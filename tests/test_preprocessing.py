@@ -16,6 +16,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
+from panels import DAY, WAVE0, make_panel
 from sklearn.dummy import DummyClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
@@ -39,75 +40,11 @@ from src.features.preprocessing import (
     select_columns,
 )
 
-DAY = pd.Timedelta(days=1)
-WAVE0 = pd.Timestamp("2026-08-31T03:45:00Z")
-
 NUMERIC = [column.name for column in FEATURES if column.kind == "numeric"]
 CATEGORICAL = [column.name for column in FEATURES if column.kind == "categorical"]
 
 
-def _frame(n_waves: int = 9, per_wave: int = 40, seed: int = 0) -> pd.DataFrame:
-    """A panel carrying every column the real one does.
-
-    Numeric values drift upward wave by wave, so that a statistic learned on an
-    early block is measurably different from one learned on the whole frame —
-    which is the only way to tell the two apart in a test.
-    """
-    rng = np.random.default_rng(seed)
-    rows = []
-    for wave in range(n_waves):
-        for index in range(per_wave):
-            rows.append(
-                {
-                    "source": "greenhouse:acme",
-                    "source_id": f"p{index}",
-                    "title": f"Engineer {index}",
-                    "company": "Acme",
-                    "location": ["Remote", "London", "Berlin"][index % 3],
-                    "remote": None,
-                    "salary_min": None,
-                    "salary_max": None,
-                    "currency": None,
-                    "salary_raw": None,
-                    "posted_at": "2026-01-01",
-                    "url": f"https://acme.example/{index}",
-                    "run_id": wave,
-                    "t": WAVE0 + wave * DAY,
-                    "run_index": wave,
-                    "y": int(index < 2),  # ~5% positive, present in every wave
-                    "label_observable": True,
-                    "first_published": WAVE0 - 30 * DAY,
-                    "updated_at": WAVE0 - DAY,
-                    "departments": ["Eng", "Sales"][index % 2],
-                    "n_departments": 1.0,
-                    "offices": ["HQ", "Remote"][index % 2],
-                    "n_offices": 1.0,
-                    "requisition_id": f"R{index}",
-                    "n_metadata": 3.0,
-                    "content_chars": 1000.0 + 100 * wave + rng.integers(0, 10),
-                    "board_size_at_t": float(per_wave),
-                    "n_same_title_on_board": 1.0,
-                    "n_same_req_on_board": 1.0,
-                    "board_growth": 0.0,
-                    "n_complete_runs_observed": wave + 1,
-                    "age_days": 30.0 + wave + rng.integers(0, 3),
-                    "days_since_update": 1.0 + wave,
-                    "t_dow": (wave + 6) % 7,
-                    "posted_dow": float(index % 7),
-                    "posted_month": 1.0,
-                    "salary_stated": True,
-                    "salary_parsed": True,
-                    "salary_min_clean": 50_000.0 + 5_000 * wave,
-                    "salary_max_clean": 70_000.0 + 5_000 * wave,
-                    "salary_period": "unstated",
-                    "salary_currency_clean": "USD",
-                    "horizon_days": 1,
-                    "horizon_basis": "calendar",
-                }
-            )
-    frame = pd.DataFrame(rows)
-    frame["y"] = frame["y"].astype("Int8")
-    return frame
+_frame = make_panel
 
 
 def _split(frame: pd.DataFrame):

@@ -4,6 +4,38 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-04 — A synthetic fixture that encoded its own label
+
+- **Problem:** the test asserting that no rung of the baseline ladder can beat
+  the base rate on an unlearnable label failed, with the random forest scoring
+  PR-AUC 1.000 and logistic regression 0.667. The obvious reading was a leak in
+  the preprocessing pipeline — the target reaching the model through some
+  column — which would have invalidated the previous component.
+
+- **Root cause:** the fixture, not the pipeline. The synthetic panel's label was
+  `index < 2`, and three of its categoricals were `index % 3` (location),
+  `index % 2` (departments, offices) and `index % 7` (posted_dow). By the
+  Chinese remainder theorem those three residues identify `index` uniquely for
+  any panel narrower than 42 postings, so the features jointly determined the
+  label exactly. The forest was learning real structure that a human had put
+  there by accident while trying to write varied-looking test data.
+
+- **Solution:** `make_panel(random_labels=True)` in `tests/panels.py` draws
+  positives per wave from a seeded generator independent of every feature, and
+  `test_no_rung_beats_the_base_rate_when_the_label_is_noise` uses it. The
+  default fixture keeps the learnable label — it is useful for the tests that
+  need a model to fit — with the coincidence documented on the builder.
+
+- **Lesson:** a synthetic fixture is data, and data can leak. Modular arithmetic
+  over a row index looks like harmless variety and is a hash of the index, so
+  any label that is also a function of the index becomes recoverable. When a
+  test asserts that a model *cannot* learn something, the label must be drawn
+  from a generator that never touches the feature values — and if such a test
+  fails, suspect the fixture before the system, because a fixture that encodes
+  its own label is far more common than a pipeline that leaks.
+
+---
+
 ## 2026-09-04 — A missing category that was not missing enough
 
 - **Problem:** the per-column missing-value policy for categoricals was silently

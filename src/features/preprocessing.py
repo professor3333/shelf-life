@@ -178,9 +178,24 @@ EXCLUDED: dict[str, str] = {
 }
 
 
-def feature_columns(include_board_identity: bool = False) -> tuple[Column, ...]:
-    """The columns the model is allowed to see."""
-    return FEATURES + (BOARD_IDENTITY if include_board_identity else ())
+def feature_columns(
+    include_board_identity: bool = False, only: tuple[str, ...] | None = None
+) -> tuple[Column, ...]:
+    """The columns the model is allowed to see.
+
+    `only` restricts to a named subset, for baselines that deliberately use one
+    feature — `docs/design.md` §7's second baseline is `age_days` alone, and it
+    has to travel through the same imputation and scaling as everything else or
+    the comparison is not a comparison.
+    """
+    allowed = FEATURES + (BOARD_IDENTITY if include_board_identity else ())
+    if only is None:
+        return allowed
+    by_name = {column.name: column for column in allowed}
+    unknown = sorted(set(only) - set(by_name))
+    if unknown:
+        raise ValueError(f"not allowed features: {unknown}")
+    return tuple(by_name[name] for name in only)
 
 
 def known_columns() -> set[str]:
@@ -275,6 +290,7 @@ def _branch(fill: Fill, min_category_frequency: int = MIN_CATEGORY_FREQUENCY) ->
 def build_preprocessor(
     include_board_identity: bool = False,
     min_category_frequency: int = MIN_CATEGORY_FREQUENCY,
+    only: tuple[str, ...] | None = None,
 ) -> ColumnTransformer:
     """The learned half: imputation, encoding and scaling, grouped by policy.
 
@@ -282,7 +298,7 @@ def build_preprocessor(
     than a training fold is the leak this component exists to prevent, which is
     why the only supported entry point is `fit_on_training_fold`.
     """
-    columns = feature_columns(include_board_identity)
+    columns = feature_columns(include_board_identity, only)
     branches = []
     for fill in ("median", "zero", "one", "category"):
         names = [column.name for column in columns if column.fill == fill]
@@ -295,6 +311,7 @@ def build_pipeline(
     estimator,
     include_board_identity: bool = False,
     min_category_frequency: int = MIN_CATEGORY_FREQUENCY,
+    only: tuple[str, ...] | None = None,
 ) -> Pipeline:
     """Selection, preprocessing and the estimator as one object.
 
@@ -302,14 +319,17 @@ def build_pipeline(
     persisted and served, so the serving path cannot drift from the training
     path by re-implementing the feature logic — the production form of leakage.
     """
-    columns = tuple(column.name for column in feature_columns(include_board_identity))
+    columns = tuple(column.name for column in feature_columns(include_board_identity, only))
     return Pipeline(
         [
             (
                 "select",
                 FunctionTransformer(select_columns, kw_args={"columns": columns}, validate=False),
             ),
-            ("preprocess", build_preprocessor(include_board_identity, min_category_frequency)),
+            (
+                "preprocess",
+                build_preprocessor(include_board_identity, min_category_frequency, only),
+            ),
             ("model", estimator),
         ]
     )
