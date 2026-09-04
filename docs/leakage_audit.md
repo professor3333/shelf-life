@@ -90,6 +90,53 @@ a leak while leaving the frame looking identical.
 | `n_same_req_on_board` | **windowed → yes** | postings sharing a requisition, within the run |
 | `board_growth` | **windowed → yes** | change in board size against the source's previous run. Null on each source's first observed wave — a fact about the panel edge, not a defect |
 
+### Engineered — added 2026-09-04, and audited like everything else
+
+Seven features derived from the as-of-`t` text by `src/features/derive.py`. Each
+one was a hypothesis before it was a column; the hypotheses and their outcomes
+are in [`reports/feature_hypotheses.md`](../reports/feature_hypotheses.md).
+
+**All seven are stateless** — every value is a function of that row's own text
+and nothing else. That is not incidental. A stateless derivation cannot leak
+across a split however it is called, and it produces the same value for a
+posting seen alone at serve time as it did in training, so it cannot cause
+training/serving skew either. It is the property that lets them sit *in front*
+of the fitted transformer in the pipeline.
+
+| column | verdict | reason |
+|---|---|---|
+| `title_seniority` | **yes** | from the as-of-`t` title, by a row-local keyword rule. Re-derived rather than read from `jobs.seniority`, which is current state and would leak later edits backwards ([`design.md`](design.md) §9) |
+| `title_is_manager` | **yes** | as above. Kept separate from seniority because the two are orthogonal |
+| `title_words`, `title_chars` | **yes** | length of the as-of-`t` title |
+| `location_is_remote` | **yes** | from the location text. Recovers what the dead `remote` column cannot carry — 27% of postings say it in words |
+| `n_locations` | **yes** | count of `;`-separated offices in the as-of-`t` location |
+| `salary_band` | **yes**, with a caveat | fixed thresholds, **not quantiles**. A quantile is a statistic of the rows it was computed over, so binning by the frame's own quartiles would make the encoding depend on which rows are present. No currency conversion is applied, so 69 of 1,240 postings (GBP and EUR) are banded by nominal value; `salary_currency_clean` stays a separate feature so a model can tell them apart |
+
+### The one that is fitted, not derived
+
+| column | verdict | reason |
+|---|---|---|
+| `company_posting_volume` | **board identity — gated with `source`** | see below |
+
+This is the trap the roadmap names, and it has two separate problems.
+
+**The one that was expected:** computing a per-company count over the whole
+frame would let each row's encoding depend on rows in the validation and test
+blocks. That is target leakage through an aggregate — it raises nothing, looks
+like an ordinary numeric column, and inflates the score. `CompanyVolumeEncoder`
+learns the lookup in `fit`, from the training fold only, and `transform` applies
+it and nothing else. An employer unseen at fit time maps to 0, which is the
+honest extrapolation and the case that will dominate at serve time.
+
+**The one that was not:** on this data the feature *is* `source`. Six of the
+seven sources have exactly one company each — Anthropic 629 postings, GitLab
+249, Figma 167, Duolingo 92, Discord 54, Airtable 16 — so a per-company count
+reproduces board identity almost exactly. The seventh, python_org, carries 25
+companies with one to three postings apiece, so it has almost no variance there
+either. The feature therefore has essentially **no within-board information at
+all**, and admitting it would quietly re-open [`design.md`](design.md) §4. It is
+gated with `source` and `company` rather than shipped as an ordinary feature.
+
 ### Excluded — leak, skew or dead
 
 | column | verdict | reason |
@@ -167,9 +214,10 @@ the horizon and the widest observed run gap.
 ## How this document is enforced
 
 Prose drifts from code, so the table above is also data.
-`src/features/preprocessing.py` carries it as `FEATURES` (17 columns),
-`BOARD_IDENTITY` (2, gated together and off by default), `TEXT_FEATURES` (1, not
-yet wired) and `EXCLUDED` (26, each with its verdict). Every panel column
+`src/features/preprocessing.py` carries it as `FEATURES` (17 panel columns),
+`DERIVED` (7, built inside the pipeline), `BOARD_IDENTITY` (3, gated together
+and off by default), `TEXT_FEATURES` (1, an input to derivation and never a
+feature itself) and `EXCLUDED` (26, each with its verdict). Every panel column
 appears in exactly one of them, `assert_known_columns` refuses a frame carrying
 a column that appears in none, and a test asserts the four sets are disjoint. A
 column added to the assembly step is therefore a build failure until a verdict

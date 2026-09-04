@@ -37,12 +37,14 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
 
 from src.data.split import SplitResult
+from src.features.derive import derive_features
 
 #: The fill value standing in for "this categorical was not stated". A real
 #: level, not a NaN, because "not stated" is information here — `remote` being
@@ -135,11 +137,48 @@ FEATURES: tuple[Column, ...] = (
     ),
 )
 
+#: Added by `src.features.derive`, which is stateless, so these are computed
+#: inside the pipeline and exist identically at serve time. Their hypotheses are
+#: stated on the functions that build them and tracked in
+#: `reports/feature_hypotheses.md`.
+DERIVED: tuple[Column, ...] = (
+    Column(
+        "title_seniority",
+        "categorical",
+        "category",
+        "never null; 'unspecified' is a level, not a gap",
+    ),
+    Column("title_is_manager", "numeric", "zero", "a flag; absent means not a manager role"),
+    Column("title_words", "numeric", "median", "never null"),
+    Column("title_chars", "numeric", "median", "never null"),
+    Column("location_is_remote", "numeric", "zero", "a flag; absent means not stated as remote"),
+    Column("n_locations", "numeric", "zero", "zero locations means the field was empty"),
+    Column(
+        "salary_band",
+        "categorical",
+        "category",
+        "'unstated' is already its own level, so nothing is left to impute",
+    ),
+)
+
+#: Fitted, not derived — see `CompanyVolumeEncoder`. Gated with board identity
+#: because on this data it *is* board identity: six of the seven sources have
+#: exactly one company each, so a per-company count reproduces `source` with a
+#: numeric face and carries no within-board information at all.
+COMPANY_VOLUME = "company_posting_volume"
+
+
 #: Gated by `include_board_identity`. `design.md` §4, widened by the audit:
 #: these two are the same information, so they move together.
 BOARD_IDENTITY: tuple[Column, ...] = (
     Column("source", "categorical", "category", "never null"),
     Column("company", "categorical", "category", "never null; determines source exactly"),
+    Column(
+        COMPANY_VOLUME,
+        "numeric",
+        "zero",
+        "fitted on the training fold; zero means an employer we have no record of",
+    ),
 )
 
 #: Allowed by the audit, not yet wired. Free text needs derived features, which
@@ -188,7 +227,7 @@ def feature_columns(
     has to travel through the same imputation and scaling as everything else or
     the comparison is not a comparison.
     """
-    allowed = FEATURES + (BOARD_IDENTITY if include_board_identity else ())
+    allowed = FEATURES + DERIVED + (BOARD_IDENTITY if include_board_identity else ())
     if only is None:
         return allowed
     by_name = {column.name: column for column in allowed}
@@ -258,6 +297,52 @@ def select_columns(frame: pd.DataFrame, columns: tuple[str, ...]) -> pd.DataFram
     return out
 
 
+class CompanyVolumeEncoder(BaseEstimator, TransformerMixin):
+    """How many postings a company had in the training window. **Fitted.**
+
+    This is the trap the roadmap warns about, and it is worth stating precisely
+    because it does not announce itself. Computing a per-company count over the
+    whole frame would let each row's encoding depend on rows in the validation
+    and test blocks — target leakage through an aggregate, which produces a
+    number that looks like an ordinary feature, raises nothing, and inflates the
+    score. So the lookup is learned in `fit`, from the training fold only, and
+    `transform` applies it as a lookup and nothing more.
+
+    A company unseen at fit time maps to 0: "we have no record of this employer
+    posting", which is the honest extrapolation and the situation that will
+    dominate at serve time.
+
+    **On this data the feature is board identity.** Six of the seven sources
+    have exactly one company each (Anthropic 629 postings, GitLab 249, Figma
+    167, Duolingo 92, Discord 54, Airtable 16), so the count reproduces `source`
+    almost exactly; the seventh, python_org, has 25 companies with one to three
+    postings apiece and therefore almost no variance. That is why it is gated
+    with `BOARD_IDENTITY` rather than shipped as an ordinary feature — see
+    `docs/leakage_audit.md`.
+    """
+
+    def __init__(
+        self,
+        company_column: str = "company",
+        posting_key: tuple[str, str] = ("source", "source_id"),
+    ):
+        self.company_column = company_column
+        self.posting_key = posting_key
+
+    def fit(self, X: pd.DataFrame, y=None) -> CompanyVolumeEncoder:
+        key = list(self.posting_key)
+        postings = X[[*key, self.company_column]].drop_duplicates(subset=key)
+        self.volumes_ = postings[self.company_column].value_counts().to_dict()
+        return self
+
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        out = X.copy()
+        out[COMPANY_VOLUME] = (
+            X[self.company_column].map(self.volumes_).astype("float64").fillna(0.0)
+        )
+        return out
+
+
 def _branch(fill: Fill, min_category_frequency: int = MIN_CATEGORY_FREQUENCY) -> Pipeline:
     """The transformer chain for one missing-value policy."""
     if fill == "category":
@@ -322,6 +407,15 @@ def build_pipeline(
     columns = tuple(column.name for column in feature_columns(include_board_identity, only))
     return Pipeline(
         [
+            # Stateless, so it cannot leak across the split however it is
+            # called, and it produces identical values for a single posting at
+            # serve time.
+            ("derive", FunctionTransformer(derive_features, validate=False)),
+            # Fitted, unlike everything else in front of the transformer, and
+            # therefore only ever fitted on the training fold. Included only
+            # when board identity is admitted, because on this data it is board
+            # identity — see the class docstring.
+            *([("company_volume", CompanyVolumeEncoder())] if include_board_identity else []),
             (
                 "select",
                 FunctionTransformer(select_columns, kw_args={"columns": columns}, validate=False),

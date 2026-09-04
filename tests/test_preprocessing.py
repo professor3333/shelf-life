@@ -23,12 +23,16 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer
 
 from src.data.split import Cuts, temporal_split
+from src.features.derive import DERIVED_COLUMNS, derive_features
 from src.features.preprocessing import (
     BOARD_IDENTITY,
+    COMPANY_VOLUME,
+    DERIVED,
     EXCLUDED,
     FEATURES,
     MISSING_CATEGORY,
     TEXT_FEATURES,
+    CompanyVolumeEncoder,
     assert_known_columns,
     build_pipeline,
     build_preprocessor,
@@ -115,7 +119,7 @@ def test_each_policy_fills_with_the_value_its_reason_states():
 
     preprocessor = build_preprocessor(min_category_frequency=1)
     columns = tuple(column.name for column in feature_columns())
-    preprocessor.fit(select_columns(frame, columns))
+    preprocessor.fit(select_columns(derive_features(frame), columns))
 
     fills = {}
     for name, transformer, names in preprocessor.transformers_:
@@ -136,7 +140,7 @@ def test_there_is_no_blanket_missing_indicator():
     frame = _frame()
     preprocessor = build_preprocessor(min_category_frequency=1)
     columns = tuple(column.name for column in feature_columns())
-    preprocessor.fit(select_columns(frame, columns))
+    preprocessor.fit(select_columns(derive_features(frame), columns))
 
     indicators = [
         name for name in preprocessor.get_feature_names_out() if "missingindicator" in name
@@ -156,6 +160,7 @@ def test_every_panel_column_has_exactly_one_verdict():
     verdict_sets = [
         {column.name for column in FEATURES},
         {column.name for column in BOARD_IDENTITY},
+        {column.name for column in DERIVED},
         set(TEXT_FEATURES),
         set(EXCLUDED),
     ]
@@ -177,7 +182,7 @@ def test_a_column_with_no_verdict_is_refused():
 def test_excluded_columns_never_reach_the_matrix():
     frame = _frame()
     columns = tuple(column.name for column in feature_columns())
-    selected = select_columns(frame, columns)
+    selected = select_columns(derive_features(frame), columns)
     assert set(selected.columns).isdisjoint(EXCLUDED)
     assert set(selected.columns).isdisjoint(TEXT_FEATURES)
 
@@ -201,10 +206,13 @@ def test_board_identity_is_off_by_default_and_moves_as_a_pair():
 def test_board_identity_columns_reach_the_matrix_only_when_enabled():
     frame = _frame()
     columns = tuple(column.name for column in feature_columns())
-    assert "source" not in select_columns(frame, columns).columns
+    assert "source" not in select_columns(derive_features(frame), columns).columns
 
     columns = tuple(column.name for column in feature_columns(include_board_identity=True))
-    assert "source" in select_columns(frame, columns).columns
+    prepared = CompanyVolumeEncoder().fit(frame).transform(derive_features(frame))
+    selected = select_columns(prepared, columns)
+    assert "source" in selected.columns
+    assert COMPANY_VOLUME in selected.columns
 
 
 # --- nothing in front of the transformer has state -------------------------
@@ -218,14 +226,15 @@ def test_selection_is_stateless():
     columns = tuple(column.name for column in feature_columns())
 
     # Fitting on one frame cannot change how a different frame is transformed.
+    derived = derive_features(frame)
     selector = FunctionTransformer(select_columns, kw_args={"columns": columns}, validate=False)
-    before = selector.transform(frame)
-    selector.fit(_frame(seed=99, per_wave=7))
-    pd.testing.assert_frame_equal(before, selector.transform(frame))
+    before = selector.transform(derived)
+    selector.fit(derive_features(_frame(seed=99, per_wave=7)))
+    pd.testing.assert_frame_equal(before, selector.transform(derived))
 
     # And it does not depend on row order either.
-    first = select_columns(frame, columns)
-    second = select_columns(frame.iloc[::-1], columns)
+    first = select_columns(derived, columns)
+    second = select_columns(derived.iloc[::-1], columns)
     pd.testing.assert_frame_equal(first, second.iloc[::-1])
 
 
@@ -267,3 +276,92 @@ def test_the_pipeline_takes_a_raw_frame_with_no_manual_step():
     fit_on_training_fold(pipeline, split)
     probabilities = pipeline.predict_proba(split.val)[:, 1]
     assert probabilities.shape == (len(split.val),)
+
+
+# --- engineered features live inside the pipeline --------------------------
+
+
+def test_the_derived_column_list_and_the_feature_records_agree():
+    """Two lists naming the same columns drift. If they do, `select_columns`
+    raises at fit time — but a test is a better place to find out."""
+    assert {column.name for column in DERIVED} == set(DERIVED_COLUMNS)
+
+
+def test_engineered_features_are_computed_inside_the_pipeline():
+    """The component's real test: hand the pipeline a raw panel with no derived
+    columns on it, and the derived features must still reach the matrix. A
+    feature that needed code outside the pipeline would break at serve time."""
+    frame = _frame()
+    assert not set(DERIVED_COLUMNS) & set(frame.columns)
+
+    split = _split(frame)
+    fitted = fit_on_training_fold(_pipeline(), split)
+    encoded = fitted.named_steps["preprocess"].get_feature_names_out()
+
+    for name in DERIVED_COLUMNS:
+        assert any(str(column).startswith(name) for column in encoded), name
+
+
+def test_the_pipeline_scores_a_single_raw_posting():
+    """Serve time is one row with no board context computed for it. If the
+    derived features needed a frame-wide pass, this is where it shows."""
+    frame = _frame()
+    split = _split(frame)
+    fitted = fit_on_training_fold(_pipeline(), split)
+    one = split.val.head(1)
+    assert fitted.predict_proba(one).shape == (1, 2)
+
+
+def test_company_volume_counts_the_training_fold_and_nothing_else():
+    """The subtlest leak the roadmap names: a per-company aggregate computed over
+    the full frame lets each row's encoding depend on rows in validation and
+    test. It raises nothing and inflates the score, so the counts are checked
+    against both windows and asserted to match the training one."""
+    frame = make_panel(per_wave=40)
+    frame["company"] = np.where(frame["source_id"].isin(["p0", "p1"]), "Small", "Large")
+    split = _split(frame)
+
+    encoder = CompanyVolumeEncoder().fit(split.train)
+    train_counts = (
+        split.train.drop_duplicates(subset=["source", "source_id"])["company"]
+        .value_counts()
+        .to_dict()
+    )
+    everything = (
+        split.frame.drop_duplicates(subset=["source", "source_id"])["company"]
+        .value_counts()
+        .to_dict()
+    )
+    assert encoder.volumes_ == train_counts
+    assert encoder.volumes_ != everything or train_counts == everything
+
+
+def test_company_volume_counts_postings_not_job_days():
+    """A posting seen in five waves is one posting. Counting rows would make the
+    feature a proxy for how long we have been watching, which is the skew verdict
+    that excluded `n_complete_runs_observed`."""
+    frame = make_panel(n_waves=9, per_wave=10)
+    encoder = CompanyVolumeEncoder().fit(frame)
+    assert encoder.volumes_ == {"Acme": 10}  # ten postings, ninety job-days
+
+
+def test_an_unseen_company_maps_to_zero_volume():
+    frame = make_panel(per_wave=40)
+    split = _split(frame)
+    encoder = CompanyVolumeEncoder().fit(split.train)
+    newcomer = split.val.head(3).copy()
+    newcomer["company"] = "Never Heard Of"
+    assert (encoder.transform(newcomer)[COMPANY_VOLUME] == 0.0).all()
+
+
+def test_company_volume_is_absent_unless_board_identity_is_admitted():
+    frame = make_panel()
+    split = _split(frame)
+    fitted = fit_on_training_fold(_pipeline(), split)
+    assert "company_volume" not in fitted.named_steps
+
+    with_board = build_pipeline(
+        LogisticRegression(max_iter=1000), include_board_identity=True, min_category_frequency=1
+    )
+    fit_on_training_fold(with_board, split)
+    assert "company_volume" in with_board.named_steps
