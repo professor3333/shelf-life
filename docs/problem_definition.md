@@ -103,6 +103,16 @@ again in §7:
 
 - Any split that puts some of a posting's rows in train and others in test is
   leaking. **Split by time, and never randomly by row.**
+
+  > **Unresolved (2026-09-04).** As written this sentence is too strong, and the
+  > protocol in §7 does not honour it: **1,131 of 1,240 postings straddle a
+  > mid-panel cut**, structurally, because the median posting outlives any weekly
+  > boundary. Subject overlap across time is standard in discrete-time hazard
+  > models, so the sentence is probably the thing that is wrong — but the real
+  > risk it gestures at is real: a posting's rows share a byte-identical title
+  > and description, so a model can memorise the posting rather than learn
+  > duration dependence. See [`design.md`](design.md) §8 for the proposed
+  > resolution and the seen/unseen reporting that would detect it.
 - The effective sample size is not the row count. It is closer to the number of
   *removal events*, which is roughly 1.7% of rows. That is what bounds model
   complexity, and §9 does the arithmetic.
@@ -425,6 +435,11 @@ A model must beat **all three** to have earned anything:
   both sides.
 - **Rolling-origin evaluation** once there are enough weeks, rather than one
   split — a single split on a short panel measures one week's weather.
+- **Report the metric separately for postings unseen in training and postings
+  carried over.** The time gap prevents a removal event appearing on both sides;
+  it does not prevent the *posting* appearing on both sides, and 91% of them do.
+  A large gap between the two figures means the model memorised postings rather
+  than learning duration dependence. See [`design.md`](design.md) §8.
 - **Never `train_test_split(shuffle=True)`.** It puts rows from the same
   posting on both sides *and* puts the future in the training set. Two leaks,
   one line.
