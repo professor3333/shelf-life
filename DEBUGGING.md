@@ -4,6 +4,41 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-04 — A monthly salary stored as 1,200,000,000
+
+- **Problem:** `jobs.salary_min` holds `1200000000` for a posting whose
+  `salary_raw` reads `£100 month`. The correct annual figure is 1,200 — the
+  stored value is six orders of magnitude too large. Nothing raised: it is a
+  plausible integer in an integer column, and it survives every non-null check.
+  Found by re-parsing all 1,666 `salary_raw` strings and comparing: 1,210 of
+  1,211 rows agreed, and this was the one that did not.
+
+- **Root cause:** the upstream parser annualises by multiplying, and for this
+  string it applied a multiplier that is not 12. The same pass also fails to
+  read 455 other stated salaries — single values with no range (`€1,000`,
+  `15,50 €`) and the uppercase `BIS` variant of the German range word — leaving
+  `salary_min` NULL where a number was plainly present. Both faults share a
+  cause: the parser recognises a narrow set of shapes and has no signal for
+  "this looked like money and I could not read it", so a miss and a
+  misinterpretation are equally silent.
+
+- **Solution:** cleaning re-derives salary from `salary_raw` in
+  `src/data/clean.py` rather than trusting `salary_min`. `parse_salary` returns
+  the figures, the currency and the periodicity separately, and `annualise`
+  applies the multiplier as an explicit, tested step. `salary_stated` and
+  `salary_parsed` are kept as distinct columns so "no pay mentioned" and "pay
+  mentioned but unreadable" cannot collapse into each other. The upstream bug
+  is not yet fixed in the scraper.
+
+- **Lesson:** a derived column is a claim, and a claim needs somewhere to record
+  that it failed. When a parser can only return a value or NULL, a
+  misinterpretation is indistinguishable from an absence and both look like
+  clean data. Prefer parsers that return the reading *and* its status, and when
+  a second implementation exists, diff them across the whole corpus rather than
+  spot-checking — one row in 1,211 is not something eyes find.
+
+---
+
 ## 2026-09-04 — "Disappeared from the board" was measuring the scraper's page cap, not job closures
 
 - **Problem:** the planned label — a posting is *closed* on the first day it
