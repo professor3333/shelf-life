@@ -227,6 +227,40 @@ problem is got wrong, and it biases every estimate toward "postings last
 forever" — the direction that would flatter a model built by someone hoping
 postings last forever.
 
+### How `<= t + H` is compared — **calendar dates, decided 2026-09-04**
+
+Both comparisons in that table are made on **calendar dates**, not instants:
+`t_gone(j)` counts as within the horizon when its date is on or before the date
+of `t + H`.
+
+This is not a formality, because the panel looks once a day at a time that
+drifts. A removal is *interval-censored* — we learn only that the posting
+vanished somewhere in `(t_last_seen, t_first_absent]`, never when — so at H=1 a
+horizon stated in continuous time is not identifiable from this data at all.
+The two comparisons agree on every row they both label; they differ only in
+which rows they are willing to label, and instant arithmetic refuses to label
+removals it has in fact observed. Measured on the 2026-09-04 snapshot:
+
+| | `y=0` | `y=1` | dropped |
+|---|---|---|---|
+| calendar | 4,474 | 53 | 1,187 |
+| instant | 4,446 | 32 | 1,236 |
+
+Under instant, the 34.4h gap between run 0 and run 1 puts every removal
+detected at run 1 outside a 1-day horizon — **0 positives in 1,116 rows at run
+0**, though nineteen postings demonstrably went. Run 2's twelve positives then
+survive by 2.6 seconds, that being how far the run 2 → run 3 gap falls under
+24h. The resulting positive rate moves 0.00% / 1.77% / 1.06% / 0.00% across run
+indices, against calendar's 1.67% / 1.75% / 1.23% / 0.00%, and the variation is
+entirely cron jitter. Since `run_index`, `t_dow` and `age_days` are features,
+that is label noise correlated with the model's own inputs — a fabricated
+signal rather than a bounded bias.
+
+On the observed schedule the calendar rule is exactly *"absent at the next
+complete run"*, which is the finest distinction a once-daily panel can draw.
+The claim it supports is therefore "gone by tomorrow's check", and the README
+must say that rather than "gone within 24 hours".
+
 ### Horizon
 
 **H = 7 days, primary.** Chosen against the measured hazard, not by taste:
@@ -433,9 +467,14 @@ A model must beat **all three** to have earned anything:
 ### Validation protocol
 
 - **Time-based split.** Train on prediction points `t <= T_cut`; test on
-  `t > T_cut + H`. The gap of H is not optional: without it, a test row's label
-  window overlaps the training period and the same removal event appears on
-  both sides.
+  `t > T_cut + H + one run`. The gap is not optional: without it, a test row's
+  label window overlaps the training period and the same removal event appears
+  on both sides. **Corrected 2026-09-04 — the gap is `H` plus one run, not
+  `H`.** A row at `t` is labelled by absence at the next complete run
+  *corroborated at the one after* (§4), so the label reaches one run further
+  than the horizon does. `src/data/split.py:embargo_width` computes it from the
+  horizon and the widest observed run gap, which was 34.4h in the 2026-09-04
+  snapshot — so at H=1 the embargo is 2 days 10:21, not 1 day.
 - **Rolling-origin evaluation** once there are enough weeks, rather than one
   split — a single split on a short panel measures one week's weather.
 - **Report the metric separately for postings unseen in training and postings

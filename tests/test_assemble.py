@@ -8,11 +8,14 @@ which is the one that is silently wrong if you get it right by accident.
 
 from __future__ import annotations
 
+import inspect
+
 import pandas as pd
 import pytest
 
 from src.features.assemble import (
     _board_context,
+    assemble,
     build_observations,
     complete_runs,
     compute_labels,
@@ -129,6 +132,23 @@ def test_horizon_basis_changes_the_answer_when_runs_are_jittered():
     calendar = _panel(seen, runs=jittered, horizon=1, basis="calendar")
     assert (instant["y"].fillna(0) == 1).sum() == 0
     assert (calendar["y"].fillna(0) == 1).sum() == 1
+
+
+def test_seconds_of_clock_drift_do_not_decide_the_label():
+    """The damning case is not the 34h outage, it is ordinary cron drift. Real
+    gaps landed 2.6s under 24h and 27.0s over it, and under instant arithmetic
+    that difference alone decides whether a removal is a positive, a negative or
+    discarded. The label must not be a function of the scheduler's punctuality."""
+    early = _panel({"a": [0, 1]}, runs=_runs(4, spacing=DAY - pd.Timedelta(seconds=3)), horizon=1)
+    late = _panel({"a": [0, 1]}, runs=_runs(4, spacing=DAY + pd.Timedelta(seconds=27)), horizon=1)
+    assert (early["y"].fillna(0) == 1).sum() == (late["y"].fillna(0) == 1).sum() == 1
+
+
+def test_calendar_is_the_default_basis():
+    """docs/design.md §10. The default is the decision; a caller who wants the
+    rejected comparison has to name it."""
+    assert inspect.signature(compute_labels).parameters["basis"].default == "calendar"
+    assert inspect.signature(assemble).parameters["basis"].default == "calendar"
 
 
 def test_unknown_basis_is_rejected():

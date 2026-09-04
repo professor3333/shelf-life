@@ -4,6 +4,111 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-04 — A synthetic fixture that encoded its own label
+
+- **Problem:** the test asserting that no rung of the baseline ladder can beat
+  the base rate on an unlearnable label failed, with the random forest scoring
+  PR-AUC 1.000 and logistic regression 0.667. The obvious reading was a leak in
+  the preprocessing pipeline — the target reaching the model through some
+  column — which would have invalidated the previous component.
+
+- **Root cause:** the fixture, not the pipeline. The synthetic panel's label was
+  `index < 2`, and three of its categoricals were `index % 3` (location),
+  `index % 2` (departments, offices) and `index % 7` (posted_dow). By the
+  Chinese remainder theorem those three residues identify `index` uniquely for
+  any panel narrower than 42 postings, so the features jointly determined the
+  label exactly. The forest was learning real structure that a human had put
+  there by accident while trying to write varied-looking test data.
+
+- **Solution:** `make_panel(random_labels=True)` in `tests/panels.py` draws
+  positives per wave from a seeded generator independent of every feature, and
+  `test_no_rung_beats_the_base_rate_when_the_label_is_noise` uses it. The
+  default fixture keeps the learnable label — it is useful for the tests that
+  need a model to fit — with the coincidence documented on the builder.
+
+- **Lesson:** a synthetic fixture is data, and data can leak. Modular arithmetic
+  over a row index looks like harmless variety and is a hash of the index, so
+  any label that is also a function of the index becomes recoverable. When a
+  test asserts that a model *cannot* learn something, the label must be drawn
+  from a generator that never touches the feature values — and if such a test
+  fails, suspect the fixture before the system, because a fixture that encodes
+  its own label is far more common than a pipeline that leaks.
+
+---
+
+## 2026-09-04 — A missing category that was not missing enough
+
+- **Problem:** the per-column missing-value policy for categoricals was silently
+  skipped. `salary_currency_clean` and `offices` have nulls, the pipeline fills
+  them with the explicit level `__missing__`, and the fitted encoder produced no
+  `__missing__` level at all. Nothing raised, the matrix had no NaNs, and the
+  model fitted and scored normally — the only visible symptom was a test
+  asserting that the level exists.
+
+- **Root cause:** `select_columns` normalised absent values in object columns to
+  `None`. `SimpleImputer` looks for `np.nan`, and `None` in an object array is
+  not `np.nan`, so the imputer passed those rows through untouched and
+  `OneHotEncoder` learned `None` as an ordinary category. Two consequences, both
+  quiet: the documented fill policy did not run, and `None` became a level that
+  exists only where training data happened to have nulls — so the same column
+  arriving null at serve time in a board that never had nulls would be an
+  *unknown* category, handled by the unknown branch rather than the missing one.
+  Both spellings mean "absent" to a reader and only one means it to sklearn.
+
+- **Solution:** `select_columns` in `src/features/preprocessing.py` normalises
+  missing object values to `np.nan`, and `tests/test_preprocessing.py`
+  asserts a `__missing__` level appears in the encoded feature names. Confirmed
+  on the real panel: `offices___missing__` and
+  `salary_currency_clean___missing__` are now present.
+
+- **Lesson:** "missing" is not one value. pandas has `NA`, numpy has `nan`,
+  Python has `None`, and a library that documents "missing values" means exactly
+  one of them — sklearn means `np.nan` unless told otherwise. When crossing from
+  pandas into sklearn, normalise the sentinel explicitly at the boundary and
+  assert the downstream step actually fired, because a skipped imputation looks
+  identical to a successful one in every shape, dtype and NaN count.
+
+---
+
+## 2026-09-04 — A one-day horizon that no removal could reach
+
+- **Problem:** at H=1 the label rule produced **0 positives in 1,116 rows** at
+  run index 0, and a positive rate that moved 0.00% / 1.77% / 1.06% / 0.00%
+  across the four labelable runs. Nothing raised. The frame had the right
+  columns, the right row count, a plausible 32 positives overall, and the
+  censoring rule was working correctly — it simply discarded nineteen removals
+  the scraper had observed.
+
+- **Root cause:** `t_gone <= t + H` was compared as instants, on a panel that
+  looks once a day at a time that drifts. Complete runs are 34.3601h, 13.6407h,
+  23.9993h and 24.0075h apart, so from run 0 the very next observation lands
+  34.4h out and cannot fall inside a 24h horizon; a removal detected as fast as
+  the panel physically permits is therefore not "removed within a day". The
+  deeper fault is that removals here are interval-censored — a posting vanished
+  somewhere in `(t_last_seen, t_first_absent]` and we never learn when — so a
+  horizon expressed in continuous time is not identifiable from this data at
+  all. The 2.6 seconds by which the run 2 → run 3 gap undershot 24h is what
+  kept that run's twelve positives, and 27.0 seconds of drift at run 3 is what
+  discarded thirteen rows.
+
+- **Solution:** the comparison is made on calendar dates
+  (`compute_labels(basis="calendar")`, now the default in
+  `src/features/assemble.py`), which on this schedule is exactly *"absent at the
+  next complete run"*. `basis="instant"` is kept so the two remain comparable
+  rather than a claim in prose, and `tests/test_assemble.py` asserts that
+  seconds of clock drift cannot change a label. Recorded as design decision §10.
+
+- **Lesson:** a horizon may not be measured in units finer than the grid you
+  observe on. If the data arrives once a day, "within one day" is a statement
+  about *the next observation*, not about 86,400 seconds, and writing it as
+  arithmetic quietly converts scheduler punctuality into label noise. Worse, it
+  is noise that lines up with `run_index`, `t_dow` and `age_days` — features —
+  so the model can learn it as signal. Whenever a threshold is compared against
+  a timestamp the collection process produced, ask what the spacing of that
+  process is and whether the threshold can even be resolved.
+
+---
+
 ## 2026-09-04 — A monthly salary stored as 1,200,000,000
 
 - **Problem:** `jobs.salary_min` holds `1200000000` for a posting whose
