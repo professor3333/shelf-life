@@ -162,7 +162,12 @@ discovered by whoever is shown the link.
 
 ---
 
-## 8. The split — **OPEN, and it contradicts an existing rule**
+## 8. The split — **DECIDED 2026-09-04**
+
+> Accepted 2026-09-04: keep the job-day unit, soften §2 of the problem
+> definition, record the departure from the one-id-one-split rule as
+> deliberate, and make the seen/unseen breakdown part of the split rather
+> than an afterthought. The reasoning that led here is kept below.
 
 This is the decision that determines what Component 6 builds, and it is not yet
 made.
@@ -179,7 +184,7 @@ nothing about *subject* overlap.
 may appear in two splits" — assumes one row per posting. The job-day unit makes
 that requirement either impossible or ruinous.
 
-**The recommendation, for sign-off.** Keep the job-day unit and amend §2.
+**The decision.** Keep the job-day unit and amend §2.
 Subject overlap across time is standard and correct in discrete-time hazard
 models: it is the person-period setup used throughout survival analysis, and
 excluding it would discard 91% of the data to defend a principle imported from
@@ -193,7 +198,7 @@ not a group split — it is **reporting the metric separately for postings unsee
 in training and postings carried over**. A large gap between the two is the
 diagnosis.
 
-**If this recommendation is accepted**, three things follow: §2's absolute
+**Three things follow, and are now in force:** §2's absolute
 sentence is softened, the departure from the one-id-one-split rule is recorded
 here as deliberate, and Component 6 implements the seen/unseen breakdown as part
 of the split, not as an afterthought.

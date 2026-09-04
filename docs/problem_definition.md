@@ -104,15 +104,18 @@ again in §7:
 - Any split that puts some of a posting's rows in train and others in test is
   leaking. **Split by time, and never randomly by row.**
 
-  > **Unresolved (2026-09-04).** As written this sentence is too strong, and the
-  > protocol in §7 does not honour it: **1,131 of 1,240 postings straddle a
-  > mid-panel cut**, structurally, because the median posting outlives any weekly
-  > boundary. Subject overlap across time is standard in discrete-time hazard
-  > models, so the sentence is probably the thing that is wrong — but the real
-  > risk it gestures at is real: a posting's rows share a byte-identical title
-  > and description, so a model can memorise the posting rather than learn
-  > duration dependence. See [`design.md`](design.md) §8 for the proposed
-  > resolution and the seen/unseen reporting that would detect it.
+  > **Amended 2026-09-04.** As first written this sentence was too strong.
+  > **1,131 of 1,240 postings straddle a mid-panel cut**, structurally, because
+  > the median posting outlives any weekly boundary — so honouring it literally
+  > would discard 91% of the data. Subject overlap across time is the standard
+  > person-period setup in discrete-time hazard models; the sentence imported a
+  > rule from the IID setting, where it is true and here is not.
+  >
+  > The risk it gestures at is nonetheless real, in a different form: a posting's
+  > rows share a byte-identical title and description, so a model can memorise
+  > *this posting survives* instead of learning duration dependence, and that
+  > memorisation crosses the cut. The mitigation is not a grouped split but the
+  > seen/unseen reporting added to §7. See [`design.md`](design.md) §8.
 - The effective sample size is not the row count. It is closer to the number of
   *removal events*, which is roughly 1.7% of rows. That is what bounds model
   complexity, and §9 does the arithmetic.
