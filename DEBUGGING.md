@@ -4,6 +4,40 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-04 — A missing category that was not missing enough
+
+- **Problem:** the per-column missing-value policy for categoricals was silently
+  skipped. `salary_currency_clean` and `offices` have nulls, the pipeline fills
+  them with the explicit level `__missing__`, and the fitted encoder produced no
+  `__missing__` level at all. Nothing raised, the matrix had no NaNs, and the
+  model fitted and scored normally — the only visible symptom was a test
+  asserting that the level exists.
+
+- **Root cause:** `select_columns` normalised absent values in object columns to
+  `None`. `SimpleImputer` looks for `np.nan`, and `None` in an object array is
+  not `np.nan`, so the imputer passed those rows through untouched and
+  `OneHotEncoder` learned `None` as an ordinary category. Two consequences, both
+  quiet: the documented fill policy did not run, and `None` became a level that
+  exists only where training data happened to have nulls — so the same column
+  arriving null at serve time in a board that never had nulls would be an
+  *unknown* category, handled by the unknown branch rather than the missing one.
+  Both spellings mean "absent" to a reader and only one means it to sklearn.
+
+- **Solution:** `select_columns` in `src/features/preprocessing.py` normalises
+  missing object values to `np.nan`, and `tests/test_preprocessing.py`
+  asserts a `__missing__` level appears in the encoded feature names. Confirmed
+  on the real panel: `offices___missing__` and
+  `salary_currency_clean___missing__` are now present.
+
+- **Lesson:** "missing" is not one value. pandas has `NA`, numpy has `nan`,
+  Python has `None`, and a library that documents "missing values" means exactly
+  one of them — sklearn means `np.nan` unless told otherwise. When crossing from
+  pandas into sklearn, normalise the sentinel explicitly at the boundary and
+  assert the downstream step actually fired, because a skipped imputation looks
+  identical to a successful one in every shape, dtype and NaN count.
+
+---
+
 ## 2026-09-04 — A one-day horizon that no removal could reach
 
 - **Problem:** at H=1 the label rule produced **0 positives in 1,116 rows** at

@@ -164,14 +164,29 @@ the horizon and the widest observed run gap.
 
 ---
 
-## What Component 7 must do with this
+## How this document is enforced
 
-The verdicts above are prose, and prose drifts from code. The preprocessing
-pipeline should encode the allowed set explicitly and fail on an unexpected
-column, so that a new column added to the panel is a test failure rather than a
-silent new feature. Two rules follow directly from the table:
+Prose drifts from code, so the table above is also data.
+`src/features/preprocessing.py` carries it as `FEATURES` (17 columns),
+`BOARD_IDENTITY` (2, gated together and off by default), `TEXT_FEATURES` (1, not
+yet wired) and `EXCLUDED` (26, each with its verdict). Every panel column
+appears in exactly one of them, `assert_known_columns` refuses a frame carrying
+a column that appears in none, and a test asserts the four sets are disjoint. A
+column added to the assembly step is therefore a build failure until a verdict
+is written for it — it can neither become a silent feature nor be silently
+dropped, which is the second way an audit becomes fiction.
 
-- every transformer is fitted on the training fold only — the frame is not
-  touched before the split;
-- categorical handling must survive categories unseen at fit time (`departments`
-  has 120 values over four days, and the tail will grow).
+Three rules from the table are implemented rather than described:
+
+- **every transformer is fitted on the training fold only.** The one supported
+  entry point is `fit_on_training_fold(pipeline, split)`, which takes a
+  `SplitResult` and can only reach `.train`; `learned_statistics` exposes the
+  fitted fills so that "which fold was this fitted on?" is an assertion rather
+  than an assurance;
+- **categorical handling survives categories unseen at fit time**
+  (`handle_unknown="infrequent_if_exist"`), because `departments` has 120 values
+  over four days and the tail will grow;
+- **there is no blanket missing-indicator step.** Missingness is encoded only
+  for categoricals, where "not stated" is a real level. An indicator over the
+  archive-derived numerics would reconstruct board identity, which is the
+  decision [`design.md`](design.md) §4 has not yet made.
