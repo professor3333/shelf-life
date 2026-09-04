@@ -437,6 +437,21 @@ def features_and_target(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
     return frame, frame["y"].astype(int)
 
 
+def fit_on_frame(pipeline: Pipeline, block: pd.DataFrame) -> Pipeline:
+    """Fit on an explicit block. **For cross-validation folds only.**
+
+    `fit_on_training_fold` is the entry point for fitting a model; this one
+    exists because a rolling-origin fold is a slice *inside* the training
+    window, and there is no `SplitResult` describing it. Passing a frame is the
+    mistake this module was built to prevent, so the two callers are named here
+    and nowhere else: `fit_on_training_fold` below, and
+    `src/models/evaluate.py:cross_validate`, which only ever hands it a slice of
+    `split.train`.
+    """
+    features, target = features_and_target(block)
+    return pipeline.fit(features, target)
+
+
 def fit_on_training_fold(pipeline: Pipeline, split: SplitResult) -> Pipeline:
     """Fit on `split.train` and nothing else.
 
@@ -445,8 +460,7 @@ def fit_on_training_fold(pipeline: Pipeline, split: SplitResult) -> Pipeline:
     caller — passing the wrong frame is the leak, and the way to prevent it is
     to stop asking the caller to pass a frame at all.
     """
-    features, target = features_and_target(split.train)
-    return pipeline.fit(features, target)
+    return fit_on_frame(pipeline, split.train)
 
 
 def learned_statistics(pipeline: Pipeline) -> dict[str, float]:

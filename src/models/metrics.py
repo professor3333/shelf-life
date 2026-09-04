@@ -113,6 +113,28 @@ def reliability_curve(y_true, y_score, n_bins: int = 10) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def expected_calibration_error(y_true, y_score, n_bins: int = 10) -> float:
+    """Average gap between predicted probability and observed frequency.
+
+    The single number behind the reliability curve: each bin's
+    ``|mean predicted − observed rate|``, weighted by how many rows fall in it.
+    Zero is perfect calibration.
+
+    It is reported *alongside* the Brier score, not instead of it, because the
+    two fail differently. Brier mixes calibration with discrimination, so a
+    model can improve it by ranking better while staying badly calibrated. ECE
+    ignores ranking entirely, so a model that predicts the base rate for every
+    posting scores a perfect 0.0 — useless and perfectly calibrated. Either
+    number alone can be gamed; the pair cannot.
+    """
+    curve = reliability_curve(y_true, y_score, n_bins)
+    populated = curve[curve["n"] > 0]
+    if populated.empty:
+        return float("nan")
+    gaps = (populated["mean_predicted"] - populated["observed_rate"]).abs()
+    return float((gaps * populated["n"]).sum() / populated["n"].sum())
+
+
 def alert_budget(n_rows: int, n_days: int, budget_per_day: int = DEFAULT_ALERT_BUDGET) -> int:
     """How many postings may be flagged across an evaluation block.
 
