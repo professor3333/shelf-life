@@ -110,6 +110,24 @@ excluded and per-source metrics become the headline, not a breakdown.
 either way. §7's acceptance bar compares against a per-board hazard baseline
 precisely so that a model which has only learned the board is visible as such.
 
+**Widened 2026-09-04, by the column audit.** The question as posed above — "is
+`source` a feature?" — cannot be answered one column at a time, because
+excluding `source` alone excludes nothing:
+
+- **`company` is a lossless re-encoding of it.** Each of the six Greenhouse
+  boards has exactly one company, and all 31 companies in the frame map to
+  exactly one source.
+- **`url` carries it in the domain.**
+- **Archive-derived missingness carries it.** `first_published`, `updated_at`,
+  `departments`, `requisition_id`, `n_metadata` and `content_chars` are null on
+  exactly the 127 python_org rows and present on every Greenhouse row, because
+  the archive covers Greenhouse only. Any missingness indicator over them
+  reconstructs part of `source` for free.
+
+So the decision is **"is board identity a feature?"**, and whichever way it goes
+it has to be applied to four columns and one missingness pattern together. See
+[`leakage_audit.md`](leakage_audit.md).
+
 ---
 
 ## 5. The metric and the cost asymmetry — **DECIDED 2026-09-04**
@@ -306,3 +324,38 @@ day, which would break calendar's equivalence to "the next run" and force the
 run-indexed definition; or a deployment story that promises a wall-clock
 guarantee ("gone within 24 hours") strongly enough that the 24–48h smear
 becomes a misrepresentation rather than a caveat.
+
+
+---
+
+## 11. The resurrection window — **OPEN**
+
+`t_gone` requires that a posting *never re-appeared*. That clause reads the whole
+remaining panel rather than a bounded window, with two consequences:
+
+- **A label is never final.** It can flip as depth accrues.
+  `greenhouse:gitlab 8615319002` was present at runs [0, 3, 4] — two consecutive
+  absences, enough to satisfy the two-run corroboration guard — and then it came
+  back, flipping its run-0 label from 1 to 0 between panel depth 3 and depth 5.
+- **No embargo of any width fully seals a training label from the evaluation
+  period**, because the reach is unbounded by construction. §10's embargo covers
+  the horizon and the corroborating run; it cannot cover this.
+
+**Scale:** 2 of 1,240 postings (0.16%) in the 2026-09-04 snapshot, one of them
+with a two-run absence. Measured by `src/data/split.py:resurrection_risk`.
+
+**The options.** Bound it — *"did not reappear within K runs"* — which makes the
+reach finite, the embargo computable, and a label final at a known time; the
+cost is that a posting returning at K+1 is mislabelled as removed. Or leave it
+unbounded and report the residual as a known defect.
+
+**Leaning toward bounding it**, on the deployment argument rather than the
+statistical one: an unbounded clause means a training label is never final, and
+a label that cannot be computed at a known time cannot be recomputed for
+retraining. Not decided, because K is a real choice and 0.16% is small enough
+that it is not yet urgent.
+
+**Would change my mind:** a resurrection rate that grows with panel depth. Two
+postings over four days may simply be the visible edge of something a longer
+panel will show properly, and K should be chosen against that distribution
+rather than against two cases.

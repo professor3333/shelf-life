@@ -467,9 +467,14 @@ A model must beat **all three** to have earned anything:
 ### Validation protocol
 
 - **Time-based split.** Train on prediction points `t <= T_cut`; test on
-  `t > T_cut + H`. The gap of H is not optional: without it, a test row's label
-  window overlaps the training period and the same removal event appears on
-  both sides.
+  `t > T_cut + H + one run`. The gap is not optional: without it, a test row's
+  label window overlaps the training period and the same removal event appears
+  on both sides. **Corrected 2026-09-04 — the gap is `H` plus one run, not
+  `H`.** A row at `t` is labelled by absence at the next complete run
+  *corroborated at the one after* (§4), so the label reaches one run further
+  than the horizon does. `src/data/split.py:embargo_width` computes it from the
+  horizon and the widest observed run gap, which was 34.4h in the 2026-09-04
+  snapshot — so at H=1 the embargo is 2 days 10:21, not 1 day.
 - **Rolling-origin evaluation** once there are enough weeks, rather than one
   split — a single split on a short panel measures one week's weather.
 - **Report the metric separately for postings unseen in training and postings
