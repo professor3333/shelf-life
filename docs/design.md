@@ -1,0 +1,219 @@
+# Design decisions
+
+The decisions this project is built on, each with a date, the reasoning, and
+what would change my mind. Where a decision is not yet made, it says so rather
+than pretending a default is a choice.
+
+The learning problem itself is defined in
+[`problem_definition.md`](problem_definition.md); this file records the
+decisions *around* it — what is fixed, what is still open, and why.
+
+**Status key.** **DECIDED** — settled, with reasons. **OPEN** — not settled;
+the entry states the options and what evidence would resolve it.
+
+---
+
+## 1. The prediction target — **DECIDED 2026-09-04**
+
+Will a posting be removed from the board within 7 days of an observation of it.
+
+Full statement in [`problem_definition.md`](problem_definition.md) §1–§4. In
+brief: one row is a (posting, complete-run observation) pair; the label is
+absence from two consecutive complete runs with no later reappearance; rows
+whose horizon has not elapsed are dropped, never labelled 0.
+
+*Rejected:* total lifetime regression — the panel observes neither end of a life
+for 1,135 of 1,240 postings. Salary-band prediction — trains on a non-random 25%
+whose coverage is confounded with source, which is a better second lesson.
+Seniority classification — labels come from the title, which is where the
+features come from.
+
+**Would change my mind:** evidence that removal is dominated by board
+housekeeping rather than hiring activity, which would make the target real but
+uninteresting.
+
+---
+
+## 2. The horizon `H` — **DECIDED 2026-09-04**
+
+**H = 7 days**, with H = 1 retained as a pipeline smoke test only.
+
+Chosen against the measured hazard, not by taste. Across complete runs at
+`rules_version = 2`, 77 disappearances in 4,549 job-day transitions — **1.69%
+per day**:
+
+| Run date | Present in previous complete run | Absent | Rate |
+|---|---|---|---|
+| 2026-09-01 | 1,104 | 20 | 1.81% |
+| 2026-09-02 | 1,143 | 21 | 1.84% |
+| 2026-09-03 | 1,143 | 14 | 1.22% |
+| 2026-09-04 | 1,159 | 22 | 1.90% |
+
+| Horizon | Implied positive rate | Comment |
+|---|---|---|
+| 1 day | 1.7% | labelable today, but dominated by ±1-run timing noise |
+| **7 days** | **≈ 11.3%** | matches the decision it feeds — "apply this week or not" |
+| 14 days | ≈ 21.3% | better balanced; costs another week of censoring at each end |
+
+**Caveat on the 11.3%.** It is `1 - (1 - 0.0169)^7`, which assumes the daily
+hazard is constant in age. §7 of the problem definition asserts the opposite —
+that duration dependence carries most of the signal — so the two cannot both be
+exactly right. 11.3% is a planning estimate, to be replaced with the measured
+7-day rate once the first cohort settles on or about 2026-09-08.
+
+**Would change my mind:** a measured 7-day rate far from 11%, or a hazard curve
+steep enough in the first week that a 7-day window averages away the signal.
+
+---
+
+## 3. Censoring and left truncation — **DECIDED 2026-09-04**
+
+**Right censoring: excluded, never zeroed.** A row whose horizon extends past
+the last complete run has not survived; we have not looked yet. Filling those
+with 0 biases every estimate toward "postings last forever".
+
+**Left truncation: dissolved by the unit of analysis.** 1,135 of 1,240 postings
+were already on the board at their source's first complete run, at a mean age of
+82.6 days (max 861). Conditioning on survival-to-observation makes age a feature
+instead of a missing outcome — the standard discrete-time hazard formulation.
+
+**Age is measured from `first_published`, not `first_seen`.** `first_seen` is
+when this project first looked, which for 1,135 postings is an artefact of when
+collection started; a model given it learns the scraper's start date.
+
+---
+
+## 4. Is `source` a feature? — **OPEN**
+
+Not decided. It cannot be decided until the deployment story is, and the
+deployment story is genuinely ambiguous here.
+
+**The case against.** `source` is the strongest signal in the data and much of
+its strength is instrumental rather than about jobs: missingness fingerprints
+the source almost perfectly (`remote` is populated for 100% of arbeitnow and 0%
+of every Greenhouse board), and per-board hazard varies. If the intended use is
+"score a posting from a board we have never scraped", a model leaning on
+`source` has learned nothing transferable.
+
+**The case for.** Every labelled row comes from a `greenhouse:*` board, so
+within the trainable population `source` is really *which employer's board* —
+closer to a company covariate than an instrument. And the primary use in §8 is
+ranking tonight's postings from boards already being collected, where the board
+identity is known at prediction time and is a legitimate input.
+
+**What resolves it:** state the deployment scenario first. If it is "rank
+postings from the boards I already collect", `source` is admissible and should
+be reported with and without. If it is "generalise to a new board", `source` is
+excluded and per-source metrics become the headline, not a breakdown.
+
+**Provisional handling until decided:** train both, report per-source metrics
+either way. §7's acceptance bar compares against a per-board hazard baseline
+precisely so that a model which has only learned the board is visible as such.
+
+---
+
+## 5. The metric and the cost asymmetry — **DECIDED 2026-09-04**
+
+**PR-AUC (average precision) primary; Brier score and a reliability curve
+co-primary.** Precision@20/day as the operational read. ROC-AUC reported for
+comparability but not decisive. **Accuracy is not reported** — at an 11.3%
+positive rate, always predicting "stays" scores 88.7%.
+
+The output is consumed as a probability, so ranking well while calibrated badly
+is a failure of the actual use, not a technicality — hence Brier alongside
+PR-AUC rather than after it.
+
+**Cost asymmetry:** a false "closing soon" costs a rushed application, measured
+in hours. A false "stays open" costs a job never applied to, which is
+unrecoverable. The second is worse, so the operating point leans to recall and
+the threshold is chosen against a fixed alert budget rather than at 0.5.
+
+---
+
+## 6. Dataset snapshot policy — **DECIDED 2026-09-04**
+
+The scraper keeps running, so "the data" is a moving target and numbers taken on
+different days are not comparable.
+
+- **The database is pinned per experiment**: `python -m src.data.snapshot` copies
+  `jobs.db` to `data/raw/<date>/` with a sha256 manifest and row counts.
+  Re-pinning an existing date is refused, because replacing a snapshot
+  invalidates every number already computed against it.
+- **Every result cites its snapshot date.** A metric without one is not
+  comparable to anything.
+- **The raw archive is not pinned, and does not need to be.** Archived payloads
+  are immutable once written — named by fetch stamp, never rewritten — so
+  re-running over the same stamps is reproducible by construction. The manifest
+  written by `python -m src.data.archive` records exactly which files were read.
+- **Derived output is disposable.** Deleting `data/processed/` and re-running
+  reproduces byte-identical Parquet; this is asserted in the test suite, not
+  checked by eye.
+- **Nothing under `data/` is committed.** It is regenerable from a snapshot, and
+  postings are employer content.
+
+---
+
+## 7. Where it deploys — **OPEN**
+
+Not yet decided. Constraints known: free tiers sleep, and a cold container
+holding a boosted model is slow to answer the first request. Whatever is chosen
+must have its cold-start behaviour measured and stated in the README rather than
+discovered by whoever is shown the link.
+
+---
+
+## 8. The split — **OPEN, and it contradicts an existing rule**
+
+This is the decision that determines what Component 6 builds, and it is not yet
+made.
+
+**The contradiction.** `problem_definition.md` §2 says any split placing some of
+a posting's rows in train and others in test is leaking. §7's protocol — train
+`t <= T_cut`, test `t > T_cut + H` — does not prevent that, and **1,131 of 1,240
+postings (91%) straddle a mid-panel cut**. It is structural, not incidental:
+mean age is 82.6 days against a 1.69% daily hazard, so the median posting
+outlives any weekly cut. The H-day gap fixes *label-window* overlap; it does
+nothing about *subject* overlap.
+
+**It also departs from a project rule.** The build's own requirement — "no job id
+may appear in two splits" — assumes one row per posting. The job-day unit makes
+that requirement either impossible or ruinous.
+
+**The recommendation, for sign-off.** Keep the job-day unit and amend §2.
+Subject overlap across time is standard and correct in discrete-time hazard
+models: it is the person-period setup used throughout survival analysis, and
+excluding it would discard 91% of the data to defend a principle imported from
+the IID setting, where it is true.
+
+But the real risk then needs naming, because it is not the one §2 describes: a
+posting's rows share a byte-identical title, company and description, so a
+high-capacity model can memorise *this posting survives* rather than learning
+duration dependence, and that memorisation crosses the cut. The mitigation is
+not a group split — it is **reporting the metric separately for postings unseen
+in training and postings carried over**. A large gap between the two is the
+diagnosis.
+
+**If this recommendation is accepted**, three things follow: §2's absolute
+sentence is softened, the departure from the one-id-one-split rule is recorded
+here as deliberate, and Component 6 implements the seen/unseen breakdown as part
+of the split, not as an afterthought.
+
+**Would change my mind:** a deployment story of "score postings from employers
+we have never seen", which would make employer-level generalisation the thing
+being measured and a grouped split the honest test.
+
+---
+
+## 9. Consequences for the feature set — **DECIDED 2026-09-04**
+
+Two corrections that follow from §6.2 of the problem definition, found while
+building the data dictionary:
+
+- **`seniority` cannot be used as stored.** It is listed as an allowed feature,
+  but it is absent from the snapshot CSVs and exists only in the current-state
+  `jobs` table, so reading it would leak later edits backwards. It is derived
+  from the title by a row-local rule, so it is re-derived from the as-of-t title
+  instead.
+- **Repost counts from `requisition_id` need a window.** The field itself is
+  as-of-t and safe. "How many postings share this requisition" reads other rows,
+  so like `board_hazard_prior` it is legitimate only when the window ends at `t`.
