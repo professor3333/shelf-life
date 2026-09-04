@@ -1,13 +1,15 @@
 # --- Data: snapshots and derived frames are reproducible, never committed ---
-data/
+# Leading slash anchors to the repo root: an unanchored `data/` would also
+# match `src/data/`, silently excluding the ingestion package from commits.
+/data/
 *.db
 *.sqlite
 *.sqlite3
 
 # --- Model artifacts and experiment tracking ---
-models/
-mlruns/
-mlartifacts/
+/models/
+/mlruns/
+/mlartifacts/
 *.pkl
 *.joblib
 
@@ -18,8 +20,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .ipynb_checkpoints/
-build/
-dist/
+/build/
+/dist/
 
 # --- Environments ---
 .venv/
