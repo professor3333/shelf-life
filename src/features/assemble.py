@@ -93,7 +93,7 @@ def compute_labels(
     panel: pd.DataFrame,
     runs_complete: pd.DataFrame,
     horizon_days: int,
-    basis: str = "instant",
+    basis: str = "calendar",
 ):
     """Attach ``y`` per ``docs/problem_definition.md`` §4.
 
@@ -112,20 +112,29 @@ def compute_labels(
     the last complete run has **not** survived — we have not looked yet. Filling
     those with 0 would teach the model that recent postings last forever.
 
-    ``basis`` decides how ``t + H`` is compared, and it is not a formality:
+    ``basis`` decides how ``t + H`` is compared. **Calendar, decided 2026-09-04**
+    (`docs/design.md` §10); ``"instant"`` is kept so the comparison stays
+    reproducible.
 
-    ``"instant"``
-        Literal arithmetic, as §4 is written. Runs are not evenly spaced —
-        **14 of 27 gaps exceed 24 hours**, one of them 34.4h because a run fired
-        at 14:07 instead of 03:45, and even ordinary days land at 24.007h. So a
-        removal confirmed by the very next daily run can fall *outside* a
-        strict 1-day horizon. At H=1 this is a bias, not noise.
     ``"calendar"``
-        Compares dates rather than instants, which is the ordinary reading of
-        "within N days" for a daily panel and is immune to run-time jitter.
-
-    At H=7 the two differ little; at H=1 they differ a great deal. Which one §4
-    means is a label-definition decision.
+        Compares dates, not instants. On the observed schedule this is exactly
+        "was the posting absent at the next complete run", which is the finest
+        distinction a once-daily panel can draw.
+    ``"instant"``
+        Literal arithmetic. Rejected because removals here are
+        *interval-censored* — we know a posting vanished somewhere in
+        ``(t_last_seen, t_first_absent]``, never when — so a continuous-time
+        horizon is not identifiable from this panel at H=1, and in practice the
+        label became a function of cron jitter. Measured: run 0 → run 1 is
+        34.4h because a run fired at 14:07 instead of 03:45, so all 19 removals
+        detected at run 1 fall outside a strict 1-day horizon and are discarded
+        — **0 positives in 1,116 rows at run 0**. Run 2 → run 3 is 23.9993h, so
+        run 2's 12 positives survive **by 2.6 seconds**, and the +27.0s drift at
+        run 3 → run 4 drops 13 further rows as unobservable. The instant
+        positive rate across run indices is 0.00% / 1.77% / 1.06% / 0.00%
+        against calendar's 1.67% / 1.75% / 1.23% / 0.00% — and ``run_index``,
+        ``t_dow`` and ``age_days`` are all features, so that is label noise
+        correlated with the model's own inputs.
     """
     if basis not in {"instant", "calendar"}:
         raise ValueError(f"basis must be 'instant' or 'calendar', got {basis!r}")
@@ -276,7 +285,7 @@ def _derived(panel: pd.DataFrame) -> pd.DataFrame:
 
 def assemble(
     horizon_days: int = 7,
-    basis: str = "instant",
+    basis: str = "calendar",
     snapshot_dir: Path | None = None,
     csv_dir: Path = DEFAULT_SNAPSHOT_CSV_DIR,
     archive: pd.DataFrame | None = None,
@@ -300,7 +309,7 @@ def assemble(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--horizon", type=int, default=7)
-    parser.add_argument("--basis", choices=["instant", "calendar"], default="instant")
+    parser.add_argument("--basis", choices=["instant", "calendar"], default="calendar")
     parser.add_argument("--out", type=Path, default=OUTPUT_ROOT)
     args = parser.parse_args()
 

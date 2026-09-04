@@ -4,6 +4,45 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-04 — A one-day horizon that no removal could reach
+
+- **Problem:** at H=1 the label rule produced **0 positives in 1,116 rows** at
+  run index 0, and a positive rate that moved 0.00% / 1.77% / 1.06% / 0.00%
+  across the four labelable runs. Nothing raised. The frame had the right
+  columns, the right row count, a plausible 32 positives overall, and the
+  censoring rule was working correctly — it simply discarded nineteen removals
+  the scraper had observed.
+
+- **Root cause:** `t_gone <= t + H` was compared as instants, on a panel that
+  looks once a day at a time that drifts. Complete runs are 34.3601h, 13.6407h,
+  23.9993h and 24.0075h apart, so from run 0 the very next observation lands
+  34.4h out and cannot fall inside a 24h horizon; a removal detected as fast as
+  the panel physically permits is therefore not "removed within a day". The
+  deeper fault is that removals here are interval-censored — a posting vanished
+  somewhere in `(t_last_seen, t_first_absent]` and we never learn when — so a
+  horizon expressed in continuous time is not identifiable from this data at
+  all. The 2.6 seconds by which the run 2 → run 3 gap undershot 24h is what
+  kept that run's twelve positives, and 27.0 seconds of drift at run 3 is what
+  discarded thirteen rows.
+
+- **Solution:** the comparison is made on calendar dates
+  (`compute_labels(basis="calendar")`, now the default in
+  `src/features/assemble.py`), which on this schedule is exactly *"absent at the
+  next complete run"*. `basis="instant"` is kept so the two remain comparable
+  rather than a claim in prose, and `tests/test_assemble.py` asserts that
+  seconds of clock drift cannot change a label. Recorded as design decision §10.
+
+- **Lesson:** a horizon may not be measured in units finer than the grid you
+  observe on. If the data arrives once a day, "within one day" is a statement
+  about *the next observation*, not about 86,400 seconds, and writing it as
+  arithmetic quietly converts scheduler punctuality into label noise. Worse, it
+  is noise that lines up with `run_index`, `t_dow` and `age_days` — features —
+  so the model can learn it as signal. Whenever a threshold is compared against
+  a timestamp the collection process produced, ask what the spacing of that
+  process is and whether the threshold can even be resolved.
+
+---
+
 ## 2026-09-04 — A monthly salary stored as 1,200,000,000
 
 - **Problem:** `jobs.salary_min` holds `1200000000` for a posting whose
