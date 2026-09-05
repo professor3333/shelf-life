@@ -7,9 +7,13 @@
 *.sqlite3
 
 # --- Model artifacts and experiment tracking ---
+# The MLflow store is a cache of runs that `python -m src.models.experiments`
+# rebuilds from scratch, so it is derived output like data/processed/, not a
+# source artifact.
 /models/
 /mlruns/
 /mlartifacts/
+/mlflow.db
 *.pkl
 *.joblib
 

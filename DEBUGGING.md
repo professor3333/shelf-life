@@ -4,6 +4,123 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-05 — A synthetic panel that could not exhibit the bug it existed to show
+
+- **Problem:** caught while reading the fixture rather than from a failure, and
+  recorded because a green suite would have hidden it. Had the history been
+  replayed on `make_panel`, run 06 (leaky features admitted) and run 07
+  (removed) would have scored identically, the deliberate leak would have
+  measured 0.0000 PR-AUC, and every test around it would have passed while
+  demonstrating nothing.
+
+- **Root cause:** `make_panel` keeps every posting alive in every wave. The
+  leaky feature is `n_observations_total`, a count of a posting's rows across
+  the panel — and with no attrition that count is the same number for every
+  posting, a constant column carrying no information. The leak is a property of
+  *postings leaving the board*, and the fixture had no leaving in it. The
+  fixture was not wrong for its original purpose; it was wrong for this one, and
+  nothing in either the fixture or the test said which purposes it served.
+
+- **Solution:** `make_closing_panel` in `tests/panels.py` gives each posting a
+  drawn lifetime, staggered entry, and a right-censored tail.
+  `tests/test_experiments.py::test_the_closing_panel_has_attrition_and_censoring`
+  asserts the attrition exists, and `test_the_leaky_columns_separate_the_classes`
+  asserts the planted leak actually carries the outcome — so a fixture that
+  stopped being able to show the bug would fail rather than quietly pass.
+
+- **Lesson:** a test that demonstrates a phenomenon must first assert that its
+  fixture can *exhibit* that phenomenon. Otherwise the demonstration passes on a
+  fixture where the effect is structurally impossible, and a green suite records
+  the shape of the lesson without its substance. This is the second fixture bug
+  in two days — see the 2026-09-04 entry on a fixture that encoded its own
+  label. Both times the fixture was data, and both times it was wrong in a way
+  no assertion was looking at.
+
+---
+
+## 2026-09-05 — A default split that silently produced no error bars
+
+- **Problem:** replaying the experiment history on a twenty-wave panel crashed
+  with `KeyError: 'pr_auc'` inside `summarise_folds`, because `cross_validate`
+  had returned an empty DataFrame.
+
+- **Root cause:** the default cuts, copied from the earlier components, are
+  `Cuts(waves[0], waves[len(waves) // 2])`. That pair was written for a
+  five-wave panel, where it is the only choice leaving anything on both sides.
+  It puts `train_end` at the *first* wave, so the training block is one wave
+  wide however deep the panel is — and `wave_forward_folds` needs at least two
+  waves in the training window to cut a single fold. The crash was luck: had
+  `summarise_folds` tolerated an empty frame, every run would have reported no
+  cross-validation and the tables would have carried a mean with no spread,
+  which reads as "cross-validation ran and found nothing".
+
+- **Solution:** `default_cuts` in `src/models/experiments.py` places the cuts at
+  60% and 80% of the available waves, and `test_default_cuts_leave_a_training_
+  window_deep_enough_for_folds` asserts at least three folds survive. `execute`
+  now records `folds_scored=0` rather than crashing when no fold exists.
+
+- **Lesson:** a default chosen under one constraint becomes a bug when the
+  constraint lifts. The five-wave panel forced `waves[0]`; nothing re-examined
+  it when the panel got deeper, because it was never written down as a
+  concession. A constant that encodes a temporary limitation needs the
+  limitation in a comment beside it, or it outlives its reason silently.
+
+---
+
+## 2026-09-05 — A cross-validation fold with only one class to learn from
+
+- **Problem:** `IndexError: index 1 is out of bounds for axis 1 with size 1`
+  from `model.predict_proba(features)[:, 1]` in
+  `src/models/evaluate.py:cross_validate`, on the very first run of the history.
+
+- **Root cause:** on an expanding window the earliest folds are the shallowest,
+  and on a rare-event panel a training slice covering the first wave or two can
+  contain no positives at all. A scikit-learn classifier fitted on a single
+  class has one entry in `classes_`, so `predict_proba` returns one column
+  instead of two and the `[:, 1]` index is out of range. The traceback describes
+  an array shape and says nothing about the cause. This had never fired before
+  because the real panel is too shallow to split, so cross-validation had never
+  actually executed — the code path was written in Component 10 and first *run*
+  in Component 11.
+
+- **Solution:** `cross_validate` checks `train_block["y"].nunique() < 2` before
+  fitting and emits a `NaN` row, which `summarise_folds` already excludes from
+  the mean. Checked before the fit rather than caught after it, because "this
+  fold had nothing to learn from" is a fact about the fold, not an exception.
+
+- **Lesson:** code that has never run is not tested code, however carefully it
+  was reviewed. Two components' worth of machinery sat behind a `SplitTooShallow`
+  guard and looked finished. When a blocker stops a path from executing, the path
+  needs a fixture that makes it execute anyway — otherwise the first real run
+  becomes the first test, at the worst possible moment.
+
+---
+
+## 2026-09-05 — `pip install` into the wrong interpreter
+
+- **Problem:** `mlflow` was installed successfully and then `import mlflow`
+  raised `ModuleNotFoundError` inside the activated virtualenv. The install had
+  also uninstalled `protobuf 5.29.3` and replaced it with `6.33.6` somewhere.
+
+- **Root cause:** `.venv` is a `uv` virtualenv and ships no `pip` binary. With
+  the venv activated, `which pip` still resolved to `/opt/anaconda3/bin/pip`,
+  because activation prepends `.venv/bin` to `PATH` and the shell simply found
+  the next `pip` along it. So the packages went into the Anaconda base
+  environment — a different interpreter entirely — and its `protobuf` was the
+  one upgraded. `python -m pip` then failed honestly with "No module named pip",
+  which is what a `uv` venv should say.
+
+- **Solution:** installed with `uv pip install`, which targets the project venv.
+  `mlflow` is declared in `pyproject.toml` under a `tracking` extra.
+
+- **Lesson:** an activated virtualenv guarantees which `python` you get, not
+  which `pip`. Install with `python -m pip` or the environment's own tool
+  (`uv pip`), never the bare `pip` on `PATH` — and read the *destination* in the
+  install output rather than trusting the exit code, because installing into the
+  wrong environment succeeds.
+
+---
+
 ## 2026-09-04 — A synthetic fixture that encoded its own label
 
 - **Problem:** the test asserting that no rung of the baseline ladder can beat

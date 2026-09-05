@@ -28,6 +28,13 @@ audit widened it: `source` and `company` are the same information (all 31
 companies map to exactly one source), so they are gated together by
 `include_board_identity` and default to off. Turning one on without the other
 would be incoherent.
+
+**`include_leaky` is a switch that should always be off.** It admits `LEAKY`,
+whose columns are wrong by construction (`src/features/leaky.py`). It exists
+because the experiment history has to contain a measured leak to be worth
+keeping — a run that says *this feature was worth 0.4 PR-AUC and all of it was
+a lie* is the one artifact of this build that cannot be reconstructed after the
+fact. One caller passes it: `src/models/experiments.py`, for run 06.
 """
 
 from __future__ import annotations
@@ -45,6 +52,7 @@ from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardSc
 
 from src.data.split import SplitResult
 from src.features.derive import derive_features
+from src.features.leaky import LEAKY_COLUMNS
 
 #: The fill value standing in for "this categorical was not stated". A real
 #: level, not a NaN, because "not stated" is information here — `remote` being
@@ -181,6 +189,25 @@ BOARD_IDENTITY: tuple[Column, ...] = (
     ),
 )
 
+#: Gated by `include_leaky`, and **wrong on purpose**. `src/features/leaky.py`
+#: says why each one is a leak; they are registered here rather than left
+#: unknown so that a panel carrying them still satisfies `assert_known_columns`,
+#: and so that admitting them is a visible argument at a call site instead of a
+#: column that quietly appears in the matrix. Nothing in `src/` passes
+#: `include_leaky=True` except `src/models/experiments.py`, which does it once,
+#: for one run, to measure the size of the lie.
+LEAKY: tuple[Column, ...] = (
+    Column(
+        "n_observations_total",
+        "numeric",
+        "median",
+        "never null once computed — but the value itself is unknowable at `t`, "
+        "which is the defect, not the missingness",
+    ),
+    Column("days_on_board_total", "numeric", "zero", "as n_observations_total"),
+)
+
+
 #: Allowed by the audit, not yet wired. Free text needs derived features, which
 #: is the next component's work, not this one's.
 TEXT_FEATURES: tuple[str, ...] = ("title",)
@@ -218,7 +245,9 @@ EXCLUDED: dict[str, str] = {
 
 
 def feature_columns(
-    include_board_identity: bool = False, only: tuple[str, ...] | None = None
+    include_board_identity: bool = False,
+    only: tuple[str, ...] | None = None,
+    include_leaky: bool = False,
 ) -> tuple[Column, ...]:
     """The columns the model is allowed to see.
 
@@ -226,8 +255,18 @@ def feature_columns(
     feature — `docs/design.md` §7's second baseline is `age_days` alone, and it
     has to travel through the same imputation and scaling as everything else or
     the comparison is not a comparison.
+
+    `include_leaky` admits columns that are known to be wrong. It defaults to
+    off and there is no path that turns it on implicitly: it is threaded down
+    from `build_pipeline` so that a leaky model is leaky at the call site, in
+    an argument a reader can see, rather than three layers away.
     """
-    allowed = FEATURES + DERIVED + (BOARD_IDENTITY if include_board_identity else ())
+    allowed = (
+        FEATURES
+        + DERIVED
+        + (BOARD_IDENTITY if include_board_identity else ())
+        + (LEAKY if include_leaky else ())
+    )
     if only is None:
         return allowed
     by_name = {column.name: column for column in allowed}
@@ -241,7 +280,9 @@ def known_columns() -> set[str]:
     """Every column this module has an opinion about."""
     return (
         {column.name for column in FEATURES}
+        | {column.name for column in DERIVED}
         | {column.name for column in BOARD_IDENTITY}
+        | set(LEAKY_COLUMNS)
         | set(TEXT_FEATURES)
         | set(EXCLUDED)
     )
@@ -376,6 +417,7 @@ def build_preprocessor(
     include_board_identity: bool = False,
     min_category_frequency: int = MIN_CATEGORY_FREQUENCY,
     only: tuple[str, ...] | None = None,
+    include_leaky: bool = False,
 ) -> ColumnTransformer:
     """The learned half: imputation, encoding and scaling, grouped by policy.
 
@@ -383,7 +425,7 @@ def build_preprocessor(
     than a training fold is the leak this component exists to prevent, which is
     why the only supported entry point is `fit_on_training_fold`.
     """
-    columns = feature_columns(include_board_identity, only)
+    columns = feature_columns(include_board_identity, only, include_leaky)
     branches = []
     for fill in ("median", "zero", "one", "category"):
         names = [column.name for column in columns if column.fill == fill]
@@ -397,6 +439,7 @@ def build_pipeline(
     include_board_identity: bool = False,
     min_category_frequency: int = MIN_CATEGORY_FREQUENCY,
     only: tuple[str, ...] | None = None,
+    include_leaky: bool = False,
 ) -> Pipeline:
     """Selection, preprocessing and the estimator as one object.
 
@@ -404,7 +447,9 @@ def build_pipeline(
     persisted and served, so the serving path cannot drift from the training
     path by re-implementing the feature logic — the production form of leakage.
     """
-    columns = tuple(column.name for column in feature_columns(include_board_identity, only))
+    columns = tuple(
+        column.name for column in feature_columns(include_board_identity, only, include_leaky)
+    )
     return Pipeline(
         [
             # Stateless, so it cannot leak across the split however it is
@@ -422,7 +467,9 @@ def build_pipeline(
             ),
             (
                 "preprocess",
-                build_preprocessor(include_board_identity, min_category_frequency, only),
+                build_preprocessor(
+                    include_board_identity, min_category_frequency, only, include_leaky
+                ),
             ),
             ("model", estimator),
         ]

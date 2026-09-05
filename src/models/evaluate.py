@@ -148,11 +148,37 @@ def cross_validate(
     A fold whose validation wave contains no positives yields `NaN` rather than
     zero — PR-AUC is undefined there, and a zero would be averaged in as if it
     were a bad score rather than an absent one.
+
+    **A fold whose *training* slice is all one class is skipped the same way.**
+    On an expanding window the earliest folds are the shallowest, and a training
+    slice covering the first wave or two of a rare-event panel can easily
+    contain no positives at all. A classifier fitted on one class has one class
+    in `classes_`, so `predict_proba` returns a single column and indexing
+    `[:, 1]` raises — the failure is an `IndexError` about array shape, which
+    says nothing about the cause. The condition is checked before the fit rather
+    than caught after it, because "this fold had nothing to learn from" is a
+    fact about the fold, not an exception.
     """
     rows = []
     for fold in folds:
         train_block = block.iloc[fold.train_index]
         val_block = block.iloc[fold.val_index]
+
+        if train_block["y"].nunique(dropna=True) < 2:
+            rows.append(
+                {
+                    "fold": fold.number,
+                    "train_end": fold.train_end,
+                    "val_start": fold.val_start,
+                    "n_train": fold.n_train,
+                    "n_val": fold.n_val,
+                    "val_positives": float((val_block["y"] == 1).sum()),
+                    "pr_auc": float("nan"),
+                    "brier": float("nan"),
+                    "roc_auc": float("nan"),
+                }
+            )
+            continue
 
         model = build()
         fit_on_frame(model, train_block)
