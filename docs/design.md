@@ -271,7 +271,8 @@ absent at the next complete run?* — and calendar comparison is exactly
 equivalent to that question on this schedule, while instant is a lossy
 approximation of it whose loss is governed by cron jitter.
 
-**What the loss looks like, measured.** The two never disagree on a row they
+**What the loss looks like, measured** on the 2026-09-04 snapshot, which is
+what this decision was made against. The two never disagree on a row they
 both label. They differ in 49 rows that instant discards as unobservable and
 calendar labels, 21 of them positive:
 

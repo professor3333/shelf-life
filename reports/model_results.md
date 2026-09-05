@@ -10,8 +10,8 @@ Every engineered feature is computed inside the pipeline by
 for a single posting at serve time, and none of them can leak across the
 split however they are called.
 
-The constant-predictor reference remains PR-AUC **0.0117**
-on 4,527 labelled rows.
+The constant-predictor reference remains PR-AUC **0.0132**
+on 5,693 labelled rows.
 
 ## Nothing below has run
 

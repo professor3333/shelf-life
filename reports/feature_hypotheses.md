@@ -93,7 +93,8 @@ column, and it will start doing so on its own as the scraper adds waves.
 
 What can be said today, without the ablation:
 
-- the constant-predictor reference is PR-AUC **0.0117** on 4,527 labelled rows;
+- the constant-predictor reference is PR-AUC **0.0132** on 5,693 labelled rows
+  (2026-09-05 snapshot);
 - every engineered feature is computed inside the pipeline, so each one exists
   identically for a single posting at serve time — verified by a test that
   scores one raw row;
