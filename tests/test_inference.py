@@ -23,7 +23,6 @@ import pandas as pd
 import pytest
 from sklearn.linear_model import LogisticRegression
 
-from src.data.split import crawl_waves, temporal_split
 from src.features.assemble import row_local_features
 from src.inference import artifact as artifact_module
 from src.inference.contract import (
@@ -34,13 +33,12 @@ from src.inference.contract import (
     validate,
 )
 from src.inference.predict import Predictor
-from src.models.experiments import default_cuts
-from src.models.freeze import build_metadata, freeze
+from src.models.freeze import freeze
 from src.models.metrics import DEFAULT_ALERT_BUDGET, alert_budget, threshold_for_budget
 from src.models.train_baseline import prediction_days
-from tests.panels import make_closing_panel
+from tests.conftest import FROZEN_RUN
 
-RUN = "05-xgboost_engineered"
+RUN = FROZEN_RUN
 
 #: The payload the pinned probability belongs to. Every field a caller would
 #: plausibly have, and none they would not: no board context, which is the
@@ -70,29 +68,8 @@ EXPECTED_PROBABILITY = 0.04348672926425934
 
 
 @pytest.fixture(scope="module")
-def split():
-    panel = make_closing_panel()
-    return temporal_split(panel, default_cuts(crawl_waves(panel[panel["label_observable"]])))
-
-
-@pytest.fixture(scope="module")
-def frozen(split):
-    return freeze(split, RUN)
-
-
-@pytest.fixture(scope="module")
-def artifact_path(tmp_path_factory, frozen, split):
-    panel = make_closing_panel()
-    metadata = build_metadata(
-        frozen, RUN, panel, artifact_module.DEFAULT_ARTIFACT, "synthetic", DEFAULT_ALERT_BUDGET
-    )
-    path = tmp_path_factory.mktemp("artifact") / "shelf_life.joblib"
-    return artifact_module.save(frozen.pipeline, metadata, path)
-
-
-@pytest.fixture(scope="module")
-def predictor(artifact_path):
-    return Predictor.load(artifact_path)
+def predictor(synthetic_artifact):
+    return Predictor.load(synthetic_artifact)
 
 
 # --- the regression pin -----------------------------------------------------
