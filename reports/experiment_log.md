@@ -23,7 +23,7 @@ tested; replaying it on the real panel is one command once the panel is deep
 enough, and `--synthetic` exercises it meanwhile.
 
 ```
-the 'val' block is empty under cuts Cuts(train_end=Timestamp('2026-09-01 14:07:14.634369+0000', tz='UTC'), val_end=Timestamp('2026-09-02 03:45:45.645648+0000', tz='UTC')) with an embargo of 2 days 10:21:37.132005.
+the 'val' block is empty under cuts Cuts(train_end=Timestamp('2026-09-02 03:45:45.645648+0000', tz='UTC'), val_end=Timestamp('2026-09-03 03:45:42.003096+0000', tz='UTC')) with an embargo of 2 days 10:21:37.132005.
 ```
 
 ## The runs — `dataset=synthetic`
@@ -80,7 +80,7 @@ closing. It would flag everything.
 
 ## Provenance
 
-- git `66a56e7f2870c651154d755ce59680d207f3727c` on `feature/mlflow-tracking` — **dirty tree**
+- git `538c7f14956afe584fc388607e428b404c75ef8d` on `feature/ui-and-docs` — **dirty tree**
 - panel `tests/panels.py`, 1,310 rows, sha256 `813def926c0855f059e275a346192b0b9324d356219ee8cf2b4e88ffe20edb06`
-- snapshot `2026-09-04`
+- snapshot `2026-09-05`
 

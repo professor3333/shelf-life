@@ -22,9 +22,9 @@ twice is a validation set: the second look cannot be un-seen, and every decision
 after it is contaminated by it.
 
 **Why ROC-AUC is reported but not decisive.** With rare positives it flatters.
-The false-positive rate has the true-negative count in its denominator — 4,474
-of them here against 53 positives — so a model can produce a great many false
-alarms and barely move the x-axis. Precision puts those same false alarms over
+The false-positive rate has the true-negative count in its denominator — 5,618
+of them against 75 positives on the 2026-09-05 snapshot — so a model can produce
+a great many false alarms and barely move the x-axis. Precision puts those same false alarms over
 the number of *flagged* rows, where they are impossible to hide. At a 1.2% base
 rate the ROC curve is describing a decision nobody makes.
 """
@@ -400,7 +400,9 @@ def write_report(
         f"{100 * (1 - reference['base_rate']):.1f}% and has told you nothing.",
         "",
         "**ROC-AUC is reported but not decisive.** With rare positives it flatters. The",
-        "false-positive rate divides by the true-negative count — 4,474 of them against 53",
+        "false-positive rate divides by the true-negative count — "
+        f"{reference['n'] - reference['positives']:,.0f} of them against "
+        f"{reference['positives']:,.0f}",
         "positives — so a model can raise a great many false alarms without moving the",
         "x-axis. Precision divides the same false alarms by the number of rows flagged,",
         "where they cannot hide.",

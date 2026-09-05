@@ -24,7 +24,27 @@ from tests.panels import make_closing_panel
 
 #: The run frozen for every test that needs an artifact. Named once so the
 #: inference test and the API test are provably scoring the same model.
-FROZEN_RUN = "05-xgboost_engineered"
+#:
+#: **Logistic rather than boosted, and the reason is a bug this repository
+#: shipped.** The pin was written against `05-xgboost_engineered` and passed on
+#: the machine that wrote it and nowhere else: CI on Linux/x86 returned 0.0603
+#: for the payload macOS/arm64 scored 0.0435. XGBoost's tree construction is not
+#: bit-reproducible across platforms, and on a small panel with a noisy label a
+#: gradient difference in the last decimal place is enough to choose a different
+#: split — after which the two models are genuinely different models, not the
+#: same model with rounding error.
+#:
+#: A convex fit has no such fork in it. `LogisticRegression` reaches the same
+#: optimum from the same data on any machine, so a number pinned against it
+#: means "the features changed" rather than "the runner changed". Boosting is
+#: still exercised end to end by `test_a_boosted_artifact_also_freezes_and_serves`;
+#: what it no longer does is carry a constant that only one laptop can verify.
+#: See `DEBUGGING.md`.
+FROZEN_RUN = "02-logistic"
+
+#: The boosted spec, frozen in one test to prove the packaging is estimator-
+#: agnostic. Its probability is deliberately not pinned.
+BOOSTED_RUN = "05-xgboost_engineered"
 
 
 @pytest.fixture(scope="session")

@@ -8,14 +8,14 @@ For a constant predictor, average precision **is** the base rate, ROC-AUC is
 exactly 0.5, and the Brier score of predicting `p` is `p(1-p)`. These are
 derived, not fitted, so they are available before any split is possible.
 
-- labelled rows: **4,527**
-- positives: **53**
-- base rate: **0.0117**
-- constant-predictor PR-AUC: **0.0117**
-- constant-predictor Brier: **0.0116**
+- labelled rows: **5,693**
+- positives: **75**
+- base rate: **0.0132**
+- constant-predictor PR-AUC: **0.0132**
+- constant-predictor Brier: **0.0130**
 
 Accuracy is not reported at any point in this file. At this base rate, always
-predicting "stays open" scores 98.8%.
+predicting "stays open" scores 98.7%.
 
 ## The fitted ladder has not run
 
@@ -25,14 +25,18 @@ constant predictor has a validation block to be scored on. The refusal:
 ```
 the 'val' block is empty under cuts Cuts(train_end=Timestamp('2026-08-31 03:45:35.705216+0000', tz='UTC'), val_end=Timestamp('2026-09-02 03:45:45.645648+0000', tz='UTC')) with an embargo of 2 days 10:21:37.132005.
 
-0 of 6 candidate cuts are usable.
+0 of 10 candidate cuts are usable.
                        train_end                          val_end  embargoed  train_rows  train_pos  val_rows  val_pos  test_rows  test_pos  valid           reason
-2026-08-31 03:45:35.705216+00:00 2026-09-01 14:07:14.634369+00:00       3423        1104         19         0        0          0         0  False  val block empty
-2026-08-31 03:45:35.705216+00:00 2026-09-02 03:45:45.645648+00:00       3423        1104         19         0        0          0         0  False  val block empty
-2026-08-31 03:45:35.705216+00:00 2026-09-03 03:45:42.003096+00:00       2286        1104         19      1137        0          0         0  False test block empty
-2026-09-01 14:07:14.634369+00:00 2026-09-02 03:45:45.645648+00:00       2280        2247         39         0        0          0         0  False  val block empty
-2026-09-01 14:07:14.634369+00:00 2026-09-03 03:45:42.003096+00:00       2280        2247         39         0        0          0         0  False  val block empty
-2026-09-02 03:45:45.645648+00:00 2026-09-03 03:45:42.003096+00:00       1137        3390         53         0        0          0         0  False  val block empty
+2026-08-31 03:45:35.705216+00:00 2026-09-01 14:07:14.634369+00:00       3445        1104         19         0        0       1144         0  False  val block empty
+2026-08-31 03:45:35.705216+00:00 2026-09-02 03:45:45.645648+00:00       4589        1104         19         0        0          0         0  False  val block empty
+2026-08-31 03:45:35.705216+00:00 2026-09-03 03:45:42.003096+00:00       3430        1104         19      1159       22          0         0  False test block empty
+2026-08-31 03:45:35.705216+00:00 2026-09-04 03:46:10.052068+00:00       2286        1104         19      2303       22          0         0  False test block empty
+2026-09-01 14:07:14.634369+00:00 2026-09-02 03:45:45.645648+00:00       3446        2247         39         0        0          0         0  False  val block empty
+2026-09-01 14:07:14.634369+00:00 2026-09-03 03:45:42.003096+00:00       3446        2247         39         0        0          0         0  False  val block empty
+2026-09-01 14:07:14.634369+00:00 2026-09-04 03:46:10.052068+00:00       2302        2247         39      1144        0          0         0  False test block empty
+2026-09-02 03:45:45.645648+00:00 2026-09-03 03:45:42.003096+00:00       2303        3390         53         0        0          0         0  False  val block empty
+2026-09-02 03:45:45.645648+00:00 2026-09-04 03:46:10.052068+00:00       2303        3390         53         0        0          0         0  False  val block empty
+2026-09-03 03:45:42.003096+00:00 2026-09-04 03:46:10.052068+00:00       1144        4549         75         0        0          0         0  False  val block empty
 ```
 
 This is panel depth, not a cut that can be moved. The scraper adds a wave

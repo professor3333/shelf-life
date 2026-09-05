@@ -28,6 +28,7 @@ from test_inference import EXPECTED_PROBABILITY, FIXED_POSTING, FIXED_T
 from api.main import create_app
 from api.schemas import PostingRequest
 from src.inference.contract import FIELDS
+from tests.conftest import FROZEN_RUN
 
 
 @pytest.fixture(scope="module")
@@ -88,7 +89,7 @@ def test_the_response_carries_what_makes_a_probability_readable(client):
     assert body["closing_soon"] == (body["probability"] >= body["threshold"])
     assert body["horizon_days"] == 1
     assert body["board_context_supplied"] is False
-    assert body["model"] == "05-xgboost_engineered"
+    assert body["model"] == FROZEN_RUN
     assert body["dataset"] == "synthetic"
 
 

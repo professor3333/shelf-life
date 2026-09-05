@@ -19,6 +19,8 @@ and this file's structure does not change.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 import pytest
 from sklearn.linear_model import LogisticRegression
@@ -33,10 +35,11 @@ from src.inference.contract import (
     validate,
 )
 from src.inference.predict import Predictor
-from src.models.freeze import freeze
+from src.models.freeze import build_metadata, freeze
 from src.models.metrics import DEFAULT_ALERT_BUDGET, alert_budget, threshold_for_budget
 from src.models.train_baseline import prediction_days
-from tests.conftest import FROZEN_RUN
+from tests.conftest import BOOSTED_RUN, FROZEN_RUN
+from tests.panels import make_closing_panel
 
 RUN = FROZEN_RUN
 
@@ -64,7 +67,15 @@ FIXED_T = "2026-09-14T03:45:00Z"
 #: What the pipeline in this repository returns for that payload at that instant.
 #: Recomputed only when a deliberate change to the feature logic or the model
 #: makes it wrong — and when that happens, the diff is the record of what moved.
-EXPECTED_PROBABILITY = 0.04348672926425934
+EXPECTED_PROBABILITY = 0.8584466825899831
+
+#: The preprocessed row the estimator is handed: its width, its sum, and its
+#: leading values. Pinned separately from the probability because this half is
+#: the *feature logic*, and it is identical on every machine — no fitted tree
+#: stands between the payload and these numbers.
+EXPECTED_N_FEATURES = 34
+EXPECTED_FEATURE_SUM = 51.853680421452765
+EXPECTED_FIRST_FEATURES = [-3.2938571215073607, 4.562661929345213, 3.4443153442563945, 0.0]
 
 
 @pytest.fixture(scope="module")
@@ -89,13 +100,52 @@ def test_the_same_payload_scores_the_same_twice(predictor):
 # --- the artifact is the whole pipeline -------------------------------------
 
 
+def test_the_feature_vector_for_a_fixed_posting_is_unchanged(predictor):
+    """The stronger half of the pin: what the estimator was *handed*.
+
+    A probability is one number at the end of a long chain, and a model swap
+    moves it for reasons that have nothing to do with the features. This asserts
+    the matrix itself — every imputed fill, every one-hot column, in order — so a
+    change to `derive_features`, to a `Column`'s fill policy, or to the encoder's
+    rare-level folding fails here and names itself. It is also the half that is
+    identical on every platform, because none of those steps involve a fitted
+    tree.
+    """
+    row = build_row(FIXED_POSTING, pd.Timestamp(FIXED_T))
+    matrix = predictor.artifact.pipeline[:-1].transform(row)
+    assert matrix.shape == (1, EXPECTED_N_FEATURES)
+    assert matrix.sum() == pytest.approx(EXPECTED_FEATURE_SUM, abs=1e-9)
+    assert matrix.tolist()[0][:4] == pytest.approx(EXPECTED_FIRST_FEATURES, abs=1e-9)
+
+
+def test_a_boosted_artifact_also_freezes_and_serves(split, tmp_path):
+    """The packaging is estimator-agnostic, and boosting still goes through it.
+
+    No pinned probability here on purpose: XGBoost's fit differs between
+    platforms, which is exactly why the pin above uses a convex model. What is
+    asserted is that the boosted pipeline freezes, saves, loads and scores.
+    """
+    frozen = freeze(split, BOOSTED_RUN)
+    metadata = build_metadata(
+        frozen,
+        BOOSTED_RUN,
+        make_closing_panel(),
+        Path("tests/panels.py"),
+        "synthetic",
+        DEFAULT_ALERT_BUDGET,
+    )
+    path = artifact_module.save(frozen.pipeline, metadata, tmp_path / "boosted.joblib")
+    probability = Predictor.load(path).predict(FIXED_POSTING, t=FIXED_T).probability
+    assert 0.0 <= probability <= 1.0
+
+
 def test_the_artifact_holds_the_feature_logic_not_just_the_estimator(predictor):
     """The roadmap's REVIEW step, as an assertion rather than an instruction."""
     steps = predictor.artifact.pipeline.named_steps
     assert artifact_module.REQUIRED_STEPS == tuple(
         name for name in steps if name in artifact_module.REQUIRED_STEPS
     )
-    assert steps["model"].__class__.__name__ == "XGBClassifier"
+    assert steps["model"].__class__.__name__ == "LogisticRegression"
 
 
 def test_saving_a_bare_estimator_is_refused(tmp_path):
