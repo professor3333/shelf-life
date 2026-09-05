@@ -34,6 +34,12 @@ api = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
 ]
+# The UI. Separate from `api` because they deploy separately: the service runs
+# in the container, the form can run anywhere that can reach it over HTTP.
+ui = [
+    "streamlit>=1.36",
+    "requests>=2.32",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
@@ -43,6 +49,11 @@ dev = [
     # Starlette's TestClient speaks HTTP through httpx rather than through a
     # socket, so the API tests need no network and no running server.
     "httpx>=0.27",
+    # Streamlit ships its own test runtime, which renders the script the way
+    # `streamlit run` does — so the UI is covered by CI rather than by having
+    # been opened in a browser once.
+    "streamlit>=1.36",
+    "requests>=2.32",
 ]
 
 [build-system]
@@ -50,7 +61,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src", "api"]
+packages = ["src", "api", "app"]
 
 [tool.ruff]
 line-length = 100
