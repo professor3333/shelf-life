@@ -21,6 +21,84 @@ the UI.
 
 ---
 
+## The pipeline, end to end
+
+Where the data comes from, how it becomes a label, how a model is chosen, and how
+a stranger gets a number back.
+
+```mermaid
+flowchart TD
+    subgraph COLLECT["COLLECT · a separate scraper, not this repo"]
+        A["7 job boards"]
+        B[("jobs.db<br/>one row per posting per crawl")]
+    end
+
+    subgraph OFFLINE["OFFLINE · my machine, on a pinned snapshot"]
+        C["Pin a snapshot<br/>dated copy + SHA-256 manifest"]
+        D["Clean<br/>salary, currency, period<br/>row-local only"]
+        E["Assemble the job-day panel<br/>one row per posting per complete crawl"]
+        F["Label<br/>absent twice, never returns<br/>unobservable outcomes dropped"]
+        G{"Leakage audit<br/>a verdict for all 44 columns"}
+        X["Excluded"]
+        H["Temporal split<br/>train · val · test, with an embargo"]
+        I["Preprocess<br/>impute · encode · scale<br/>fitted on the training fold only"]
+        J["Model ladder<br/>constant → age → board hazard →<br/>logistic → tree → forest → XGBoost"]
+        K["Evaluate on validation<br/>PR-AUC · paired folds · calibration<br/>per-source breakdown"]
+        L["Choose the threshold<br/>alert budget, 20 postings per day"]
+        M["FREEZE<br/>opens the test block once"]
+        T[("MLflow")]
+    end
+
+    N[("models/shelf_life.joblib<br/>pipeline + threshold + provenance")]
+
+    subgraph ONLINE["ONLINE · runs anywhere"]
+        P["FastAPI<br/>POST /predict · GET /health"]
+        Q["Streamlit UI"]
+    end
+
+    U(["A stranger, holding one posting"])
+    R(["probability + the threshold it was compared against<br/>plus: closed is not filled"])
+
+    A -->|"daily crawl, since 2026-08-29"| B
+    B --> C
+    C --> D
+    D --> E
+    E --> F
+    F --> G
+    G -->|"24 features survive"| H
+    G -.->|"rejected: last_seen, observation counts,<br/>anything whose window is still open"| X
+    H --> I
+    I --> J
+    J --> K
+    K -->|"loops: features, params, ablations"| J
+    K --> L
+    L --> M
+    J -.->|"params · metrics · panel hash · git SHA"| T
+    K -.-> T
+    M --> N
+    N -->|"released by tag, checksum-verified at build"| P
+    U --> Q
+    Q -->|"HTTP, never an import"| P
+    P --> R
+```
+
+**The four things that diagram is really saying:**
+
+1. **Everything left of the split is sealed at `t`.** A feature that would not
+   exist at the moment of prediction is not a weaker feature — it is the answer,
+   arriving early.
+2. **The loop is between the ladder and validation, and it never touches test.**
+   The test block is read in one place, once, after the threshold is already
+   fixed.
+3. **The object that is trained is the object that is served.** Not a
+   re-implementation of the feature logic on the serving side — the same fitted
+   `Pipeline`, in one file, with its threshold inside it.
+4. **The UI talks to the API over HTTP, and the API holds no feature logic.**
+   Each arrow across a boundary is enforced by a test, because a rule that
+   depends on remembering is a rule that ends.
+
+---
+
 ## Architecture
 
 Two systems that share exactly one object: the fitted pipeline.
