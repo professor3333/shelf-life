@@ -7,10 +7,11 @@ worked out on paper and the arithmetic is written into the test, so a metric
 wired to the wrong argument fails here rather than surviving into a report where
 nothing can be checked against anything.
 
-**The test-set discipline check.** `test_the_test_block_is_read_in_exactly_one_place`
-parses `src/` and fails if the test split is read anywhere but the property that
-defines it. It uses the AST rather than a grep so that a docstring *mentioning*
-the test block is not mistaken for code reading it.
+**The test-set discipline check.** `test_the_test_block_is_read_only_where_it_should_be`
+parses `src/` and fails if the test split is read anywhere but the two places
+entitled to: the property that defines it, and the freeze step that opens it
+once. It uses the AST rather than a grep so that a docstring *mentioning* the
+test block is not mistaken for code reading it.
 """
 
 from __future__ import annotations
@@ -112,7 +113,16 @@ def test_calibration_summary_reports_predicted_against_observed():
 
 # --- the test-set discipline check -----------------------------------------
 
-SPLIT_MODULE = Path("src/data/split.py")
+#: The only modules allowed to read `split.test`, and why each one is.
+#:
+#: `src/data/split.py` defines the property. `src/models/freeze.py` is the single
+#: evaluation — it fits the pipeline, fixes the threshold on validation, and only
+#: then reads the block, once, at the end of the experimental phase.
+#:
+#: Adding a third name here is not a maintenance chore, it is a decision to look
+#: at the test set again, and the list is short so that decision cannot be made
+#: by accident.
+TEST_BLOCK_READERS = [Path("src/data/split.py"), Path("src/models/freeze.py")]
 
 
 def _reads_the_test_block(path: Path) -> bool:
@@ -131,12 +141,16 @@ def _reads_the_test_block(path: Path) -> bool:
     return False
 
 
-def test_the_test_block_is_read_in_exactly_one_place():
-    """`CLAUDE`-independent statement of the rule: a test set looked at twice is
-    a validation set. The single evaluation happens once the pipeline is frozen,
-    which is not this component and not any module under `src/models/`."""
+def test_the_test_block_is_read_only_where_it_should_be():
+    """A test set looked at twice is a validation set.
+
+    So the block is read where it is defined, and in the freeze step that opens
+    it once — and nowhere else. Not in the comparison, not in the ablation, not
+    in the tuning: every one of those chooses something, and a choice made
+    against test is a choice that cannot be un-made.
+    """
     readers = [path for path in sorted(Path("src").rglob("*.py")) if _reads_the_test_block(path)]
-    assert readers == [SPLIT_MODULE], f"the test block is read in {readers}"
+    assert readers == sorted(TEST_BLOCK_READERS), f"the test block is read in {readers}"
 
 
 def test_the_discipline_check_would_notice_a_violation(tmp_path):

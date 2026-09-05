@@ -19,9 +19,11 @@ from src.data.split import (
     SplitTooShallow,
     assert_temporal_order,
     crawl_waves,
+    depth_report,
     embargo_width,
     feasible_cuts,
     max_run_gap,
+    minimum_waves,
     resurrection_risk,
     split_report,
     temporal_split,
@@ -307,3 +309,42 @@ def test_resurrection_risk_finds_a_posting_that_came_back():
 
 def test_resurrection_risk_is_empty_when_nothing_comes_back():
     assert resurrection_risk(_panel(_wide(4))).empty
+
+
+def test_minimum_waves_counts_what_the_embargo_burns():
+    """Seven waves for the smallest legal split on an even daily panel at H=1.
+
+    One wave per block, plus everything inside each of the two embargoes. The
+    embargo is the horizon plus one run's reach — two days here — and the wave
+    sitting exactly on the boundary is discarded too, so each boundary costs
+    three waves and the arithmetic is 1 + 2*3 = 7. Written as a test because
+    that number is the answer to "how much longer must the scraper run", and a
+    wrong one is a wrong plan.
+    """
+    depth = minimum_waves(_panel(_wide(9)))
+    assert depth["burnt_per_boundary"] == 3
+    assert depth["needed"] == 7
+    assert depth["present"] == 9
+    assert depth["shortfall"] == 0
+
+
+def test_minimum_waves_reports_a_shortfall_on_a_panel_too_short():
+    depth = minimum_waves(_panel(_wide(3)))
+    assert depth["shortfall"] == depth["needed"] - 3
+    assert "more labelled wave(s) needed" in depth_report(_panel(_wide(3)))
+
+
+def test_a_single_late_crawl_widens_the_embargo_for_the_whole_panel():
+    """The widest run gap sets the reach, so one late crawl costs waves forever.
+
+    Not a hypothetical: the 2026-09-01 crawl fired at 14:07 instead of 03:45,
+    making the widest gap 34.4h, and every boundary in the panel has paid for it
+    since.
+    """
+    even = minimum_waves(_panel(_wide(9)))
+    ids = {"a", "b", "c"}
+    skipped = [ids] * 9
+    skipped[2] = None  # the source did not run in that wave, so its gap doubles
+    late = minimum_waves(_panel({"board": [ids] * 9, "erratic": skipped}))
+    assert late["embargo"] > even["embargo"]
+    assert late["needed"] > even["needed"]

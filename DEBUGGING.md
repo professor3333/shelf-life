@@ -4,6 +4,40 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-05 — A serve-time row whose numbers arrived as text
+
+- **Problem:** caught by printing `dtypes` on the first row `build_row`
+  produced, not by an exception. Every numeric field the caller omitted —
+  `board_size_at_t`, `n_offices`, `content_chars` — came back as `object` dtype
+  holding a single `None`. The pipeline would have run: `select_columns` routes
+  on dtype and would have handed those columns to the categorical branch, while
+  the `ColumnTransformer` routes on *name* and would have sent them to a median
+  imputer. The request would have returned a confident probability computed
+  from a column the model had never seen in that form.
+
+- **Root cause:** `pd.DataFrame([row])` infers each column's dtype from one
+  value, and the only value was `None`. Training never sees this because the
+  panel is built from thousands of rows at once, so a column of mostly-numbers
+  is numeric whatever any single row holds. At serve time the frame is one row
+  wide by definition, and **every payload omits something** — so the pathological
+  case is the ordinary case, and the shapes of the two paths diverge exactly
+  where nothing compares them.
+
+- **Solution:** `src/inference/contract.py:build_row` now constructs each column
+  as a typed `pd.Series` from the field's declared kind, using pandas' nullable
+  dtypes so "absent" survives as NA rather than collapsing the dtype.
+  `tests/test_inference.py::test_serve_time_row_local_features_match_the_training_frame`
+  compares the served row against one built by the panel's own
+  `row_local_features`, so a future divergence fails rather than serves.
+
+- **Lesson:** dtype inference is a statistic, and a one-row frame is a sample of
+  size one. Anywhere training sees a batch and serving sees a single record,
+  the schema must be declared rather than inferred — and the test that catches
+  it is the one that builds the same record down both paths and compares, not
+  the one that checks the response was a float between 0 and 1.
+
+---
+
 ## 2026-09-05 — A synthetic panel that could not exhibit the bug it existed to show
 
 - **Problem:** caught while reading the fixture rather than from a failure, and
