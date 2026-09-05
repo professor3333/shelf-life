@@ -392,7 +392,7 @@ shelf-life/
 │   └── inference/    contract.py artifact.py predict.py
 ├── api/              main.py schemas.py
 ├── app/              streamlit_app.py client.py
-├── tests/            261 tests, no network, no data files
+├── tests/            263 tests, no network, no data files
 ├── docs/             problem_definition.md design.md leakage_audit.md
 │                     data_dictionary.md
 ├── reports/          generated: profile, baselines, model results, comparison,
@@ -588,7 +588,7 @@ code, decisions and aggregate numbers.
 ## Testing
 
 ```bash
-pytest                 # 261 tests
+pytest                 # 263 tests
 ruff check .
 ruff format --check .
 ```
@@ -600,11 +600,19 @@ thing a green local run means.
 
 Three of them carry more weight than the rest:
 
-- `test_a_fixed_posting_scores_the_same_number_forever` pins a probability for a
-  fixed payload at a fixed instant. Every other test asserts a property, and
-  properties survive a change in the feature logic. A pinned number does not:
-  change how `age_days` rounds and it moves. `tests/test_api.py` asserts the same
+- `test_the_feature_vector_for_a_fixed_posting_is_unchanged` pins the matrix the
+  estimator is handed for a fixed payload at a fixed instant — its width, its
+  sum, its leading values. Every other test asserts a *property*, and properties
+  survive a change in the feature logic. A pinned vector does not: change how
+  `age_days` rounds, reorder the one-hot levels, or swap an imputer's strategy,
+  and it moves. `test_a_fixed_posting_scores_the_same_number_forever` pins the
+  probability at the end of that chain, and `tests/test_api.py` asserts the same
   constant survives the HTTP round trip.
+
+  Both are pinned against a **logistic** artifact rather than a boosted one, and
+  that is a scar: the original pin used XGBoost, passed on the machine that wrote
+  it, and failed on the first CI run because gradient boosting is not
+  bit-reproducible across platforms. `DEBUGGING.md` has the post-mortem.
 - `test_the_test_block_is_read_only_where_it_should_be` parses `src/` and fails
   if the test split is read anywhere but the two places entitled to.
 - `test_serve_time_row_local_features_match_the_training_frame` builds the same

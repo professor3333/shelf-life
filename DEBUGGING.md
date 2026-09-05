@@ -4,6 +4,45 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-05 — The pinned prediction only held on the machine that wrote it
+
+- **Problem:** three tests asserting a fixed posting scores a fixed probability
+  passed locally and failed on the first CI run. macOS/arm64 returned
+  `0.04348672926425934`; Linux/x86 returned `0.06030833721160889`. Not float
+  noise — a 39% difference, from the same code, the same seed and the same
+  synthetic panel.
+
+- **Root cause:** the pin was taken against `05-xgboost_engineered`, and
+  **gradient boosting is not bit-reproducible across platforms.** Histogram
+  construction sums gradients in a thread-dependent order and the arithmetic is
+  not associative, so two machines can disagree in the last decimal place of a
+  split gain. On a 220-posting panel whose label is drawn independently of every
+  feature, competing splits are near-ties by construction, and a last-decimal
+  difference is enough to choose a different one — after which the two runners
+  have fitted genuinely different trees, not the same tree with rounding error.
+  `random_state` does not help: it seeds sampling, not summation order.
+
+- **Solution:** the pinned artifact moved to `02-logistic`
+  (`tests/conftest.py:FROZEN_RUN`). A convex fit reaches the same optimum from
+  the same data on any machine, so the number means "the features changed"
+  rather than "the runner changed". The stronger assertion was added alongside
+  it: `test_the_feature_vector_for_a_fixed_posting_is_unchanged` pins the
+  preprocessed matrix — width, sum and leading values — which is the feature
+  logic itself and involves no fitted tree at all. Boosting is still frozen,
+  saved, loaded and scored by `test_a_boosted_artifact_also_freezes_and_serves`;
+  it just no longer carries a constant only one laptop can verify.
+
+- **Lesson:** a regression pin is only as portable as the computation behind it.
+  Before pinning a number, ask *what in this chain is allowed to differ between
+  two machines* — thread counts, BLAS kernels, summation order, library builds —
+  and pin at the last point upstream of all of it. Here that point is the
+  feature matrix, and the end-to-end number is worth pinning only through an
+  estimator whose fit is deterministic. This is also the argument for running CI
+  on a different platform than you develop on: the failure was invisible on one
+  machine and is not a rare edge case.
+
+---
+
 ## 2026-09-05 — A serve-time row whose numbers arrived as text
 
 - **Problem:** caught by printing `dtypes` on the first row `build_row`
