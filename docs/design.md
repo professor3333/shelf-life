@@ -171,12 +171,118 @@ different days are not comparable.
 
 ---
 
-## 7. Where it deploys — **OPEN**
+## 7. Where it deploys — **DECIDED 2026-09-05**
 
-Not yet decided. Constraints known: free tiers sleep, and a cold container
-holding a boosted model is slow to answer the first request. Whatever is chosen
-must have its cold-start behaviour measured and stated in the README rather than
-discovered by whoever is shown the link.
+**The API on Google Cloud Run. The Streamlit UI on a Hugging Face Space. The
+frozen artifact ships as a release asset, not from a laptop.**
+
+Three answers, because the question has three parts, and the third was the one
+actually blocking.
+
+### 7a. Where the served model comes from
+
+`/models/` is gitignored — it is derived output, like `data/processed/`, and §6
+says derived output is not committed. The Dockerfile picks the artifact up with
+`COPY . .`, from the working directory. So **the image can only be built on a
+machine that has run `python -m src.models.freeze`**, and an image built by CI
+from a clean clone boots happily and answers `/health` with
+`model_loaded: false`. That is correct behaviour and a useless deployment.
+
+**Decision:** `freeze` writes the artifact, the artifact is attached to a git
+tag as a release asset, and the image build fetches it by tag.
+
+Three reasons. The artifact already carries its own provenance — git SHA, panel
+sha256, `fitted_on`, and the threshold — so a release asset is self-describing
+rather than a loose binary. A tag makes the deployed model *a version* instead
+of a file that happened to be on a laptop that afternoon. And it leaves the
+"derived output is not committed" rule intact.
+
+*Rejected:* committing the `.joblib` — binary, derived, and stale within a week
+of the scraper running. *Rejected:* building the image locally and pushing it —
+it works, and the answer to "what is serving right now?" becomes "trust me".
+
+### 7b. The API — Google Cloud Run
+
+The container is already the deployment unit and nothing has to change to ship
+it: `$PORT` is honoured, the process is non-root, and `/health` reports "port
+open" and "model loaded" as separate facts, which is exactly what a platform
+health check and a human need to distinguish during a bad deploy.
+
+It scales to zero, so an idle service costs nothing, and this service is idle
+almost always. The always-free allowance is orders of magnitude above anything
+a portfolio endpoint will see. And the cold start is **a knob rather than a
+fate** — startup CPU boost, and `--min-instances=1` when it matters — which is
+the property Render does not offer at any price on its free tier.
+
+**Not literally free, and worth saying so.** Artifact Registry storage for a
+~1 GB image sits just above the 0.5 GB free allowance — pennies a month — and
+Cloud Run requires a billing account with a card on file. A "free tier" that
+needs a card is a thing to learn now rather than mid-deploy.
+
+*Rejected — Render free web service:* 512 MB of RAM. FastAPI with pandas,
+scikit-learn and XGBoost holding a booster is plausibly 300–500 MB resident, so
+it is a coin flip whose losing side is an OOM kill mid-request. It also sleeps
+after 15 minutes idle with a cold start in the tens of seconds. Worse on both
+axes that matter here.
+
+*Rejected — Fly.io:* scale-to-zero is good and the ergonomics are pleasant, but
+the free allowance is gone, so it is the *cheap* option rather than the free
+one. It stays the fallback if the card requirement is unacceptable.
+
+*Rejected — function-shaped hosts* (Vercel, Netlify, a zipped Lambda): a 1 GB
+image whose whole job is to hold a fitted pipeline in memory between requests
+is the wrong shape for a platform that bills per invocation and rebuilds state
+each time.
+
+### 7c. The UI — a Hugging Face Space
+
+Free without a card, a native Streamlit runtime, and therefore none of the
+websocket and session-affinity configuration that Streamlit needs to survive on
+a general-purpose container host. It sleeps after roughly two days idle rather
+than fifteen minutes, which is the right behaviour for a link someone opens
+three days after being sent it.
+
+The property worth the most is architectural. `app/` may not import `src/` —
+today that is a rule enforced by a test. Put the UI on a different host and it
+becomes enforced by physics: the model code is not there to import. The UI
+reaches the model the only way it is allowed to, over HTTP, because there is no
+other way left.
+
+Configuration is one variable: `SHELF_LIFE_API` points at the Cloud Run URL, set
+as a Space secret.
+
+*Rejected, but only just — both services on Cloud Run:* one platform, one auth
+model, one deploy shape. The argument is real and it is the thing to revisit if
+running two platforms turns out to be a nuisance rather than a separation.
+
+### 7d. What happens when it sleeps
+
+The open question from the build rules, answered as a plan rather than a hope:
+
+1. **Measure it.** Time the first request after thirty minutes idle and put the
+   number in the README. A cold start nobody has timed is a surprise being saved
+   up for whoever is being shown the link.
+2. **Startup CPU boost on**, because the expensive part is import and unpickle,
+   which is exactly the window it covers.
+3. **Say so in the UI.** The client already sets a 30-second timeout for this
+   reason; the first request gets a "waking the service" message rather than a
+   spinner that looks like a hang.
+4. **No keep-warm cron.** Pinging a scale-to-zero service every ten minutes
+   converts it into an always-on one in order to hide a delay — it spends the
+   free tier to avoid explaining a spinner, and it makes the idle cost real.
+5. **For a live demo, `--min-instances=1` beforehand and back to 0 after.** A
+   deliberate, temporary, costed decision, which is a different thing from
+   leaving it on.
+
+**Verify the terms before deploying.** Free-tier allowances change often and
+every figure above is as understood at the time of writing. None of them should
+be trusted without checking on the day.
+
+**Would change my mind:** a measured cold start much past ~20 seconds, which
+would make the demo worse than the caveat is worth and would argue for a small
+always-on instance instead; a resident-memory measurement that does not fit the
+tier; or the two-platform split costing more attention than the separation
+buys.
 
 ---
 
