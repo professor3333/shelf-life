@@ -16,9 +16,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Experiment tracking. Optional because MLflow pulls in a large dependency tree
+# — a server, a database layer, a web UI — and none of it is needed to run the
+# model ladder or the evaluation. `src/models/experiments.py` imports it lazily
+# and its tests skip when it is absent.
+tracking = [
+    "mlflow>=2.16",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
+    "mlflow>=2.16",
 ]
 
 [build-system]
