@@ -640,10 +640,18 @@ synthetic fixture, and a link a stranger can hit should return a number that
 means something. The deploy happens when the panel clears the depth gate and a
 real artifact exists.
 
+**Where it will go, decided 2026-09-05:** the API on Google Cloud Run, the
+Streamlit UI on a Hugging Face Space, and the frozen model shipped as a release
+asset rather than copied from a laptop — `models/` is derived output and is not
+committed, so an image built from a clean clone has no model in it and says so
+through `/health`. The reasoning, the rejected alternatives and the plan for a
+sleeping container are in [`docs/design.md`](docs/design.md) §7.
+
 The free-tier cost is known in advance: the image is 1.08 GB, and a cold
 container has to start Python, import XGBoost and unpickle a booster before it
 answers — so the first request after a sleep is slow, and the UI's HTTP timeout
-is set at 30 seconds for exactly that reason.
+is set at 30 seconds for exactly that reason. The cold start gets measured and
+written here as a number before the link is given to anyone.
 
 ---
 
