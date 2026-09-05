@@ -1,6 +1,14 @@
-# The image needs the code, the packaging metadata and the model artifact.
-# Everything else is either large, secret, or regenerable — and each of those is
-# a reason not to ship it.
+# The image needs the code and the packaging metadata. Everything else is
+# either large, secret, or regenerable — and each of those is a reason not to
+# ship it.
+
+# The model artifact, above all. It is derived output and is not committed, so
+# copying it would mean an image built on a developer's machine bakes whatever
+# happened to be in models/ that afternoon, and "which model is serving?" is
+# answered with "trust me". The only way a model enters an image is a verified
+# fetch from a release tag — docs/design.md §7a, src/inference/fetch.py.
+# Locally, mount it instead: docker run -v "$PWD/models:/app/models:ro"
+models/
 
 # Data: gigabytes of snapshots and derived frames, none of it needed to serve.
 data/
