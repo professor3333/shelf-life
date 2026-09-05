@@ -120,10 +120,11 @@ def create_app(artifact: Path | str | None = None) -> FastAPI:
         if predictor is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=(
-                    f"no model loaded from {app.state.artifact_path}: "
-                    f"{app.state.detail}. Build one with `python -m src.models.freeze`."
-                ),
+                # The loader's own message already names the artifact and the
+                # command that builds one. Appending a second copy of the
+                # instruction is how a 503 body ends up saying the same sentence
+                # twice to the person who most needs to read it once.
+                detail=f"no model loaded: {app.state.detail}",
             )
         return predictor
 
