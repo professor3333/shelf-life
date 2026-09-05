@@ -17,8 +17,10 @@ their budget differs from the one it was set for; the response always reports
 which threshold was actually applied.
 
 **A probability is not a decision.** The response carries both, and it also
-carries `board_context_supplied`, because a prediction made without board
-context came from a model whose four board features were imputed to constants —
+carries `dataset` — real panel or synthetic fixture, because a rehearsal must
+never be mistaken for a result — and `board_context_supplied`, because a
+prediction made without board context came from a model whose four board
+features were imputed to constants —
 see `src/inference/contract.py`. A caller who never sees that flag cannot tell
 the two regimes apart.
 """
@@ -45,6 +47,7 @@ class Prediction:
     horizon_days: int
     board_context_supplied: bool
     model: str
+    dataset: str
     t: str
 
     def as_dict(self) -> dict:
@@ -99,6 +102,7 @@ class Predictor:
             horizon_days=self.metadata.horizon_days,
             board_context_supplied=board_context_supplied(payload),
             model=self.metadata.run_name,
+            dataset=self.metadata.dataset,
             t=moment.isoformat(),
         )
 

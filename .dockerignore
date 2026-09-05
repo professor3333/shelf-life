@@ -1,0 +1,34 @@
+# The image needs the code, the packaging metadata and the model artifact.
+# Everything else is either large, secret, or regenerable — and each of those is
+# a reason not to ship it.
+
+# Data: gigabytes of snapshots and derived frames, none of it needed to serve.
+data/
+*.db
+*.sqlite*
+
+# Experiment tracking: a local cache of runs, rebuildable from the code.
+mlruns/
+mlartifacts/
+mlflow.db
+
+# Host environment: a macOS virtualenv is actively harmful inside a Linux image.
+.venv/
+venv/
+.env
+
+# History and tooling.
+.git/
+.github/
+.ruff_cache/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Tests do not run in the served image; the CI job runs them before it is built.
+tests/
+
+# Local working notes, and the planning documents that are not part of the repo.
+*.md
+!README.md
