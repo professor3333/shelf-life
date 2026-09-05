@@ -4,6 +4,38 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-05 — A memory reading taken before the process had finished starting
+
+- **Problem:** `docker stats --no-stream` on the freshly started API container
+  reported **139.6 MiB** resident. Repeated with a wait, the same container on
+  the same image reported **370.8 MiB**. Nothing failed; both commands exited 0
+  and printed a plausible number. The low reading was about to be written into
+  `docs/design.md` §7 as evidence that a 512 MB free tier is comfortable.
+
+- **Root cause:** `--no-stream` takes a single sample, and the sample raced the
+  container reaching steady state. The model is loaded in the FastAPI lifespan
+  hook, so at the instant the first `/health` answers, the artifact is loaded
+  but the allocator has not settled and the sample lands mid-startup. The
+  process was not lying and neither was Docker — the number was simply of a
+  moment that does not describe the running service.
+
+- **Solution:** measured at three points instead of one — after start with a
+  wait, after one prediction, after thirty-one — which agree at 371–377 MiB and
+  show no growth under repeated requests. The figures and the method are in
+  `docs/design.md` §7d, and the Render rejection in §7b was rewritten: it had
+  been justified by a *guess* of 300–500 MB, and the measurement (377 MiB, which
+  fits in 512 MB) does not support that reason. The platform choice stands on
+  sleep behaviour and cold-start controls instead.
+
+- **Lesson:** a single sample of a process that is still starting is not a
+  measurement of that process. Sample repeatedly, with the load you care about,
+  and only trust a figure that two readings agree on. And the direction matters:
+  this error was *flattering* — it made a rejected option look viable — which is
+  the kind that survives review, because a number that supports the easier
+  decision does not get a second look.
+
+---
+
 ## 2026-09-05 — The pinned prediction only held on the machine that wrote it
 
 - **Problem:** three tests asserting a fixed posting scores a fixed probability

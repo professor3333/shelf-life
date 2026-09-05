@@ -219,11 +219,16 @@ the property Render does not offer at any price on its free tier.
 Cloud Run requires a billing account with a card on file. A "free tier" that
 needs a card is a thing to learn now rather than mid-deploy.
 
-*Rejected — Render free web service:* 512 MB of RAM. FastAPI with pandas,
-scikit-learn and XGBoost holding a booster is plausibly 300–500 MB resident, so
-it is a coin flip whose losing side is an OOM kill mid-request. It also sleeps
-after 15 minutes idle with a cold start in the tens of seconds. Worse on both
-axes that matter here.
+*Rejected — Render free web service:* **and the stated reason has changed now
+that it is measured.** The first draft of this entry rejected Render on memory,
+guessing 300–500 MB resident and calling 512 MB a coin flip. Measured (§7e), the
+container settles at **377 MiB**, which fits — with about 135 MB of headroom.
+Thin, and thinner still because that figure is the synthetic model on arm64, but
+not the disqualification I claimed before measuring. Render is rejected on the
+other two: it sleeps after 15 minutes idle where a Space sleeps after days, and
+its free tier offers no equivalent of startup CPU boost or `--min-instances`, so
+the cold start is a fate rather than a knob. Memory is now a caution, not a
+verdict.
 
 *Rejected — Fly.io:* scale-to-zero is good and the ergonomics are pleasant, but
 the free allowance is gone, so it is the *cheap* option rather than the free
@@ -255,7 +260,35 @@ as a Space secret.
 model, one deploy shape. The argument is real and it is the thing to revisit if
 running two platforms turns out to be a nuisance rather than a separation.
 
-### 7d. What happens when it sleeps
+### 7d. What it measures, on 2026-09-05
+
+Taken from the image built at this commit, serving the synthetic artifact on
+arm64. Every figure here replaces an estimate, and one of them changed a
+decision above.
+
+| | |
+|---|---|
+| Image | 1.08 GB |
+| Resident memory, model loaded, idle | 370.8 MiB |
+| Resident after 31 predictions | 376.9 MiB — flat, no growth |
+| Container start → `/health` 200 | 2.06 s |
+| Container start → first `/predict` | 2.12 s |
+
+**What these are not.** The 2-second start is a *local* container on a warm
+page cache with no image pull — a lower bound for Cloud Run, not a prediction of
+it. The real cold start includes pulling a 1.08 GB image onto a cold instance,
+and it is the number §7e promises to measure and publish at deploy.
+
+**One measurement was nearly wrong in the honest direction.** A first
+`docker stats --no-stream` taken immediately after startup read 139.6 MiB — the
+sample races the process reaching steady state — and 139.6 MiB is a number that
+would have made Render look comfortable. Three samples with a wait between them
+give 371 MiB. Recorded in `DEBUGGING.md`: a single sample of a process that is
+still starting is not a measurement of that process.
+
+---
+
+### 7e. What happens when it sleeps
 
 The open question from the build rules, answered as a plan rather than a hope:
 

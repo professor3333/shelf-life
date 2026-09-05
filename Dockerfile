@@ -1,8 +1,17 @@
 # The service, containerised. One artifact, two endpoints, no build-time model
-# training — `python -m src.models.freeze` runs *before* this and writes
-# `models/shelf_life.joblib`, which the final COPY picks up.
+# training — `python -m src.models.freeze` runs long before this.
 #
-# The image builds without one. That is deliberate: the container starts,
+# The model does not arrive by COPY. `models/` is derived output, is not
+# committed, and is in `.dockerignore`, so the only way one enters this image is
+# a verified fetch from a release tag:
+#
+#     docker build --build-arg ARTIFACT_TAG=artifact-2026-09-07 -t shelf-life .
+#
+# That is `docs/design.md` §7a: the served model is a version, not a file that
+# happened to be on a laptop. Locally, mount one instead of baking it —
+# `docker run -v "$PWD/models:/app/models:ro"`.
+#
+# Without a tag the image still builds, deliberately: the container starts,
 # `/health` answers 200 with `model_loaded: false`, and `/predict` returns 503
 # with the command that fixes it. A container that refuses to boot because a
 # file is missing turns a one-line diagnosis into a log-reading exercise.
@@ -32,9 +41,29 @@ RUN pip install --no-cache-dir ".[api]" \
     # imports them unless a booster is asked for `device="cuda"`.
     && pip list --format=freeze | grep -i "^nvidia" | cut -d= -f1 | xargs -r pip uninstall -y
 
-# Then everything else the image is allowed to have — `models/` above all.
-# `.dockerignore` decides what "everything else" means.
+# Then everything else the image is allowed to have. `.dockerignore` decides
+# what "everything else" means, and it does not mean `models/`.
 COPY . .
+
+# The model, by tag, or not at all. Empty by default so a plain `docker build`
+# still works and still produces the honest no-artifact container.
+ARG ARTIFACT_REPO=professor3333/shelf-life
+ARG ARTIFACT_TAG=""
+
+# Two checks, not one, and they prove different things. The fetch verifies the
+# bytes against the checksums published with the release. The load then proves
+# the file is a fitted end-to-end pipeline *in the environment that will serve
+# it* — which is the check no checksum can make, and the one that would have
+# caught a booster written by a different xgboost than the image installs.
+# Both run at build time, so a bad artifact fails the build rather than the
+# stranger's first request.
+RUN if [ -n "${ARTIFACT_TAG}" ]; then \
+        python -m src.inference.fetch --repo "${ARTIFACT_REPO}" --tag "${ARTIFACT_TAG}" --into models && \
+        python -c "from src.inference.artifact import load; a = load(); \
+print(f'artifact ok: {a.metadata.run_name}, fitted on {a.metadata.fitted_on}, threshold {a.metadata.threshold}')"; \
+    else \
+        echo "no ARTIFACT_TAG: building the no-artifact image (/health will report model_loaded: false)"; \
+    fi
 
 # Not root. The process needs to read one artifact and answer HTTP; it has no
 # business being able to write to its own image.

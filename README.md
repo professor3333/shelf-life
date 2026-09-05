@@ -530,16 +530,38 @@ screen rather than in a footnote.
 
 ### Docker
 
+`models/` is derived output, is not committed, and is in `.dockerignore`, so the
+image never bakes whatever artifact happened to be on the machine that built it.
+There are exactly two ways a model reaches a container, and both are explicit.
+
+**Locally — mount it:**
+
 ```bash
 python -m src.models.freeze --run 05-xgboost_engineered --synthetic  # or the real run
 docker build -t shelf-life .
-docker run --rm -p 8000:8000 shelf-life
+docker run --rm -p 8000:8000 -v "$PWD/models:/app/models:ro" shelf-life
 ```
 
-The image builds without an artifact. The container then starts, `/health`
-answers 200 with `model_loaded: false`, and `/predict` returns 503 naming the
-command that fixes it — a container that refuses to boot over a missing file
-turns a one-line diagnosis into a log-reading exercise.
+**Deployed — fetch it from a release tag:**
+
+```bash
+python -m src.inference.fetch --checksums models          # SHA256SUMS, beside the artifact
+gh release create artifact-2026-09-07 models/shelf_life.joblib \
+    models/shelf_life.json models/SHA256SUMS
+docker build --build-arg ARTIFACT_TAG=artifact-2026-09-07 -t shelf-life .
+```
+
+The build then verifies twice, and the two checks prove different things. The
+downloaded bytes are checked against the checksums published with the release —
+which catches a truncated download, a stale cache or the wrong tag, and is not a
+signature. Then the artifact is **loaded**, which proves it is a fitted
+end-to-end pipeline in the environment that will serve it. Either failure fails
+the build rather than the first stranger's request.
+
+Without `ARTIFACT_TAG` the image still builds, deliberately. The container
+starts, `/health` answers 200 with `model_loaded: false`, and `/predict` returns
+503 naming the command that fixes it — a container that refuses to boot over a
+missing file turns a one-line diagnosis into a log-reading exercise.
 
 ---
 
@@ -647,11 +669,14 @@ committed, so an image built from a clean clone has no model in it and says so
 through `/health`. The reasoning, the rejected alternatives and the plan for a
 sleeping container are in [`docs/design.md`](docs/design.md) §7.
 
-The free-tier cost is known in advance: the image is 1.08 GB, and a cold
-container has to start Python, import XGBoost and unpickle a booster before it
-answers — so the first request after a sleep is slow, and the UI's HTTP timeout
-is set at 30 seconds for exactly that reason. The cold start gets measured and
-written here as a number before the link is given to anyone.
+The free-tier cost is known in advance, and measured rather than assumed. The
+image is 1.08 GB. The container settles at **377 MiB** resident with the model
+loaded, flat across repeated requests. Locally it answers `/health` **2.06 s**
+after start and serves its first prediction at **2.12 s** — but that is a warm
+page cache with no image pull, so treat it as a floor, not a forecast. The real
+cold start includes pulling a 1.08 GB image onto a cold instance; it gets
+measured and written here as a number before the link is given to anyone, and
+the UI's HTTP timeout is already set at 30 seconds for exactly that reason.
 
 ---
 
