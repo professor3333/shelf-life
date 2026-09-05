@@ -13,6 +13,10 @@ dependencies = [
     "pyarrow>=16.0",
     "scikit-learn>=1.5",
     "xgboost>=2.0",
+    # Pulled in by scikit-learn anyway, but named because `src/inference` imports
+    # it directly to write the model artifact. A dependency you import is a
+    # dependency you declare.
+    "joblib>=1.4",
 ]
 
 [project.optional-dependencies]

@@ -359,3 +359,69 @@ that it is not yet urgent.
 postings over four days may simply be the visible edge of something a longer
 panel will show properly, and K should be chosen against that distribution
 rather than against two cases.
+---
+
+## 12. Board context at serve time — **OPEN, defaulting to imputation**
+
+Four features describe the board rather than the posting: `board_size_at_t`,
+`board_growth`, `n_same_title_on_board`, `n_same_req_on_board`. Each was
+computed inside a single crawl, so each is honestly as-of-`t` and none of them
+is a leak. **But a stranger holding one job posting cannot supply any of them**,
+and Component 13's rule is that a field which cannot appear in the request
+cannot be a feature.
+
+**The decision, dated 2026-09-05:** accept them when supplied and impute them
+when not, and say which happened. `src/inference/contract.py` marks the four as
+board-origin, `POST /predict` accepts them as optional, and every response
+carries `board_context_supplied` so a caller can tell the two regimes apart.
+
+**What this costs, stated rather than hidden.** For a caller who supplies
+nothing, the four arrive as nulls and the training fold's imputers fill them
+with constants. The features are then inert, and the served model is *not quite*
+the model that was validated — its board columns carry no information at all.
+That is a training/serving mismatch of a mild kind: not a wrong value, but a
+constant where a variable was expected.
+
+**The alternative** is to drop the four from the fitted model, so that the
+validated model and the served model are the same object for every caller. It
+costs whatever the four features are worth, and nothing yet says what that is —
+the leave-one-out ablation in `reports/model_results.md` has not run, because
+the panel cannot be split. Two of the four are also the most plausible
+mechanisms in the whole feature set: a posting duplicated across a large board
+is a different animal from a lone requisition.
+
+**Would change my mind:** an ablation showing the four are worth little, in
+which case dropping them buys a cleaner serving story for nearly nothing. Or a
+deployment story that changes the caller — a board owner scoring their own
+requisitions has all four, and for them the imputation branch never runs.
+
+---
+
+## 13. What the frozen artifact is fitted on — **DECIDED 2026-09-05**
+
+**The training block only**, by default (`--fit train` in
+`src/models/freeze.py`).
+
+The alternative, refitting on train + validation before shipping, is the more
+common practice and has the better deployment argument: more data, and more
+*recent* data, which on a panel where the board turns over daily is not a small
+thing.
+
+It was rejected for one property. Fitted on train alone, the object in
+`models/shelf_life.joblib` is the same object the validation number describes
+and the same object the test number describes — so the README can say "this
+model scores X" without a footnote about which of three fits produced which
+figure. Refitting makes the shipped model a fourth thing, measured only by
+inheritance from its siblings.
+
+The flag stays, because the argument the other way is real and the panel is
+still short. What is not negotiable is that whichever is chosen is recorded in
+the artifact's metadata (`fitted_on`) rather than remembered.
+
+**The threshold ships inside the artifact.** It is chosen on validation at the
+alert budget from §5, and a probability without the threshold it is compared
+against is not a decision. Shipping them in separate files is how the two come
+to disagree.
+
+**Would change my mind:** a validation block large enough that discarding it
+from the fit is measurably expensive. On the current panel it is one crawl wave.

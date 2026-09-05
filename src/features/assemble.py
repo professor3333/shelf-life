@@ -260,10 +260,19 @@ def _board_context(panel: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _derived(panel: pd.DataFrame) -> pd.DataFrame:
+def row_local_features(panel: pd.DataFrame) -> pd.DataFrame:
     """Row-local features. `age_days` is measured from the employer's own
     publication instant, never from `first_seen` — which records when this
-    project started looking, not when the posting appeared."""
+    project started looking, not when the posting appeared.
+
+    **Public, and called from the serving path.** Every column here is a
+    function of one row and nothing else, so it can be computed for a single
+    posting at serve time — and `src/inference/contract.py` computes it by
+    calling *this* function rather than by restating the arithmetic. A second
+    implementation of `age_days` that rounded differently would be
+    training/serving skew: the model would be scored on a column that no longer
+    means what it meant when it was fitted, and nothing would raise.
+    """
     out = panel.copy()
     day = pd.Timedelta(days=1)
 
@@ -299,7 +308,7 @@ def assemble(
     panel = compute_labels(panel, runs_complete, horizon_days, basis=basis)
     panel = _attach_archive(panel, load_archive() if archive is None else archive)
     panel = _board_context(panel)
-    panel = _derived(panel)
+    panel = row_local_features(panel)
 
     panel["horizon_days"] = horizon_days
     panel["horizon_basis"] = basis

@@ -53,6 +53,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 SPLIT_NAMES = ("train", "val", "test")
@@ -386,6 +387,75 @@ def _verdict(record: dict[str, object]) -> tuple[bool, str]:
         if record[f"{name}_pos"] == 0:
             return False, f"{name} block has no positives"
     return True, ""
+
+
+def minimum_waves(
+    frame: pd.DataFrame,
+    horizon_days: int | None = None,
+    corroboration_runs: int = CORROBORATION_RUNS,
+) -> dict[str, object]:
+    """How many crawl waves a three-block split needs, and how many exist.
+
+    `feasible_cuts` answers *can I split this today*; this answers *how much
+    longer*, which is the question actually being asked while the panel is too
+    shallow. Both are wanted: a table of ten rejected cuts says nothing about
+    whether the wait is one day or three weeks.
+
+    The arithmetic is the embargo's, and it is unforgiving on a daily panel. Each
+    block needs at least one wave, and each of the two boundaries discards every
+    wave inside the embargo — `ceil(embargo / spacing)` of them — so
+
+        minimum waves = 1 + 2 * (floor(embargo / spacing) + 1)
+
+    The `+ 1` is `assign_split`'s strict inequality and not an off-by-one: a
+    wave landing *exactly* on `train_end + embargo` is discarded, so an embargo
+    of two days on a daily panel costs three waves, not two.
+
+    At H=1 the embargo is one day plus a run's reach, which on the observed
+    schedule is 2d10h against a daily spacing: three waves burnt at each
+    boundary, seven waves for the smallest legal split. The widest run gap in
+    the panel sets that reach, so a single late crawl permanently widens the
+    embargo for every row — the 34.4h gap of 2026-09-01 costs a wave at both
+    boundaries for the life of the panel.
+
+    **A wave is not labelled the moment it is crawled.** A row at `t` needs a
+    complete run at or after `t + H` to be a negative, and absence at two
+    consecutive later runs to be a positive, so the newest waves are still
+    censored and the count below is of *labelled* waves only.
+    """
+    labelled = frame[frame["label_observable"]]
+    waves = crawl_waves(labelled)
+    if horizon_days is None:
+        horizon_days = int(pd.unique(frame["horizon_days"])[0])
+    embargo = embargo_width(frame, horizon_days, corroboration_runs)
+
+    spacing = waves.diff().dropna().median() if len(waves) > 1 else pd.Timedelta(days=1)
+    burnt = int(np.floor(embargo / spacing)) + 1
+    needed = 1 + 2 * burnt
+    return {
+        "present": len(waves),
+        "needed": needed,
+        "shortfall": max(0, needed - len(waves)),
+        "embargo": embargo,
+        "spacing": spacing,
+        "burnt_per_boundary": burnt,
+    }
+
+
+def depth_report(frame: pd.DataFrame) -> str:
+    """`minimum_waves` as a sentence, for a report that has to explain a wait."""
+    depth = minimum_waves(frame)
+    verdict = (
+        "enough to cut three blocks"
+        if depth["shortfall"] == 0
+        else f"{depth['shortfall']} more labelled wave(s) needed"
+    )
+    return (
+        f"{depth['present']} labelled crawl wave(s) against a minimum of "
+        f"{depth['needed']} — {verdict}. The embargo is {depth['embargo']} and waves "
+        f"arrive every {depth['spacing']}, so each of the two block boundaries "
+        f"discards {depth['burnt_per_boundary']} wave(s)."
+    )
 
 
 def feasibility_report(frame: pd.DataFrame) -> str:
