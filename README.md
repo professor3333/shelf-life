@@ -69,6 +69,98 @@ prevent it is to make the wrong call inexpressible rather than merely discourage
 
 ---
 
+## Problem statement
+
+**Informally.** A job board shows a list of things that all look equally
+available, and they are not. Some will be gone this week; some have been sitting
+there for two years and will still be there next spring. A board sorted by
+"new" cannot tell you which is which, and neither can any single scrape — the
+information lives in the *difference* between scrapes.
+
+**Formally.** Let a posting `j` be observed by a complete crawl at time `t`.
+Using only information sealed at or before `t`, estimate
+
+```
+P( posting j is absent from the board throughout (t, t + H]  |  information at t )
+```
+
+| | |
+|---|---|
+| **Task** | Binary classification, scored as a probability |
+| **Unit** | A job-day: one posting as one complete crawl saw it |
+| **Inputs** | 44 audited panel columns → 24 features once the leakage verdict is applied |
+| **Output** | A probability, plus the threshold it is compared against |
+| **Horizon** | `H = 7` days for the decision, chosen against a measured 1.69%/day hazard; `H = 1` retained as a pipeline smoke test |
+| **Base rate** | **1.32%** at `H = 1`, measured on today's labelled rows — the panel the numbers below come from. At `H = 7` a constant hazard implies ≈11%, which is a planning estimate and not yet a measurement |
+| **Constraint** | Every feature must exist at `t`, and be suppliable by a caller holding one posting |
+| **Success** | Beat three baselines — the base rate, `age_days` alone, and a per-board hazard — by a margin that survives fold variance |
+
+**Why it is harder than it looks.** Four difficulties, none of which are about
+model choice:
+
+1. **The label is a measurement, not an observation.** "Disappeared" is only
+   evidence of removal if the crawl saw the whole board that day. For 74% of the
+   collected postings it did not, and the label meant something else entirely.
+2. **The outcome is censored at both ends.** Postings first seen recently have
+   not had time to close; postings already present when collection began had been
+   open for an unknown time.
+3. **Positives are rare and the panel is short.** 75 positives across 5,693
+   labelled rows at `H = 1` means differences of a few points sit inside the
+   noise. A longer horizon buys a healthier base rate and costs another week of
+   censoring at each end — which is the trade `docs/design.md` §2 records.
+4. **Missingness fingerprints the source.** "Salary is missing" is very nearly a
+   synonym for "this row came from arbeitnow" — so the strongest signal available
+   is partly a fact about the collector rather than about the world.
+
+Each of these is unpacked below, and each is the reason for a decision recorded
+with a date in [`docs/design.md`](docs/design.md).
+
+---
+
+## Approach
+
+**Classical ML on tabular data, deliberately.** Gradient-boosted trees remain the
+thing to beat on problems of this shape, and the difficulty here lives in
+labelling, leakage and evaluation rather than in representation. A neural network
+would let all three be skipped and hide the skipping behind a good-looking loss
+curve.
+
+Eight steps, in the order they were done. Each links to its detail below.
+
+| # | Step | The discipline that makes it honest |
+|---|---|---|
+| 1 | **Pin a snapshot** | The scraper runs daily, so "the data" moves. Every experiment reads a dated, hashed copy — never the live database. |
+| 2 | **Define the label once, in code** | Two consecutive absences, never reappearing; unobservable outcomes dropped rather than called negative. Sources whose crawls were truncated carry no label at all. |
+| 3 | **Assemble a job-day panel** | One row per (posting, complete crawl), every feature sealed at `t`. |
+| 4 | **Audit before modelling** | A written verdict for all 44 columns, enforced by a test — a column with no verdict raises rather than being silently used. |
+| 5 | **Split on time, with an embargo** | A strip wide enough that no training label was computed from the evaluation period. |
+| 6 | **Climb a ladder** | Constant → `age_days` → per-board hazard → logistic → tree → forest → XGBoost, comparing *paired* fold differences rather than two averages. |
+| 7 | **Choose an operating point** | A threshold from an alert budget, plus calibration, plus a per-source breakdown. |
+| 8 | **Freeze one object, serve it unchanged** | The artifact is the whole fitted pipeline; the test block is opened once, after freezing. |
+
+**The rung that matters is not the top one.** The ladder exists to find out
+whether complexity buys anything on this problem. If the forest ties the logistic
+regression, that is a finding about the data and it gets written down rather than
+tuned past — which is exactly what the comparison machinery reports today on a
+label known to be pure noise.
+
+**Three rules are enforced by tests rather than by intention**, because a
+discipline that depends on remembering is a discipline that ends:
+
+- the preprocessing pipeline has exactly one supported fit path, and it can only
+  reach the training block;
+- `api/` may not import `src.features`, `src.models` or `src.data`, and `app/`
+  may not import `src/` at all;
+- the test split is readable in exactly two places, and a parser over `src/`
+  fails the build if that changes.
+
+**What is deliberately not attempted:** deep learning, embeddings over the
+description text, scraping more sources to repair the data, retraining and drift
+monitoring, authentication. The mess in this data *is* the problem being solved;
+fixing it upstream would delete the thing worth learning.
+
+---
+
 ## The problem
 
 **Who would use this, and what changes because of it.** Someone who tracks a
@@ -334,6 +426,34 @@ label that is pure noise, is the machinery working.
 **The one real number that exists** is the constant-predictor reference: PR-AUC
 **0.0132** on 5,693 labelled rows, which is the base rate. Every model must beat
 it, and none has been asked to yet.
+
+---
+
+## What happens on the day it clears
+
+The sequence is fixed, and every step already has a command that runs today and
+refuses honestly.
+
+```bash
+python -m src.data.snapshot                    # pin a dated, hashed copy
+python -m src.data.profile                     # regenerate the data profile
+python -m src.models.experiments               # replay the history on the real panel
+python -m src.models.evaluate                  # compare, threshold, calibrate — validation only
+python -m src.models.freeze --run <spec>       # opens the test block, once
+python -m src.inference.fetch --checksums models
+```
+
+Then the three decisions that have been waiting on real numbers rather than on
+thought — whether `source` is a feature, how wide the resurrection window is, and
+what to do about board context a caller cannot supply — get settled in
+`docs/design.md` with the numbers that settled them. Then the artifact is tagged,
+released, and fetched into an image by tag.
+
+**The order is not negotiable.** `freeze` is the only step that reads the test
+block, it happens after the threshold is chosen, and nothing downstream of it may
+change either. A disappointing number there is evidence about the validation
+discipline, not a licence to tune — the tuning would be selection on test, and
+the next number would mean less than the first.
 
 ---
 
@@ -610,7 +730,7 @@ code, decisions and aggregate numbers.
 ## Testing
 
 ```bash
-pytest                 # 263 tests
+pytest                 # 273 tests
 ruff check .
 ruff format --check .
 ```
@@ -654,6 +774,45 @@ reasoning, and what would change my mind — including the four still open.
 
 ---
 
+## Reproducibility
+
+A metric with no dataset version is a number about an unknown quantity of data.
+Four things make a result here re-derivable rather than remembered.
+
+**The data is pinned, not read live.** `python -m src.data.snapshot` writes
+`data/raw/<date>/jobs.db` with a SHA-256 manifest. The scraper adds a wave a day,
+so two numbers computed on different days are otherwise not comparable to each
+other — and every report names the snapshot it read.
+
+**Derived output is disposable and verified so.** Delete `data/processed/` and
+re-run, and the Parquet comes back byte-identical. That is asserted in the test
+suite rather than checked by eye.
+
+**Every run logs what cannot be recovered afterwards.** Params and metrics, plus
+the **git SHA** of the code and the **sha256 of the panel** — the panel is hashed
+rather than named, because `data/processed/` is regenerable and its filename is
+stable across regenerations, so two runs against the same path a week apart are
+runs against different data. `src/models/experiments.py:reproduce` refits a
+logged run from its logged parameters and compares the metric; if that cannot be
+done, the run logged too little, and the failure says which of three reasons
+applies. `tests/test_experiments.py` exercises it.
+
+**Determinism has a known limit, and it is documented rather than hoped for.**
+Gradient boosting is *not* bit-reproducible across platforms: histogram
+construction sums gradients in a thread-dependent order, floating-point addition
+is not associative, and on a small panel that is enough to choose a different
+split and grow a different tree. `random_state` does not help — it seeds
+sampling, not summation order. So the pinned-prediction tests are pinned against
+a **convex** model, and the stronger assertion pins the *feature matrix* instead
+of the score. `DEBUGGING.md` carries the post-mortem.
+
+What follows from that: a number in this README is reproducible on another
+machine when it comes from the logistic rung or from the feature matrix, and
+reproducible only on the same platform when it comes from a boosted one. Which
+kind it is, is stated wherever it matters.
+
+---
+
 ## Deployment
 
 **Not yet deployed**, by choice. The service, the container and the UI are
@@ -677,6 +836,67 @@ page cache with no image pull, so treat it as a floor, not a forecast. The real
 cold start includes pulling a 1.08 GB image onto a cold instance; it gets
 measured and written here as a number before the link is given to anyone, and
 the UI's HTTP timeout is already set at 30 seconds for exactly that reason.
+
+---
+
+## Model card
+
+The short, structured version of everything above, in the form that survives
+being pasted into someone else's document.
+
+**Model.** Discrete-time hazard classifier over job-day rows: a scikit-learn
+`Pipeline` carrying derivation, column selection, imputation, encoding and a
+tree-based estimator, with the decision threshold and full provenance stored in
+the same artifact. **No estimator has been selected on the real panel yet** — the
+ladder is built and the selection rule is written, and the run that ships will be
+named here with its number when the panel clears.
+
+**Intended use.** Ordering a watched job board so that a person with a fixed
+daily attention budget looks at the postings most likely to disappear first. The
+output is a ranking aid whose unit of value is a short list.
+
+**Out-of-scope use**, in the strong sense that the label cannot support it:
+
+- Inferring that a role was **filled**, or that anyone was hired. The label is
+  disappearance from a board.
+- Judging a **company's** hiring health from its postings' predicted lifetimes.
+  Board housekeeping and ATS migrations are indistinguishable from hiring here.
+- Any decision **about a person**. The subject of a prediction is a posting.
+- Scoring boards outside the training sources without re-measuring first — see
+  the per-source breakdown, which is mandatory reporting for this reason.
+
+**Training data.** A panel collected by my own scraper from 2026-08-29 onward:
+one row per (posting, complete crawl). Only sources whose crawls observed the
+*whole* board carry a label — six Greenhouse boards and `python_org` — so
+arbeitnow, 74% of the collected postings, is excluded entirely. Postings are
+employer-published listings; no personal data is collected, and nothing under
+`data/` is committed.
+
+**Evaluation data.** The most recent block of the same panel, separated from
+training by an embargo wide enough that no training label was computed from it.
+Opened once. Rolling-origin folds inside the training window for everything else.
+
+**Metrics.** PR-AUC as the headline; Brier score and expected calibration error
+alongside it; precision and recall at an alert budget of 20 postings per day;
+every one of them also broken down per source and by whether the posting was seen
+during training.
+
+**Factors that change performance.** Source (each board has its own hazard);
+posting age at the prediction instant; whether the caller supplied board-level
+context, which a stranger holding one advert cannot.
+
+**Caveats.** Read the [known failure modes](#known-failure-modes-and-caveats)
+below in full — they are part of this card, not an appendix to it. The
+load-bearing ones: closed ≠ filled; this is a Greenhouse model; positives are
+rare and the panel is short; and a label is never final, because "never
+reappeared" reads the whole remaining panel.
+
+**Ethical note.** The honest failure mode of a tool like this is that it gets
+quoted as a hiring signal, because "83% likely to close" reads like knowledge
+about a job market and is in fact a statement about a row disappearing from a
+list. Every response the service returns carries the threshold, the horizon and
+whether the model was fitted on real data, and the UI carries the caveat on
+screen rather than in a footnote — that is the mitigation, and it is deliberate.
 
 ---
 
