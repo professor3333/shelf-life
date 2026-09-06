@@ -519,7 +519,13 @@ python -m src.models.experiments               # replay the history on the real 
 python -m src.models.evaluate                  # compare, threshold, calibrate — validation only
 python -m src.models.freeze --run <spec>       # opens the test block, once
 python -m src.inference.fetch --checksums models
+gh release create artifact-<date> models/*     # the model becomes a version
+git push origin artifact-<date>                # pushing the tag is the deploy
 ```
+
+The last two lines are the whole of the deployment, because the path around them
+already exists: [`docs/deploy.md`](docs/deploy.md) has the one-time cloud setup,
+the rollback and the teardown.
 
 Then the three decisions that have been waiting on real numbers rather than on
 thought — whether `source` is a feature, how wide the resurrection window is, and
@@ -587,17 +593,19 @@ shelf-life/
 │   ├── features/     assemble.py derive.py preprocessing.py leaky.py
 │   ├── models/       metrics.py baselines.py train_baseline.py train.py
 │   │                 evaluate.py experiments.py freeze.py provenance.py
-│   └── inference/    contract.py artifact.py predict.py
+│   └── inference/    contract.py artifact.py predict.py fetch.py
 ├── api/              main.py schemas.py
 ├── app/              streamlit_app.py client.py
-├── tests/            263 tests, no network, no data files
+├── scripts/          smoke.sh cold_start.sh
+├── deploy/space/     what a Hugging Face Space needs and this repo does not
+├── tests/            282 tests, no network, no data files
 ├── docs/             problem_definition.md design.md leakage_audit.md
-│                     data_dictionary.md
+│                     data_dictionary.md deploy.md
 ├── reports/          generated: profile, baselines, model results, comparison,
 │                     experiment log, test results, feature hypotheses
 ├── data/             not committed — snapshots and derived frames
 ├── models/           not committed — the frozen artifact
-├── Dockerfile
+├── Dockerfile        .github/workflows/  ci.yml deploy.yml
 └── pyproject.toml
 ```
 
@@ -906,6 +914,38 @@ committed, so an image built from a clean clone has no model in it and says so
 through `/health`. The reasoning, the rejected alternatives and the plan for a
 sleeping container are in [`docs/design.md`](docs/design.md) §7.
 
+**The path itself is built and waiting on the artifact**, so the day the panel
+clears there is nothing left to invent:
+
+```
+gh release create artifact-<date> …    the model becomes a version
+        │
+        ▼
+.github/workflows/deploy.yml           pushing that tag is the deploy
+        │
+        ▼
+scripts/smoke.sh                       is a model actually serving?
+        │
+        ▼
+scripts/cold_start.sh                  the number this section still owes you
+```
+
+Pushing an `artifact-*` tag builds the image with `--build-arg ARTIFACT_TAG`,
+which fetches the release's assets and verifies them against the `SHA256SUMS`
+published beside them **during the build** — so a bad artifact fails the build
+rather than a stranger's first request. Authentication to Google is keyless
+(Workload Identity Federation, restricted to this repository); there is no
+service-account key in a repository secret.
+
+**The smoke test refuses a synthetic model.** `gcloud run deploy` succeeding
+proves a container started, not that it has a model: the image boots happily
+with none and reports `model_loaded: false` on purpose. So the deploy is only
+green if `/health` reports a loaded model, `/predict` returns a probability
+*with* the threshold it was compared against, a malformed payload still gets a
+422, and the loaded model was **not** fitted on the synthetic fixture. That last
+check is why the placeholder currently in `models/` cannot reach a public URL by
+accident. Setup, release ritual, rollback and teardown: [`docs/deploy.md`](docs/deploy.md).
+
 The free-tier cost is known in advance, and measured rather than assumed. The
 image is 1.08 GB. The container settles at **377 MiB** resident with the model
 loaded, flat across repeated requests. Locally it answers `/health` **2.06 s**
@@ -914,6 +954,14 @@ page cache with no image pull, so treat it as a floor, not a forecast. The real
 cold start includes pulling a 1.08 GB image onto a cold instance; it gets
 measured and written here as a number before the link is given to anyone, and
 the UI's HTTP timeout is already set at 30 seconds for exactly that reason.
+
+That measurement is deliberately **not** taken by the deploy workflow. Deploying
+a revision starts an instance to check that it serves, so the first request
+afterwards finds a warm one and would report a comfortable number that is not a
+cold start. `scripts/cold_start.sh` waits out the idle window first and prints
+the cold and warm figures side by side, because the difference between them is
+the cost, and the absolute figure alone hides how much of it is just scoring a
+row.
 
 ---
 

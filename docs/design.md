@@ -319,6 +319,49 @@ buys.
 
 ---
 
+### 7f. The deploy path, and the gate on it — **DECIDED 2026-09-06**
+
+The decisions above were made before there was anything to run them with. The
+path is now built — `.github/workflows/deploy.yml`, `scripts/smoke.sh`,
+`scripts/cold_start.sh`, `deploy/space/`, and the runbook in `docs/deploy.md` —
+and building it forced one decision the earlier entries did not make.
+
+**A deploy is not green because it deployed.** The image boots with no artifact
+on purpose (§7a), reports `model_loaded: false`, and answers 503. That is a
+successful `gcloud run deploy` and a useless service, so the workflow's last step
+is a smoke test against the live URL and the deploy fails if it fails.
+
+**The gate: the smoke test refuses a model whose `dataset` is `synthetic`.**
+Every component here is exercised on a synthetic panel whose label is drawn
+independently of every feature — the right thing to build against, and a
+placeholder whose predictions are noise. On a laptop that is obvious, because
+whoever is running it knows. Behind a public URL it is invisible: the response
+carries `dataset` for exactly this reason, but nobody reads a field to find out
+whether the number they were given means anything. `ALLOW_SYNTHETIC=1` overrides
+it for a deliberate rehearsal, which is a different act from forgetting.
+
+Chosen over the alternative of simply not deploying until the panel clears: that
+is what is happening anyway, but "we will remember" is not a mechanism, and the
+mechanism costs four lines.
+
+**Authentication is keyless** — Workload Identity Federation, with an attribute
+condition restricting the provider to this repository. Rejected: a
+service-account JSON key in a repository secret, which is a permanent credential
+in a place that gets copied, and which outlives the laptop that created it.
+
+**The cold start is not measured by the deploy.** Deploying a revision starts an
+instance to verify it serves, so the first request after a deploy finds a warm
+one — the same class of mistake as §7d's 139.6 MiB reading, and caught this time
+before it was published rather than after. `scripts/cold_start.sh` waits out the
+idle window and prints cold beside warm.
+
+**Would change my mind:** if the artifact-tag trigger turns out to conflate two
+things that should stay separate — "a new model" and "a new deploy of the same
+model" — the manual `workflow_dispatch` path becomes the primary one and the tag
+trigger goes.
+
+---
+
 ## 8. The split — **DECIDED 2026-09-04**
 
 > Accepted 2026-09-04: keep the job-day unit, soften §2 of the problem

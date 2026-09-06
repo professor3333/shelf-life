@@ -54,6 +54,12 @@ dev = [
     # been opened in a browser once.
     "streamlit>=1.36",
     "requests>=2.32",
+    # `tests/test_deploy.py` parses the deploy workflow and the Space's front
+    # matter. MLflow and Streamlit both drag PyYAML in anyway; it is named here
+    # because a test imports it, and a dependency you import is a dependency you
+    # declare — the alternative is a suite that breaks when an unrelated package
+    # drops a transitive dependency.
+    "pyyaml>=6.0",
 ]
 
 [build-system]
