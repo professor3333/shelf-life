@@ -979,9 +979,12 @@ symptom go away.
 **And it is measured twice.** A *baseline* against the no-artifact image can be
 taken before the panel clears, because starting the process and importing
 scikit-learn and XGBoost costs the same whether or not a model loads. That
-baseline can fail — it can only get worse with an artifact added — but it cannot
-pass, because it never unpickles a pipeline and the unpickle on 0.1 of a CPU is
-the part the criterion exists for. The *definitive* measurement comes from an
+baseline can **fail** — conclusively, since the definitive measurement can only
+be slower — but it cannot **pass**, and a baseline within the criterion implies
+nothing about the one that counts: it never unpickles a pipeline, and that cost
+on 0.1 of a CPU is exactly what the criterion exists to bound. A baseline is
+worth taking because it can end the question early, not because it can settle
+it. The *definitive* measurement comes from an
 image built with a real release, and **the deployment architecture is provisional
 until that one is within the criterion.** The script asks `/health` which kind of
 deployment it is talking to rather than trusting whoever ran it to remember.

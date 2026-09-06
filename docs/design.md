@@ -483,8 +483,20 @@ exactly the part the baseline is missing** — and that part is the reason this
 criterion exists at all.
 
 **The architecture is not accepted until the definitive measurement is within the
-criterion.** Until then it is provisional, and a baseline that passes is evidence
-that the definitive one might, and nothing more. The script says which kind of
+criterion.** Until then it is provisional.
+
+**And a passing baseline is not evidence that it will pass** — an earlier draft of
+this entry said it was "evidence that the definitive one might", which is the
+loose phrasing the whole distinction exists to prevent. The inference runs one
+way only, because the baseline is a lower bound:
+
+| Baseline result | What follows about the definitive measurement |
+|---|---|
+| **over** the criterion | it fails too, **conclusively** — the definitive can only be slower, so stop here and reassess without waiting for a model |
+| **within** the criterion | **nothing.** The omitted work — opening joblib, unpickling a pipeline and a booster on 0.1 of a CPU — is not bounded by anything this run measured |
+
+The asymmetry is the point. A baseline is worth taking because it can end the
+question early, not because it can reassure anyone. The script says which kind of
 run it just did rather than taking the caller's word for it — it asks `/health`
 whether a model is loaded — because a caller who has to remember which sort of
 measurement they are looking at will eventually file a lower bound as a result.
