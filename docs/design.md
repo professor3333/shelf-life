@@ -482,6 +482,38 @@ touches the model, so **whatever the unpickle costs on a tenth of a CPU is
 exactly the part the baseline is missing** — and that part is the reason this
 criterion exists at all.
 
+**The baseline, measured 2026-09-06.** Taken against
+`https://shelf-life-5hin.onrender.com` — the no-artifact image, `MODEL_TAG`
+empty, `/health` reporting `model_loaded: false` — after 16 minutes of enforced
+idle with nothing else touching the service:
+
+| | |
+|---|---|
+| Cold `/health`, first request after 16 idle minutes | **32.65 s** (HTTP 200) |
+| The criterion | 90 s |
+| Left over for the entire load path | **57.35 s** |
+| Verdict the script recorded | `BASELINE` — not `ACCEPTED` |
+
+`/predict` was not timed. With no model it answers 503 without reaching the load
+path, and that omission is precisely what makes this a lower bound.
+
+**Thirty-six percent of the budget is gone before a single byte of model is
+read.** That is the finding, and it is not a comfortable one. The definitive
+measurement has to fit opening joblib, unpickling a `ColumnTransformer` and a
+booster, and scoring one row into the remaining 57 seconds — on the same tenth of
+a CPU that just spent 32 on a platform wake and the imports.
+
+**A tempting cross-check, and why it is weaker than it looks.** The same
+no-artifact image answered in **2.39 s** on this laptop, which invites a ~14×
+"0.1 CPU factor" and an extrapolated prediction for tomorrow. It does not support
+one. The local run restarted an already-created container against a warm page
+cache on a full core of arm64; the Render figure includes platform scheduling and
+starting a container from cold on amd64. The two numbers do not measure the same
+events, so their ratio is an order-of-magnitude indication rather than a
+calibration, and nothing should be forecast from it that tomorrow's measurement
+would then be read as confirming. It is recorded because it was taken, not
+because it is evidence.
+
 **The architecture is not accepted until the definitive measurement is within the
 criterion.** Until then it is provisional.
 
