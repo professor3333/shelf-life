@@ -169,7 +169,7 @@ P( posting j is absent from the board throughout (t, t + H]  |  information at t
 | **Inputs** | 44 audited panel columns → 24 features once the leakage verdict is applied |
 | **Output** | A probability, plus the threshold it is compared against |
 | **Horizon** | `H = 7` days for the decision, chosen against a measured 1.69%/day hazard; `H = 1` retained as a pipeline smoke test |
-| **Base rate** | **1.32%** at `H = 1`, measured on today's labelled rows — the panel the numbers below come from. At `H = 7` a constant hazard implies ≈11%, which is a planning estimate and not yet a measurement |
+| **Base rate** | **1.40%** at `H = 1`, measured on today's labelled rows — the panel the numbers below come from. At `H = 7` a constant hazard implies ≈11%, which is a planning estimate and not yet a measurement |
 | **Constraint** | Every feature must exist at `t`, and be suppliable by a caller holding one posting |
 | **Success** | Beat three baselines — the base rate, `age_days` alone, and a per-board hazard — by a margin that survives fold variance |
 
@@ -177,12 +177,12 @@ P( posting j is absent from the board throughout (t, t + H]  |  information at t
 model choice:
 
 1. **The label is a measurement, not an observation.** "Disappeared" is only
-   evidence of removal if the crawl saw the whole board that day. For 74% of the
+   evidence of removal if the crawl saw the whole board that day. For 78% of the
    collected postings it did not, and the label meant something else entirely.
 2. **The outcome is censored at both ends.** Postings first seen recently have
    not had time to close; postings already present when collection began had been
    open for an unknown time.
-3. **Positives are rare and the panel is short.** 75 positives across 5,693
+3. **Positives are rare and the panel is short.** 96 positives across 6,874
    labelled rows at `H = 1` means differences of a few points sit inside the
    noise. A longer horizon buys a healthier base rate and costs another week of
    censoring at each end — which is the trade `docs/design.md` §2 records.
@@ -272,7 +272,7 @@ removal.
 **Rows whose outcome is not yet observable are dropped, not labelled zero.** A
 posting first seen yesterday has not had time to close; calling that a negative
 teaches the model that recent means open, which is a labelling bug that produces
-a beautiful score. 1,185 of 6,878 job-days are dropped for this reason.
+a beautiful score. 1,166 of 8,040 job-days are dropped for this reason.
 
 ### The prediction point
 
@@ -308,36 +308,36 @@ copied here as an immutable dated snapshot before anything reads it. The scraper
 keeps running, so "the data" is a moving target; numbers computed on different
 days are not comparable unless the snapshot is pinned.
 
-**Snapshot 2026-09-05** — 5,297 postings, 20,447 observations, 95 crawl runs,
-window 2026-08-29 → 2026-09-05.
+**Snapshot 2026-09-06** — 5,712 postings, 22,703 observations, 103 crawl runs,
+window 2026-08-29 → 2026-09-06.
 
 The job-day panel built from it, at `H = 1`:
 
 | | |
 |---|---|
-| job-days | 6,878 |
-| labelled (outcome observable) | 5,693 |
-| dropped (right-censored) | 1,185 |
-| positives | 75 (**1.32%**) |
-| distinct postings | 1,260 |
-| complete crawl waves | 6 (5 of them labelled) |
+| job-days | 8,040 |
+| labelled (outcome observable) | 6,874 |
+| dropped (right-censored) | 1,166 |
+| positives | 96 (**1.40%**) |
+| distinct postings | 1,262 |
+| complete crawl waves | 7 (6 of them labelled) |
 
 Per source, on the labelled rows:
 
 | source | rows | postings | positives | rate |
 |---|---|---|---|---|
-| greenhouse:anthropic | 2,884 | 629 | 39 | 1.35% |
-| greenhouse:gitlab | 1,120 | 249 | 18 | 1.61% |
-| greenhouse:figma | 802 | 167 | 10 | 1.25% |
-| greenhouse:duolingo | 431 | 92 | 2 | 0.46% |
-| greenhouse:discord | 249 | 54 | 5 | 2.01% |
-| python_org | 127 | 33 | 1 | 0.79% |
-| greenhouse:airtable | 80 | 16 | 0 | 0.00% |
+| greenhouse:anthropic | 3,488 | 645 | 50 | 1.43% |
+| greenhouse:gitlab | 1,353 | 251 | 24 | 1.77% |
+| greenhouse:figma | 959 | 167 | 10 | 1.04% |
+| greenhouse:duolingo | 523 | 94 | 5 | 0.96% |
+| greenhouse:discord | 298 | 54 | 6 | 2.01% |
+| python_org | 157 | 33 | 1 | 0.64% |
+| greenhouse:airtable | 96 | 16 | 0 | 0.00% |
 
 ### What is broken in it, and what was done
 
 **The largest source is excluded, and that is the most important fact here.**
-arbeitnow is 3,531 of the 5,297 postings — and every one of its crawls in the
+arbeitnow is 4,450 of the 5,712 postings — and every one of its crawls in the
 current rules epoch stopped at its page cap without observing the whole board.
 A posting's absence from a partial crawl is not evidence of removal; it may
 simply have fallen past page 8. Treating those absences as closures would have
@@ -349,7 +349,7 @@ trade.
 
 **Missingness is a fingerprint of the source, not noise.** `remote` is never
 populated on Greenhouse and always populated on arbeitnow. `first_published`,
-`departments` and `content_chars` are null on exactly the 127 python_org rows.
+`departments` and `content_chars` are null on exactly the 157 python_org rows.
 So an "is this missing?" indicator on any of them reconstructs board identity
 for free — which is a decision the project has *not* yet made (`docs/design.md`
 §4), so no such indicator exists. Each column's fill and the reason for it are
@@ -442,11 +442,11 @@ test split is read anywhere but there and in the property that defines it.
 
 **PR-AUC, with precision and recall at a chosen threshold.**
 
-*Not accuracy.* At a base rate of 1.32%, predicting "stays open" for every
-posting scores **98.7%** and has told you nothing.
+*Not accuracy.* At a base rate of 1.40%, predicting "stays open" for every
+posting scores **98.6%** and has told you nothing.
 
 *Not ROC-AUC.* With rare positives it flatters. The false-positive rate divides
-by the true-negative count — 5,618 of them against 75 positives — so a model can
+by the true-negative count — 6,778 of them against 96 positives — so a model can
 raise a great many false alarms without visibly moving the x-axis. Precision
 divides those same false alarms by the number of rows *flagged*, where they
 cannot hide. At this base rate the ROC curve describes a decision nobody makes.
@@ -473,7 +473,7 @@ budget — a list of 500 alerts nobody reads has perfect recall and zero value.
 
 ## Why there are no real numbers yet
 
-An honest three-way split needs seven labelled crawl waves. The panel has five.
+An honest three-way split needs seven labelled crawl waves. The panel has six.
 
 ```
 minimum waves = 1 + 2 × (floor(embargo ÷ spacing) + 1)
@@ -502,8 +502,15 @@ by 0.06 PR-AUC across seven rolling-origin folds and still returns the verdict
 label that is pure noise, is the machinery working.
 
 **The one real number that exists** is the constant-predictor reference: PR-AUC
-**0.0132** on 5,693 labelled rows, which is the base rate. Every model must beat
+**0.0140** on 6,874 labelled rows, which is the base rate. Every model must beat
 it, and none has been asked to yet.
+
+**What moved on 2026-09-06.** The sixth labelled wave arrived and the refusal
+changed shape with it: `freeze` used to report an empty *validation* block, and
+now reports an empty *test* block. Train and validation are both populated on
+the best candidate cut — 1,104 training rows with 19 positives, 1,159 validation
+rows with 22 — and what is still missing is a test block on the far side of the
+second embargo. One labelled wave short, and waves arrive daily.
 
 ---
 
@@ -1034,7 +1041,7 @@ output is a ranking aid whose unit of value is a short list.
 **Training data.** A panel collected by my own scraper from 2026-08-29 onward:
 one row per (posting, complete crawl). Only sources whose crawls observed the
 *whole* board carry a label — six Greenhouse boards and `python_org` — so
-arbeitnow, 74% of the collected postings, is excluded entirely. Postings are
+arbeitnow, 78% of the collected postings, is excluded entirely. Postings are
 employer-published listings; no personal data is collected, and nothing under
 `data/` is committed.
 
@@ -1071,11 +1078,11 @@ screen rather than in a footnote — that is the mitigation, and it is deliberat
 1. **"Closed" is not "filled."** The label is disappearance from the board. A
    posting can be pulled, expire, be reposted, or be moved to another system.
    Every claim this project makes is about disappearance.
-2. **It is a Greenhouse model.** arbeitnow — 74% of the collected postings — is
+2. **It is a Greenhouse model.** arbeitnow — 78% of the collected postings — is
    excluded because its crawls never observed a whole board. Whatever is learned
    here is learned from six Greenhouse boards and python_org, and the per-source
    breakdown is mandatory reporting for exactly that reason.
-3. **The panel is short and the positives are few.** 75 positives across 5,693
+3. **The panel is short and the positives are few.** 96 positives across 6,874
    labelled rows. Differences of a few points between models will be inside the
    noise, which is why fold variance is reported and paired differences are used
    rather than differences of averages.
