@@ -39,9 +39,11 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.client import (  # noqa: E402
+    API_URL_ENV,
     CAVEAT,
     Api,
     ApiError,
+    api_url_from,
     build_payload,
     verdict,
     warnings_for,
@@ -60,7 +62,21 @@ def _iso(value: dt.date | None) -> str | None:
     return dt.datetime.combine(value, dt.time.min, dt.UTC).isoformat() if value else None
 
 
-api = Api(st.session_state.get("api_url", ""))
+def _secret_api_url() -> str | None:
+    """`SHELF_LIFE_API` from Streamlit's secrets, or nothing.
+
+    Wrapped because reading `st.secrets` is an error, not an empty mapping, when
+    no secrets are configured at all — which is the normal case for
+    `streamlit run` on a laptop. A missing secret must leave the other rungs of
+    `api_url_from` intact rather than replacing the form with a traceback.
+    """
+    try:
+        return st.secrets.get(API_URL_ENV) or None
+    except Exception:  # noqa: BLE001 - any secrets failure means "no secret"
+        return None
+
+
+api = Api(api_url_from(st.session_state.get("api_url", ""), _secret_api_url()))
 
 st.title("shelf-life")
 st.caption(

@@ -49,6 +49,25 @@ class ApiError(RuntimeError):
     """
 
 
+def api_url_from(explicit: str = "", secret: str | None = None) -> str:
+    """Where the API lives, in precedence order, as an ordinary testable function.
+
+    `explicit` (a session override) beats `secret` beats the environment beats
+    localhost. The middle rung exists because of how the deployed UI is actually
+    configured: Streamlit Community Cloud takes the URL as a *secret*, and the
+    fact that root-level secrets are also exported to `os.environ` is a
+    documented convenience rather than a guarantee — it says nothing about
+    secrets nested under a section, and it is not the interface Streamlit tells
+    you to read. Depending on it made the deployed UI fall back to localhost and
+    say so on screen, which was the correct behaviour of a wrong assumption.
+
+    Reading `st.secrets` explicitly is the supported path; the environment stays
+    as a rung so `SHELF_LIFE_API=... streamlit run` keeps working locally and so
+    nothing here has to import Streamlit.
+    """
+    return explicit or secret or os.environ.get(API_URL_ENV) or DEFAULT_API_URL
+
+
 @dataclass(frozen=True)
 class Api:
     """A thin client. No retries, no caching, no cleverness."""

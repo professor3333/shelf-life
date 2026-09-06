@@ -23,7 +23,15 @@ from fastapi.testclient import TestClient
 from test_inference import EXPECTED_PROBABILITY, FIXED_POSTING, FIXED_T
 
 from api.main import create_app
-from app.client import Api, ApiError, _detail, build_payload, verdict, warnings_for
+from app.client import (
+    Api,
+    ApiError,
+    _detail,
+    api_url_from,
+    build_payload,
+    verdict,
+    warnings_for,
+)
 
 
 class _FakeResponse:
@@ -217,3 +225,42 @@ def test_submitting_the_form_shows_a_probability_and_the_caveat(rendered):
     assert not result.exception
     assert result.metric[0].label == "Probability"
     assert any("not the same as filled" in info.value for info in result.info)
+
+
+# --- where the API is, which is what broke the first deployed UI -------------
+
+
+def test_the_url_falls_back_to_localhost_when_nothing_says_otherwise(monkeypatch):
+    monkeypatch.delenv("SHELF_LIFE_API", raising=False)
+    assert api_url_from() == "http://localhost:8000"
+
+
+def test_a_secret_is_used_when_the_environment_is_empty(monkeypatch):
+    """The deployed case. Community Cloud configures the URL as a secret."""
+    monkeypatch.delenv("SHELF_LIFE_API", raising=False)
+    assert api_url_from("", "https://api.example") == "https://api.example"
+
+
+def test_the_environment_still_works_for_a_local_run(monkeypatch):
+    monkeypatch.setenv("SHELF_LIFE_API", "http://localhost:9000")
+    assert api_url_from() == "http://localhost:9000"
+
+
+def test_a_secret_outranks_the_environment(monkeypatch):
+    """Both present means a deployed app whose host also exports the variable.
+
+    The secret is the one the operator set on purpose, so it wins.
+    """
+    monkeypatch.setenv("SHELF_LIFE_API", "http://localhost:9000")
+    assert api_url_from("", "https://api.example") == "https://api.example"
+
+
+def test_an_explicit_url_outranks_everything(monkeypatch):
+    monkeypatch.setenv("SHELF_LIFE_API", "http://localhost:9000")
+    assert api_url_from("https://override", "https://api.example") == "https://override"
+
+
+def test_an_empty_secret_does_not_shadow_the_environment(monkeypatch):
+    """A blank secret box is 'unset', not 'use the empty string'."""
+    monkeypatch.setenv("SHELF_LIFE_API", "http://localhost:9000")
+    assert api_url_from("", "") == "http://localhost:9000"
