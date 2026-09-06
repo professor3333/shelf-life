@@ -1,0 +1,176 @@
+name: Deploy
+
+# One tag, one model, one deployment.
+#
+#     python -m src.models.freeze  ──>  models/shelf_life.joblib
+#     gh release create artifact-YYYY-MM-DD ...   ──>  this workflow  ──>  Cloud Run
+#
+# The trigger is the artifact tag itself, which is `docs/design.md` §7a made
+# executable: the served model is a *version*, not a file that happened to be on
+# a laptop that afternoon. The image is built with `--build-arg ARTIFACT_TAG`,
+# so the model inside it is fetched from that release and checksum-verified
+# during the build — a bad artifact fails the build rather than the stranger's
+# first request.
+#
+# Nothing here can run until the one-time Google Cloud setup in `docs/deploy.md`
+# has been done. The preflight step below says so in one line rather than
+# letting `gcloud` fail four steps later with an authentication error.
+
+on:
+  push:
+    tags: ["artifact-*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Artifact release tag to deploy (e.g. artifact-2026-09-08)"
+        required: true
+      min_instances:
+        description: "Keep an instance warm? 0 = scale to zero (the default)"
+        required: false
+        default: "0"
+
+# Least privilege, and the reason `id-token` is here at all: authentication to
+# Google is keyless (Workload Identity Federation). GitHub mints a short-lived
+# OIDC token for this run and Google trades it for a short-lived access token.
+# The rejected alternative is a service-account JSON key in a repository secret,
+# which is a permanent credential sitting in a place that gets copied.
+permissions:
+  contents: read
+  id-token: write
+
+# One deploy at a time. Two tags pushed a minute apart must not race to decide
+# which model is serving.
+concurrency:
+  group: deploy-cloud-run
+  cancel-in-progress: false
+
+env:
+  ARTIFACT_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fail here, loudly, or not at all. Every value below is configuration
+      # rather than a secret — a project id is not a credential — so they are
+      # repository *variables*, which are readable in the log and therefore
+      # debuggable.
+      - name: Preflight — is this repository configured to deploy?
+        run: |
+          missing=""
+          for name in GCP_PROJECT_ID GCP_REGION GCP_ARTIFACT_REPO GCP_SERVICE \
+                      GCP_WORKLOAD_IDENTITY_PROVIDER GCP_SERVICE_ACCOUNT; do
+            eval "value=\${$name}"
+            [ -n "$value" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Not configured to deploy. Missing repository variables:$missing"
+            echo "One-time setup, with the exact commands, is in docs/deploy.md §1."
+            exit 1
+          fi
+          echo "deploying artifact tag: ${ARTIFACT_TAG}"
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+          GCP_ARTIFACT_REPO: ${{ vars.GCP_ARTIFACT_REPO }}
+          GCP_SERVICE: ${{ vars.GCP_SERVICE }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      # The release must exist before the image is built, because the build
+      # fetches from it. Checking first turns "step 7 failed with HTTP 404" into
+      # a sentence naming the missing tag.
+      - name: Preflight — does the release carry an artifact?
+        run: |
+          base="https://github.com/${{ github.repository }}/releases/download/${ARTIFACT_TAG}"
+          for asset in SHA256SUMS shelf_life.joblib shelf_life.json; do
+            code=$(curl -sSL -o /dev/null -w '%{http_code}' "${base}/${asset}")
+            if [ "$code" != "200" ]; then
+              echo "::error::release ${ARTIFACT_TAG} has no ${asset} (HTTP ${code})."
+              echo "Create it with the sequence in docs/deploy.md §2."
+              exit 1
+            fi
+          done
+          echo "release ${ARTIFACT_TAG} carries all three assets"
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Authorise Docker against Artifact Registry
+        run: gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
+
+      # Two tags on one image, on purpose. The artifact tag answers "which model
+      # is this?" and the commit SHA answers "which code is serving it?" — and
+      # those are different questions, because the same artifact can be
+      # redeployed after a fix to the API.
+      - name: Build the image, with the model fetched by tag
+        id: build
+        run: |
+          image="${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.GCP_ARTIFACT_REPO }}/shelf-life"
+          docker build \
+            --build-arg "ARTIFACT_REPO=${{ github.repository }}" \
+            --build-arg "ARTIFACT_TAG=${ARTIFACT_TAG}" \
+            --tag "${image}:${ARTIFACT_TAG}" \
+            --tag "${image}:${{ github.sha }}" \
+            .
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+
+      - name: Push
+        run: |
+          docker push --all-tags "${{ steps.build.outputs.image }}"
+
+      # `--cpu-boost` is here because the expensive part of a cold start is
+      # import and unpickle, which is exactly the window it covers
+      # (docs/design.md §7e). `--min-instances` stays 0 by default: a keep-warm
+      # instance spends the free tier to hide a spinner.
+      - name: Deploy to Cloud Run
+        id: deploy
+        run: |
+          gcloud run deploy "${{ vars.GCP_SERVICE }}" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --image "${{ steps.build.outputs.image }}:${ARTIFACT_TAG}" \
+            --allow-unauthenticated \
+            --cpu-boost \
+            --cpu 1 --memory 1Gi \
+            --min-instances "${{ github.event.inputs.min_instances || '0' }}" \
+            --max-instances 3 \
+            --concurrency 8 \
+            --timeout 60s \
+            --labels "artifact=${ARTIFACT_TAG//./-}" \
+            --quiet
+          url=$(gcloud run services describe "${{ vars.GCP_SERVICE }}" \
+                  --project "${{ vars.GCP_PROJECT_ID }}" \
+                  --region "${{ vars.GCP_REGION }}" \
+                  --format 'value(status.url)')
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+
+      # The deploy is not the test. A revision that serves 503 to every caller
+      # is a successful `gcloud run deploy`.
+      - name: Smoke test the deployed service
+        run: ./scripts/smoke.sh "${{ steps.deploy.outputs.url }}"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Deployed"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| URL | ${{ steps.deploy.outputs.url }} |"
+            echo "| Artifact | \`${ARTIFACT_TAG}\` |"
+            echo "| Code | \`${{ github.sha }}\` |"
+            echo
+            echo "The cold start is **not** measured here: this revision was just"
+            echo "started by the deploy, so the first request finds a warm instance."
+            echo "Measure it honestly after the service has idled down —"
+            echo "\`./scripts/cold_start.sh ${{ steps.deploy.outputs.url }}\` — and put"
+            echo "the number in the README (docs/design.md §7e)."
+          } >> "$GITHUB_STEP_SUMMARY"
