@@ -217,9 +217,13 @@ artifact loads, and it is a real measurement of a real instance, so it can
 already fail — a baseline over the criterion can only get worse once a model is
 added, and learning that today costs nothing.
 
-What it cannot do is pass. That image never opens joblib, never unpickles a
-pipeline or a booster, and `/predict` answers 503 without reaching the model, so
-the load cost on 0.1 of a CPU is precisely what is missing from the figure. The
+What it cannot do is pass, and a baseline within the criterion is **not**
+reassurance about the definitive one. That image never opens joblib, never
+unpickles a pipeline or a booster, and `/predict` answers 503 without reaching
+the model, so the load cost on 0.1 of a CPU is precisely what is missing from the
+figure — and nothing in the baseline bounds it. The inference runs one way: a
+baseline over the criterion condemns the definitive measurement outright; a
+baseline under it says nothing. The
 script says so: it asks `/health` which kind of deployment it is talking to and
 labels the run `BASELINE` or `ACCEPTED` accordingly, rather than trusting whoever
 ran it to remember.

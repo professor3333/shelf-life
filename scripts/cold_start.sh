@@ -162,8 +162,15 @@ if [ "${MODEL_LOADED}" != "yes" ]; then
   echo
   echo "Re-run this against an image built from a real release. Until that second"
   echo "measurement comes back within the criterion, docs/design.md §7e says the"
-  echo "architecture is provisional — a baseline that passes is evidence the"
-  echo "definitive one might, and nothing more."
+  echo "architecture is provisional."
+  echo
+  echo "And do not read this figure as reassurance. The inference runs one way"
+  echo "only: a baseline OVER the criterion would have condemned the definitive"
+  echo "measurement outright, because the definitive one can only be slower. A"
+  echo "baseline within it implies nothing at all, because the work it skipped —"
+  echo "unpickling a pipeline and a booster on a tenth of a CPU — is not bounded"
+  echo "by anything this run measured. The value of a baseline is that it can end"
+  echo "the question early, never that it can settle it."
   exit 0
 fi
 
