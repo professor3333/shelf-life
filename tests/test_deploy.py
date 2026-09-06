@@ -23,6 +23,7 @@ import ast
 import importlib.util
 import os
 import re
+from fnmatch import fnmatch
 from pathlib import Path
 
 import pytest
@@ -69,6 +70,60 @@ def test_nothing_in_the_blueprint_scales_beyond_the_free_instance(render: dict) 
             f"render.yaml sets {field!r}, which the free plan does not support and which "
             "Render would satisfy by requiring a paid plan."
         )
+
+
+#: Everything whose change must still reach the running service. `MODEL_TAG` is
+#: the one that matters most: a model reaches production *only* by a build, so a
+#: pattern that swallowed it would turn every future release into a green commit
+#: in front of an unchanged container.
+MUST_STILL_DEPLOY = (
+    "MODEL_TAG",
+    "Dockerfile",
+    "render.yaml",
+    "pyproject.toml",
+    "requirements.txt",
+    "src/models/freeze.py",
+    "src/inference/predict.py",
+    "src/features/preprocessing.py",
+    "api/main.py",
+    "api/schemas.py",
+)
+
+
+def test_the_build_filter_never_ignores_what_changes_the_image(render: dict) -> None:
+    """Build minutes are worth saving; a silently skipped release is not.
+
+    The filter exists so prose commits stop rebuilding a ~1 GB image, because
+    exhausting the free allowance disables *all* builds for the month and a
+    release day needs that capability intact. This asserts it bought that
+    without also buying the failure it was meant to avoid.
+    """
+    ignored = render.get("buildFilter", {}).get("ignoredPaths", [])
+    for path in MUST_STILL_DEPLOY:
+        matched = [pattern for pattern in ignored if fnmatch(path, pattern)]
+        assert not matched, (
+            f"render.yaml's buildFilter ignores {path!r} via {matched!r}. A change to it "
+            "would then leave the deployed image untouched, with nothing failing and "
+            "nothing to read — for MODEL_TAG that means the release you just cut is not "
+            "the one serving."
+        )
+
+
+def test_the_build_filter_names_only_what_it_skips(render: dict) -> None:
+    """`ignoredPaths` without `paths`, deliberately — see the note in render.yaml.
+
+    An allowlist has to be complete to be correct, and the cost of forgetting an
+    entry is a deploy that does not happen and does not complain. A denylist that
+    is missing an entry only wastes a build. The asymmetry is the whole reason
+    one of the two fields is absent, so its absence is asserted rather than left
+    to whoever edits this next.
+    """
+    build_filter = render.get("buildFilter", {})
+    assert "paths" not in build_filter, (
+        "render.yaml's buildFilter sets `paths`, an allowlist. Every path not named "
+        "there stops deploying, silently, including any added later. Use `ignoredPaths` "
+        "so the default stays 'this change ships'."
+    )
 
 
 # --- the ones about a deploy that silently did not happen --------------------

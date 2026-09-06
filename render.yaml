@@ -35,3 +35,31 @@ services:
     # checksums. There is no deploy credential in CI because there is no deploy
     # step in CI — see `docs/design.md` §7f.
     autoDeployTrigger: commit
+
+    # ...but not for a change that cannot alter the image. A rebuild installs
+    # scikit-learn, XGBoost and pyarrow into a ~1 GB image, and the free plan's
+    # build minutes are finite: exhausted, with no payment method on file, Render
+    # disables *all* new builds for the workspace until the month turns. Since a
+    # model reaches production only by a build, spending that allowance on prose
+    # risks losing the one capability a release day needs.
+    #
+    # Only `ignoredPaths` is listed, and the omission of `paths` is the decision.
+    # The two fail in opposite directions. An incomplete `paths` allowlist means a
+    # commit that *should* deploy silently does not — the failure this whole file
+    # is arranged to prevent, and one that shows up as "the new model isn't
+    # serving" with a green build history. An over-long `ignoredPaths` at worst
+    # skips a build nobody needed; an incomplete one at worst wastes minutes.
+    # Everything not named here still triggers a build, so `MODEL_TAG`, the
+    # `Dockerfile`, `src/`, `api/`, `pyproject.toml` and `requirements.txt` keep
+    # deploying by default rather than by remembering to list them.
+    # `tests/test_deploy.py` asserts exactly that.
+    #
+    # Consequence worth naming: the `README.md` copied into the image may lag the
+    # repository by a few commits. Nothing reads it there.
+    buildFilter:
+      ignoredPaths:
+        - docs/**
+        - reports/**
+        - learning_log/**
+        - README.md
+        - DEBUGGING.md

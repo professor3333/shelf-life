@@ -4,6 +4,38 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-06 — A privacy check that could only ever return one answer
+
+- **Problem:** I concluded that the deployed Streamlit UI was private and acted on
+  it, asking for a sharing setting to be changed. The evidence was five requests
+  to the app URL — three with cache-busting query strings, one with
+  `Cache-Control: no-cache`, one with a full browser `User-Agent` — every one of
+  which returned `HTTP 303` to `share.streamlit.io/-/auth/app`. The app was
+  reachable anonymously the whole time.
+
+- **Root cause:** Community Cloud bootstraps an anonymous session at that
+  endpoint: it sets a cookie and redirects back to the app. `curl` without
+  `-c`/`-b` keeps no cookie jar, so every attempt re-entered the bootstrap and
+  returned the same 303. **A public app and a private app are indistinguishable
+  under that method** — both redirect to the same URL. The test had no power to
+  return "public", so its failure to do so carried no information. Repeating it
+  five times felt like corroboration while adding nothing: five runs of a blind
+  check are one blind check.
+
+- **Solution:** re-ran with a cookie jar (`curl -L -c jar -b jar`). The chain
+  completed anonymously in three hops and returned `HTTP 200` with the Streamlit
+  shell. Reachability is now checked that way; a bare `curl` against a Community
+  Cloud URL is not evidence of anything.
+
+- **Lesson:** **before believing a negative, say what a positive would have looked
+  like under the same method.** If the answer is "identical", the method
+  discriminates nothing and the observation is not evidence — no amount of
+  repetition converts it into some. This is the same error as the two entries
+  below, in its third costume: the 139.6 MiB reading was one sample of a moving
+  quantity, the Spaces pricing table was one source wearing three faces, and this
+  was one blind test run five times. Each felt like enough because the answer it
+  gave was the answer that fit.
+
 ## 2026-09-06 — A platform chosen from a pricing table instead of the documentation
 
 - **Problem:** `docs/design.md` §7c committed the Streamlit UI to a Hugging Face
