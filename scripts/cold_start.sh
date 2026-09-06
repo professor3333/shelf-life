@@ -78,46 +78,98 @@ echo "Cold — the first request after ${IDLE_MINUTES} idle minutes:"
 timed "/health (cold)" "${BASE_URL}/health"
 COLD_SECONDS="${LAST_SECONDS}"
 
+# Which of the two measurements is this? The answer is not a flag the caller
+# passes, because a caller who has to remember which kind of run this is will
+# eventually record a baseline as if it were the definitive one.
+#
+#   BASELINE   — the no-artifact image. Process start, interpreter, and the
+#                scikit-learn and XGBoost imports. A genuine measurement of a
+#                real instance, and a LOWER BOUND: it never touches joblib, never
+#                unpickles a pipeline or a booster, and /predict answers 503
+#                without reaching the model.
+#   DEFINITIVE — the same image with a released artifact in it. Adds the load
+#                path the baseline omits, and is the only measurement that can
+#                accept the architecture.
+#
+# `docs/design.md` §7e: the architecture is not accepted until the DEFINITIVE
+# measurement is within the criterion.
+MODEL_LOADED=$(curl -fsS --max-time 60 "${BASE_URL}/health" \
+  | python3 -c 'import json,sys; print("yes" if json.load(sys.stdin).get("model_loaded") else "no")')
+
 payload='{"title": "Senior Data Engineer", "location": "Berlin",
           "content_chars": 1400, "first_published": "2026-08-20T00:00:00Z",
           "as_of": "2026-09-14T03:45:00Z"}'
 
-echo
-echo "Warm — the same instance, immediately afterwards:"
-timed "/predict (warm)" -X POST "${BASE_URL}/predict" \
-  -H 'content-type: application/json' -d "${payload}"
-timed "/predict (warm, again)" -X POST "${BASE_URL}/predict" \
-  -H 'content-type: application/json' -d "${payload}"
-
-echo
-echo "Put the cold figure in the README beside the caveat, not instead of it:"
-echo "  \"the first request after idle takes N seconds; subsequent ones take M ms\""
+PREDICT_SECONDS=""
+if [ "${MODEL_LOADED}" = "yes" ]; then
+  echo
+  echo "First prediction — the load path the baseline cannot reach:"
+  timed "/predict (first)" -X POST "${BASE_URL}/predict" \
+    -H 'content-type: application/json' -d "${payload}"
+  PREDICT_SECONDS="${LAST_SECONDS}"
+  timed "/predict (warm)" -X POST "${BASE_URL}/predict" \
+    -H 'content-type: application/json' -d "${payload}"
+else
+  echo
+  echo "No model loaded, so /predict is a 503 and is not timed."
+fi
 
 # --- the acceptance criterion, applied ---------------------------------------
-verdict=$(COLD="${COLD_SECONDS:-0}" STOP="${STOP_RULE_SECONDS}" python3 -c '
+#
+# Applied to the SLOWEST request, not to the wake alone. The UI's timeout is per
+# request and guards both, so a /health that wakes in 40 s followed by a
+# /predict that takes 100 s is a failure even though the wake looked fine.
+verdict=$(COLD="${COLD_SECONDS:-0}" PRED="${PREDICT_SECONDS:-0}" STOP="${STOP_RULE_SECONDS}" \
+  python3 -c '
 import os, sys
 
-cold, stop = float(os.environ["COLD"]), float(os.environ["STOP"])
-print(f"{cold:.2f} {stop:.0f}")
-sys.exit(1 if cold > stop else 0)
-') && passed=0 || passed=1
+cold = float(os.environ["COLD"])
+predict = float(os.environ["PRED"] or 0.0)
+stop = float(os.environ["STOP"])
+worst = max(cold, predict)
+print(f"{cold:.2f} {predict:.2f} {worst:.2f} {stop:.0f}")
+sys.exit(1 if worst > stop else 0)
+') && within=0 || within=1
 set -- ${verdict}
+cold_s="$1"; predict_s="$2"; worst_s="$3"; stop_s="$4"
+
 echo
-if [ "${passed}" -eq 0 ]; then
-  echo "PASS: cold start ${1} s is within the ${2} s acceptance criterion."
+if [ "${within}" -ne 0 ]; then
+  echo "STOP: ${worst_s} s exceeds the ${stop_s} s acceptance criterion." >&2
+  echo "  cold /health ${cold_s} s   first /predict ${predict_s} s" >&2
+  echo >&2
+  echo "docs/design.md §7e: past this line the decision is reassessed, not tuned" >&2
+  echo "around. Specifically NOT the available shortcut — raising the UI timeout" >&2
+  echo "until the number stops looking bad changes only who finds out, and" >&2
+  echo "tests/test_deploy.py fails if you try it." >&2
+  echo >&2
+  echo "The questions §7e says to ask instead:" >&2
+  echo "  * is a live API needed for this demo at all, or would a static page" >&2
+  echo "    with pre-computed examples show the same work?" >&2
+  echo "  * does the image have to carry XGBoost, when import-and-unpickle is" >&2
+  echo "    what the tenth of a CPU is actually spending its time on?" >&2
+  exit 1
+fi
+
+if [ "${MODEL_LOADED}" != "yes" ]; then
+  echo "BASELINE recorded: ${cold_s} s, within the ${stop_s} s criterion."
+  echo
+  echo "This does NOT accept the deployment architecture, and the number is a"
+  echo "lower bound rather than a result. The image carries no artifact, so this"
+  echo "run never unpickled a pipeline, never loaded a booster, and never entered"
+  echo "the code path a prediction uses. Whatever the real load costs on 0.1 of a"
+  echo "CPU is missing from the figure above."
+  echo
+  echo "Re-run this against an image built from a real release. Until that second"
+  echo "measurement comes back within the criterion, docs/design.md §7e says the"
+  echo "architecture is provisional — a baseline that passes is evidence the"
+  echo "definitive one might, and nothing more."
   exit 0
 fi
 
-echo "STOP: cold start ${1} s exceeds the ${2} s acceptance criterion." >&2
-echo >&2
-echo "docs/design.md §7e: past this line the decision is reassessed, not tuned" >&2
-echo "around. Specifically NOT the available shortcut — raising the UI timeout" >&2
-echo "until the number stops looking bad changes only who finds out, and" >&2
-echo "tests/test_deploy.py fails if you try it." >&2
-echo >&2
-echo "The questions §7e says to ask instead:" >&2
-echo "  * is a live API needed for this demo at all, or would a static page" >&2
-echo "    with pre-computed examples show the same work?" >&2
-echo "  * does the image have to carry XGBoost, when import-and-unpickle is" >&2
-echo "    what the tenth of a CPU is actually spending its time on?" >&2
-exit 1
+echo "ACCEPTED: ${worst_s} s is within the ${stop_s} s acceptance criterion."
+echo "  cold /health ${cold_s} s   first /predict ${predict_s} s"
+echo
+echo "This is the definitive measurement — a real artifact, loaded and used."
+echo "Put both figures in the README beside the caveat, not instead of it:"
+echo "  \"the first request after idle takes N seconds; subsequent ones take M ms\""

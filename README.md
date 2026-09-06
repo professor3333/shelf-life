@@ -600,7 +600,7 @@ shelf-life/
 ├── render.yaml       the API service, as configuration rather than clicks
 ├── MODEL_TAG         which release is deployed; empty until one exists
 ├── requirements.txt  what the UI's host installs — and nothing that loads a model
-├── tests/            287 tests, no network, no data files
+├── tests/            288 tests, no network, no data files
 ├── docs/             problem_definition.md design.md leakage_audit.md
 │                     data_dictionary.md deploy.md
 ├── reports/          generated: profile, baselines, model results, comparison,
@@ -974,9 +974,17 @@ it gets written here before the link is given to anyone.
 **There is a stop rule attached to it.** Past 90 seconds, the hosting decision is
 reassessed rather than tuned around — `scripts/cold_start.sh` exits non-zero, and
 a test fails if the UI's timeout is raised above the criterion to make the
-symptom go away. The measurement does not need a model to be taken, so it can be
-had before the panel clears: import-and-unpickle is the expensive part and it
-happens whether or not an artifact loads.
+symptom go away.
+
+**And it is measured twice.** A *baseline* against the no-artifact image can be
+taken before the panel clears, because starting the process and importing
+scikit-learn and XGBoost costs the same whether or not a model loads. That
+baseline can fail — it can only get worse with an artifact added — but it cannot
+pass, because it never unpickles a pipeline and the unpickle on 0.1 of a CPU is
+the part the criterion exists for. The *definitive* measurement comes from an
+image built with a real release, and **the deployment architecture is provisional
+until that one is within the criterion.** The script asks `/health` which kind of
+deployment it is talking to rather than trusting whoever ran it to remember.
 
 Two things follow from that and are already in the code. The UI's HTTP timeout is
 **90 seconds**, not 30, because a timeout tuned for a fast platform reports a

@@ -467,6 +467,33 @@ fails if the client timeout is raised above the criterion. Raising *both*
 together still works, which is correct: renegotiating the criterion should cost a
 diff and an entry here, not an afternoon's convenience.
 
+**It is measured twice, and only the second one can accept anything.**
+
+| | What it measures | What it omits | Can it accept? |
+|---|---|---|---|
+| **Baseline** — the no-artifact image | process start, interpreter, the scikit-learn and XGBoost imports, on the real instance | joblib, unpickling the pipeline and the booster, the code path a prediction takes | **no** |
+| **Definitive** — an image built from a real release | all of the above, plus the load path and a first prediction | nothing that a visitor would experience | **yes** |
+
+The baseline is worth taking *now*, before the panel clears, because it is a real
+measurement of a real instance and it can already fail: a baseline over the
+criterion can only get worse once an artifact is added, and finding that out
+today costs nothing. What it cannot do is pass. The image it comes from never
+touches the model, so **whatever the unpickle costs on a tenth of a CPU is
+exactly the part the baseline is missing** — and that part is the reason this
+criterion exists at all.
+
+**The architecture is not accepted until the definitive measurement is within the
+criterion.** Until then it is provisional, and a baseline that passes is evidence
+that the definitive one might, and nothing more. The script says which kind of
+run it just did rather than taking the caller's word for it — it asks `/health`
+whether a model is loaded — because a caller who has to remember which sort of
+measurement they are looking at will eventually file a lower bound as a result.
+
+The criterion is applied to the **slowest request**, not to the wake alone. The
+UI's timeout is per request and guards both, so a `/health` that wakes in 40
+seconds followed by a `/predict` that takes 100 is a failure even though the wake
+looked fine.
+
 **What "reassess" means concretely**, so that the rule cannot be satisfied by
 staring at it:
 

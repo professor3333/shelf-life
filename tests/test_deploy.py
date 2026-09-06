@@ -185,6 +185,41 @@ def test_the_stop_rule_is_the_number_the_documents_quote() -> None:
     )
 
 
+def test_the_cold_start_script_cannot_accept_without_a_model() -> None:
+    """A lower bound must not be filable as a result.
+
+    The no-artifact image never opens joblib, never unpickles a pipeline or a
+    booster, and answers 503 from `/predict` — so its cold start omits exactly the
+    work the criterion exists to bound. It is still worth measuring, because it
+    can *fail*: a baseline over the rule can only get worse with a model added.
+    It must never *pass*.
+
+    Structural rather than behavioural — it asserts the model-less branch returns
+    before the acceptance verdict is reachable, which is the shape that would be
+    lost if the two branches were ever merged for tidiness.
+    """
+    script = (ROOT / "scripts" / "cold_start.sh").read_text()
+
+    assert "MODEL_LOADED=$(curl" in script, (
+        "the script no longer asks /health whether a model is loaded, so it cannot "
+        "tell a baseline from the definitive measurement and must be trusting the caller"
+    )
+
+    baseline_branch = script.index('if [ "${MODEL_LOADED}" != "yes" ]')
+    accepted = script.index("ACCEPTED:")
+    assert baseline_branch < accepted, (
+        "the acceptance verdict is now reachable before the model-less branch, so a "
+        "baseline could report the architecture as accepted"
+    )
+    assert "exit 0" in script[baseline_branch:accepted], (
+        "the model-less branch no longer returns before the acceptance verdict"
+    )
+    assert "does NOT accept" in script[baseline_branch:accepted], (
+        "the baseline no longer says out loud that it accepts nothing, which is the "
+        "only thing standing between a lower bound and a README claiming it as a result"
+    )
+
+
 # --- the ones about the UI's boundary ----------------------------------------
 
 
