@@ -75,12 +75,97 @@ arriving at `POST /predict` has been seen once, so `n_observations_total` is 1
 for every request a stranger ever makes. The model learned that low counts mean
 closing. It would flag everything.
 
-> **In my own words:** _(to be written. The table above is machinery; this
-> line is the deliverable, and it is not one a generator can produce.)_
+### In my own words
+
+**What the column measures.** `n_observations_total` is the number of crawl waves
+the posting survived before it was pulled. It is not a property of the posting —
+not its title, its salary, its board or its description. It is a property of the
+posting's *fate*, recorded as an integer. The panel is one row per (posting,
+crawl); a posting accrues a row per wave for exactly as long as it stays up, and
+then it stops. So counting its rows is measuring its lifetime, and its lifetime
+is the label with the threshold not yet applied. `days_on_board_total` is the
+same quantity said in days instead of in rows. The reason it got in is that the
+name is a data-quality name: "how many times have we seen this row" is the kind
+of column you add to downweight thinly-observed records, and nothing in it says
+*outcome*.
+
+**Why it was not available at the prediction point.** `board_growth` also
+aggregates over rows the target posting does not own, so "it counts other rows"
+cannot be the disqualifier, and neither can "it is an aggregate" — half the
+honest feature set would fail that rule. The difference is the right-hand end of
+the window. `board_growth` aggregates over rows at or before `t`, the moment of
+prediction: board size now minus board size at the previous wave, every row of it
+already in existence when I would have to compute it. `n_observations_total` has
+no right-hand end — its window runs to the end of the panel. On 2026-09-02,
+scoring a posting first seen on 2026-08-31, it is counting crawls that have not
+happened. So the problem is not the count. It is the bound: the aggregation's
+upper limit is the end of the dataset rather than the prediction time, and those
+two are the same thing only for the very last row in the panel.
+
+There is a sharper version, because "it uses future rows" alone would still be
+too broad a rule. `board_growth` scopes over *other postings at a fixed time*;
+`n_observations_total` scopes over *the same posting across all time*, and the
+future rows it reaches are precisely the rows that exist **because** the outcome
+had not happened yet. Their count is not correlated with the label — it is the
+label. That is why gating the column inside the pipeline would not have fixed it:
+a fold-local count is just a weaker version of the same measurement. The fix had
+to be deletion.
+
+**Which number is the stronger evidence.** The **0.0000**, and not by a small
+margin. The +0.6471 jump is a single observation that something changed when two
+columns were admitted, and on its own it is compatible with several stories that
+are not leakage: the columns carrying real signal, XGBoost catching a seed, an
+interaction with the seven engineered features, a small validation block being
+kind. A big number has no counterfactual inside it. And it could not have failed
+to be impressive — whatever happened in run 06 was going to be interesting, which
+is exactly what makes it weak evidence.
+
+The 0.0000 is the counterfactual. It says runs 05 and 07 are the same experiment
+— same seed, same snapshot, same preprocessing, same everything — so the only
+thing that happened between 05 and 06 was the two columns going in, and the only
+thing between 06 and 07 was them coming out. That closes the loop and makes
++0.6471 *attributable* rather than merely observed: without it I have a
+correlation, with it I have a controlled comparison. It is also the falsifiable
+half. It could easily have come back at 0.1908 or 0.1922 — a stochastic learner
+has no obligation to land on the same four decimals — and any drift would have
+meant something else moved too, and the attribution would be dead. It did not
+drift. That result also certifies the instrument, not just the finding: exact
+agreement across a remove-and-refit is evidence the harness is deterministic,
+which is what lets any later comparison in the table above be read as a
+difference rather than as noise.
+
+**What production would have done.** At `POST /predict`, a stranger's posting has
+been seen exactly once. `n_observations_total` is 1 and `days_on_board_total` is
+0 — not usually, but for every request, forever, with zero variance. There is no
+path by which a live request can carry any other value, because the quantity is
+defined over a history the request does not have. In training,
+`n_observations_total = 1` meant a posting that showed up and was gone by the
+next wave: the strongest positive in the data, the cleanest *this closed*. So the
+model's single most confident rule maps exactly onto the one input value
+production is capable of producing. Every request lands in the region where the
+model says closing, with high confidence. The service returns roughly the same
+number to everybody — a constant classifier wearing a probability.
+
+And that is the opposite of the failure people expect from a model that scored
+too well offline. The expected story is degradation: 0.8385 offline becomes
+something poor in production, the model is worse than advertised but still a
+model, still ranking, still telling postings apart, just badly. What actually
+happens here is that it does not decay toward the honest 0.1915 — it stops
+discriminating altogether, and it does so in one direction. Maximum recall,
+precision pinned at the base rate. It flags everything.
+
+Which is worse than a bad model, because the failure is silent in every channel
+that would normally catch it. Nothing 500s. The response schema is valid. The
+probabilities are well-formed and confident, and run 06 had the best calibration
+in the whole table — ECE 0.0377, against 0.1902 for the honest run. The only
+symptom is that the answer never changes, and you have to send two different
+postings and compare to see it. For the user this is built for — someone deciding
+where to spend application effort — "apply everywhere" is precisely the advice
+they already had before the model existed.
 
 ## Provenance
 
-- git `538c7f14956afe584fc388607e428b404c75ef8d` on `feature/ui-and-docs` — **dirty tree**
+- git `00bd75ba343ac9332d7c333b85cf08ff78a3aa76` on `docs/leak-in-my-own-words` — **dirty tree**
 - panel `tests/panels.py`, 1,310 rows, sha256 `813def926c0855f059e275a346192b0b9324d356219ee8cf2b4e88ffe20edb06`
-- snapshot `2026-09-05`
+- snapshot `2026-09-06`
 
