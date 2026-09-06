@@ -199,13 +199,33 @@ timeout until the slow service stops timing out — is blocked by
 the criterion. Both numbers can be changed together, and that is a decision with
 a diff and a design-doc entry.
 
-**Set Render up before there is a model.** The measurement does not need one:
-importing scikit-learn and XGBoost and starting the process is the expensive
-part, and it happens whether or not an artifact loads. So deploy the
-no-artifact image, confirm `/health` reports `model_loaded: false`, and take the
-cold-start reading then — it is the one number that could still send the hosting
-decision back to §7, and it is available today rather than after the panel
-clears.
+**Two measurements, and only the second one accepts anything.**
+
+```
+now                                    when the 7-wave gate clears
+ │                                      │
+ ├─ deploy the no-artifact image        ├─ MODEL_TAG names a release
+ ├─ /health reports model_loaded: false ├─ the image is rebuilt with it
+ └─ ./scripts/cold_start.sh  ──────────>└─ ./scripts/cold_start.sh
+        BASELINE — a lower bound               DEFINITIVE — the acceptance
+        (never unpickles anything)              measurement
+```
+
+Take the baseline **now**, before the panel clears. It needs no model: starting
+the process and importing scikit-learn and XGBoost is expensive whether or not an
+artifact loads, and it is a real measurement of a real instance, so it can
+already fail — a baseline over the criterion can only get worse once a model is
+added, and learning that today costs nothing.
+
+What it cannot do is pass. That image never opens joblib, never unpickles a
+pipeline or a booster, and `/predict` answers 503 without reaching the model, so
+the load cost on 0.1 of a CPU is precisely what is missing from the figure. The
+script says so: it asks `/health` which kind of deployment it is talking to and
+labels the run `BASELINE` or `ACCEPTED` accordingly, rather than trusting whoever
+ran it to remember.
+
+**The deployment architecture is not accepted until the definitive measurement
+comes back within the criterion.** Until then it is provisional.
 
 ---
 
