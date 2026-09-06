@@ -1,7 +1,12 @@
 {
   "name": "Python 3",
   // Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-  "image": "mcr.microsoft.com/devcontainers/python:1-3.11-bookworm",
+  // 3.12, matching the Dockerfile, CI and the serving image. A dev container on
+  // 3.11 is where a model gets frozen that the 3.12 image then has to unpickle,
+  // and DEBUGGING.md already carries one entry about a pinned prediction that
+  // only held on the machine that wrote it. tests/test_deploy.py asserts these
+  // two versions stay equal.
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
   "customizations": {
     "codespaces": {
       "openFiles": [
@@ -19,7 +24,12 @@
   },
   "updateContentCommand": "[ -f packages.txt ] && sudo apt update && sudo apt upgrade -y && sudo xargs apt install -y <packages.txt; [ -f requirements.txt ] && pip3 install --user -r requirements.txt; pip3 install --user streamlit; echo '✅ Packages installed and Requirements met'",
   "postAttachCommand": {
-    "server": "streamlit run app/streamlit_app.py --server.enableCORS false --server.enableXsrfProtection false"
+    // These two flags are Codespaces-only, and they are here because the port
+      // forwarding proxies the app from a different origin. They must never be
+      // copied into anything deployed: the public UI runs on Streamlit Community
+      // Cloud with its own defaults, and the public API is the FastAPI container,
+      // neither of which reads this file.
+      "server": "streamlit run app/streamlit_app.py --server.enableCORS false --server.enableXsrfProtection false"
   },
   "portsAttributes": {
     "8501": {
