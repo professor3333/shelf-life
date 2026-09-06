@@ -19,10 +19,17 @@ set -euo pipefail
 
 BASE_URL="${1:-${SHELF_LIFE_API:-}}"
 if [ -z "${BASE_URL}" ]; then
-  echo "usage: $0 <base-url>   (or set SHELF_LIFE_API)" >&2
+  echo "usage: $0 <base-url> [expected-release-tag]   (or set SHELF_LIFE_API)" >&2
   exit 2
 fi
 BASE_URL="${BASE_URL%/}"
+
+# Optional second argument: the release tag this deployment is supposed to be
+# serving. Without it the script proves a model is answering; with it, that the
+# *expected* one is. Those differ exactly when a deploy silently did not happen,
+# which is the failure a smoke test run straight after a deploy is most likely
+# to meet and least likely to notice.
+EXPECTED_TAG="${2:-}"
 
 fail() { echo "SMOKE FAIL: $*" >&2; exit 1; }
 
@@ -34,7 +41,7 @@ trap 'rm -rf "${WORK}"' EXIT
 
 # --- /health, and the two facts it keeps separate ---------------------------
 curl -fsS --max-time 60 "${BASE_URL}/health" > "${WORK}/health.json" || fail "/health did not answer"
-python3 - "${WORK}/health.json" <<'PY' || fail "/health reported no usable model"
+EXPECTED_TAG="${EXPECTED_TAG}" python3 - "${WORK}/health.json" <<'PY' || fail "/health did not report a usable model at the expected release"
 import json, os, sys
 
 body = json.load(open(sys.argv[1]))
@@ -46,7 +53,17 @@ if not body.get("model_loaded"):
         "The image was built without ARTIFACT_TAG, or the fetch was skipped."
     )
 print(f"  model     {body.get('model')}")
+print(f"  release   {body.get('artifact_tag') or '(none — not built from a release)'}")
 print(f"  dataset   {body.get('dataset')}")
+
+expected = os.environ.get("EXPECTED_TAG") or ""
+actual = body.get("artifact_tag") or ""
+if expected and actual != expected:
+    sys.exit(
+        f"this deployment is serving release {actual or '(none)'}, not {expected}.\n"
+        "The push either has not finished building yet, or the build did not pick up\n"
+        "MODEL_TAG. Either way the URL is answering from the previous model."
+    )
 print(f"  fitted on {body.get('fitted_on')}")
 print(f"  horizon   {body.get('horizon_days')} days")
 print(f"  threshold {body.get('threshold')}")

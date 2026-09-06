@@ -146,6 +146,13 @@ class HealthResponse(BaseModel):
     status: str
     model_loaded: bool
     artifact: str
+    #: The release tag this image was built from, from `MODEL_TAG` at build time.
+    #: It answers a question the artifact's own metadata cannot: *which published
+    #: version is this process serving?* `run_name` says which experiment was
+    #: frozen, not which release reached the URL, and after a deploy those are
+    #: exactly the two facts that need distinguishing. `None` when the image was
+    #: built without one — a local build, or the deliberate no-artifact image.
+    artifact_tag: str | None = None
     model: str | None = None
     dataset: str | None = None
     horizon_days: int | None = None

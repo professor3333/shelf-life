@@ -1,0 +1,103 @@
+name: Verify deployment
+
+# This workflow does not deploy. Render builds from the repository it is
+# connected to and Streamlit Community Cloud does the same, so a push to `main`
+# *is* the deploy and CI holds no deployment credential at all — see
+# `docs/design.md` §7f, which explains why losing that credential was an
+# improvement and not a sacrifice.
+#
+# What is left is the half worth automating: after the platform has finished,
+# confirm that the URL a stranger would use is answering from the model this
+# commit intended, with a real model rather than the synthetic rehearsal.
+#
+#     push to main ──> Render rebuilds ──> await_release.sh ──> smoke.sh
+#
+# It is deliberately unable to fail for the wrong reason. Before there is a
+# service, or before there is a released model, it reports why it has nothing to
+# check and exits green — a workflow that fails on every push because a URL does
+# not exist yet is a workflow people learn to ignore.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - MODEL_TAG
+      - Dockerfile
+      - render.yaml
+      - "src/**"
+      - "api/**"
+      - requirements.txt
+  workflow_dispatch:
+    inputs:
+      allow_synthetic:
+        description: "Accept a model fitted on the synthetic panel (rehearsal only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-deployment
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Two reasons there may be nothing to verify, and neither is a failure.
+      - name: Is there a deployment, and a model in it?
+        id: what
+        run: |
+          url='${{ vars.SHELF_LIFE_API }}'
+          tag=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' MODEL_TAG | grep -v '^$' | head -n 1 || true)
+
+          if [ -z "${url}" ]; then
+            echo "::notice::No SHELF_LIFE_API variable set, so no deployed service to verify."
+            echo "Set it once the Render service exists — docs/deploy.md §1."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "${tag}" ]; then
+            echo "::notice::MODEL_TAG names no release yet, so the deployment is intentionally"
+            echo "model-less. Nothing to verify until a model is frozen and released."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      # The build takes minutes on a free tier, and until it finishes the URL is
+      # up and answering from the previous model. Waiting for the expected
+      # release is what stops this job passing on the deploy it replaced.
+      - name: Wait for the new release to be the one serving
+        if: steps.what.outputs.skip == 'false'
+        run: ./scripts/await_release.sh "${{ steps.what.outputs.url }}" "${{ steps.what.outputs.tag }}" 20
+
+      - name: Smoke test
+        if: steps.what.outputs.skip == 'false'
+        env:
+          ALLOW_SYNTHETIC: ${{ inputs.allow_synthetic && '1' || '0' }}
+        run: ./scripts/smoke.sh "${{ steps.what.outputs.url }}" "${{ steps.what.outputs.tag }}"
+
+      - name: Summary
+        if: steps.what.outputs.skip == 'false'
+        run: |
+          {
+            echo "### Verified"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| URL | ${{ steps.what.outputs.url }} |"
+            echo "| Release | \`${{ steps.what.outputs.tag }}\` |"
+            echo "| Code | \`${{ github.sha }}\` |"
+            echo
+            echo "The cold start is **not** measured here — this service was just"
+            echo "rebuilt and is warm. Measure it after it has idled down:"
+            echo "\`./scripts/cold_start.sh ${{ steps.what.outputs.url }}\`, then put the"
+            echo "number in the README (\`docs/design.md\` §7e)."
+          } >> "$GITHUB_STEP_SUMMARY"

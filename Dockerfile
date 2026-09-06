@@ -3,9 +3,13 @@
 #
 # The model does not arrive by COPY. `models/` is derived output, is not
 # committed, and is in `.dockerignore`, so the only way one enters this image is
-# a verified fetch from a release tag:
+# a verified fetch from a release tag. The tag comes from the committed
+# `MODEL_TAG` file, which is what makes "which model is serving?" answerable
+# from git history rather than from a dashboard (`docs/design.md` §7f). A build
+# argument overrides it, for building a specific version locally:
 #
-#     docker build --build-arg ARTIFACT_TAG=artifact-2026-09-07 -t shelf-life .
+#     docker build -t shelf-life .                                   # MODEL_TAG
+#     docker build --build-arg ARTIFACT_TAG=artifact-2026-09-07 .    # override
 #
 # That is `docs/design.md` §7a: the served model is a version, not a file that
 # happened to be on a laptop. Locally, mount one instead of baking it —
@@ -45,8 +49,9 @@ RUN pip install --no-cache-dir ".[api]" \
 # what "everything else" means, and it does not mean `models/`.
 COPY . .
 
-# The model, by tag, or not at all. Empty by default so a plain `docker build`
-# still works and still produces the honest no-artifact container.
+# The model, by tag, or not at all. Empty by default: the tag is normally read
+# from `MODEL_TAG` below, and a plain `docker build` with neither still works and
+# still produces the honest no-artifact container.
 ARG ARTIFACT_REPO=professor3333/shelf-life
 ARG ARTIFACT_TAG=""
 
@@ -57,13 +62,30 @@ ARG ARTIFACT_TAG=""
 # caught a booster written by a different xgboost than the image installs.
 # Both run at build time, so a bad artifact fails the build rather than the
 # stranger's first request.
-RUN if [ -n "${ARTIFACT_TAG}" ]; then \
-        python -m src.inference.fetch --repo "${ARTIFACT_REPO}" --tag "${ARTIFACT_TAG}" --into models && \
+#
+# The build argument wins if given; otherwise the committed file decides. Blank
+# lines and `#` comments are stripped from it, so `MODEL_TAG` can explain itself
+# and a file containing only its own explanation reads as "no model yet" rather
+# than as a tag named `#`.
+#
+# The last line records what was *actually* used, so `/health` can report the
+# tag this build fetched rather than the tag the repository currently intends.
+# `ENV` cannot take a value computed by `RUN`, so it is a file, and
+# `api/main.py` reads it. (No comments inside the RUN itself: the Dockerfile
+# parser strips comment lines out of a backslash continuation.)
+RUN TAG="${ARTIFACT_TAG}"; \
+    if [ -z "${TAG}" ] && [ -f MODEL_TAG ]; then \
+        TAG=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' MODEL_TAG | grep -v '^$' | head -n 1); \
+    fi; \
+    if [ -n "${TAG}" ]; then \
+        echo "artifact tag: ${TAG}" && \
+        python -m src.inference.fetch --repo "${ARTIFACT_REPO}" --tag "${TAG}" --into models && \
         python -c "from src.inference.artifact import load; a = load(); \
 print(f'artifact ok: {a.metadata.run_name}, fitted on {a.metadata.fitted_on}, threshold {a.metadata.threshold}')"; \
     else \
-        echo "no ARTIFACT_TAG: building the no-artifact image (/health will report model_loaded: false)"; \
-    fi
+        echo "no artifact tag: building the no-artifact image (/health will report model_loaded: false)"; \
+    fi; \
+    printf '%s' "${TAG}" > /app/ARTIFACT_TAG
 
 # Not root. The process needs to read one artifact and answer HTTP; it has no
 # business being able to write to its own image.

@@ -30,7 +30,14 @@ DEFAULT_API_URL = "http://localhost:8000"
 #: Seconds. Generous, because a free tier that has slept the container needs to
 #: start Python, import XGBoost and unpickle a booster before it can answer —
 #: and a UI that gives up at five seconds reports that as an outage.
-TIMEOUT = 30.0
+#:
+#: **Raised from 30 to 90 on 2026-09-06**, when the API moved to a host that
+#: spins down after 15 idle minutes and documents "about one minute" to come
+#: back, on 0.1 of a CPU (`docs/design.md` §7b). Against that, 30 seconds is a
+#: timeout that fires on the *normal* case and reports a working service as a
+#: dead one. The number is not a guess about how slow the wake is; it is a
+#: deliberate over-estimate until `scripts/cold_start.sh` measures the real one.
+TIMEOUT = 90.0
 
 
 class ApiError(RuntimeError):

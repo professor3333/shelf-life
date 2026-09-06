@@ -1,17 +1,20 @@
 """The deploy path, checked without deploying anything.
 
-Nothing here talks to Google, GitHub or Hugging Face. What it checks is the
-class of mistake that a deploy does not report: a rename in one file that
-silently changes what another file does.
+Nothing here talks to Render, GitHub or Streamlit. What it checks is the class of
+mistake that a deploy does not report: a rename in one file that silently changes
+what another file does, and a configuration change that quietly costs money.
 
-**The one worth having is `test_the_workflow_passes_build_args_the_dockerfile_declares`.**
-Docker ignores a `--build-arg` naming an `ARG` that does not exist — it warns,
-and the build succeeds. The Dockerfile's model fetch is guarded by
-`if [ -n "${ARTIFACT_TAG}" ]`, so an unrecognised argument does not fail the
-build: it produces the *no-artifact* image, which starts, passes its health
-check, reports `model_loaded: false` and returns 503 to every caller. Renaming
-that `ARG` would therefore deploy an empty service and no step before the smoke
-test would notice.
+**`test_the_service_plan_is_free` is the one with a bill attached.** Every other
+failure here is an outage; that one is a charge. The constraint this deployment
+is built to (`docs/design.md` §7) is not "cheap" but "$0 with no payment method
+on file", and a plan named in a YAML file is exactly the kind of thing that gets
+bumped during debugging and left.
+
+**`test_the_workflow_reads_model_tag_the_same_way_the_dockerfile_does` is the
+one with an invisible failure.** The tag is extracted by an identical shell
+pipeline in two places. If they drift, the workflow waits for a release the image
+was never built with, times out, and reports a deployment failure that did not
+happen.
 """
 
 from __future__ import annotations
@@ -26,10 +29,15 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
-WORKFLOW = ROOT / ".github" / "workflows" / "deploy.yml"
+WORKFLOW = ROOT / ".github" / "workflows" / "verify-deployment.yml"
 DOCKERFILE = ROOT / "Dockerfile"
+RENDER = ROOT / "render.yaml"
 RUNBOOK = ROOT / "docs" / "deploy.md"
-SPACE = ROOT / "deploy" / "space"
+REQUIREMENTS = ROOT / "requirements.txt"
+
+#: The pipeline that turns the `MODEL_TAG` file into a bare tag. Comments and
+#: whitespace out, first surviving line wins.
+TAG_PIPELINE = "sed -e 's/#.*//' -e 's/[[:space:]]//g' MODEL_TAG | grep -v '^$' | head -n 1"
 
 
 @pytest.fixture(scope="module")
@@ -38,62 +46,89 @@ def workflow_text() -> str:
 
 
 @pytest.fixture(scope="module")
-def workflow(workflow_text: str) -> dict:
-    return yaml.safe_load(workflow_text)
+def render() -> dict:
+    return yaml.safe_load(RENDER.read_text())["services"][0]
 
 
-def test_the_workflow_passes_build_args_the_dockerfile_declares(workflow_text: str) -> None:
-    passed = set(re.findall(r'--build-arg\s+"?([A-Z_]+)=', workflow_text))
+# --- the ones about money ----------------------------------------------------
+
+
+def test_the_service_plan_is_free(render: dict) -> None:
+    """$0 is the first requirement, and this file is where it would be lost."""
+    assert render["plan"] == "free", (
+        f"render.yaml asks for the {render['plan']!r} plan. The deployment constraint is $0 "
+        "with no payment method on file (docs/design.md §7); a paid plan is a bill, not a "
+        "performance tweak."
+    )
+
+
+def test_nothing_in_the_blueprint_scales_beyond_the_free_instance(render: dict) -> None:
+    """Free services are single-instance. Asking for more is asking for a plan change."""
+    for field in ("numInstances", "scaling"):
+        assert field not in render, (
+            f"render.yaml sets {field!r}, which the free plan does not support and which "
+            "Render would satisfy by requiring a paid plan."
+        )
+
+
+# --- the ones about a deploy that silently did not happen --------------------
+
+
+def test_the_workflow_reads_model_tag_the_same_way_the_dockerfile_does(workflow_text: str) -> None:
+    """Two copies of one pipeline. Drift here fails a deploy that worked."""
+    assert TAG_PIPELINE in DOCKERFILE.read_text(), (
+        "the Dockerfile no longer extracts the tag from MODEL_TAG the documented way; "
+        "if that is deliberate, update TAG_PIPELINE here and the workflow together"
+    )
+    assert TAG_PIPELINE in workflow_text, (
+        "the verify workflow extracts the release tag differently from the Dockerfile. "
+        "They must agree: the workflow waits for the tag the image was built with, and a "
+        "mismatch reports a deployment failure that did not occur."
+    )
+
+
+def test_the_dockerfile_records_the_tag_it_actually_fetched(workflow_text: str) -> None:
+    """`/health` must report the release the build used, not the one the repo intends."""
+    dockerfile = DOCKERFILE.read_text()
+    assert "> /app/ARTIFACT_TAG" in dockerfile, (
+        "the image no longer records which release it fetched, so /health cannot report it "
+        "and the verify workflow cannot tell a new deployment from the one it replaced"
+    )
+    assert "artifact_tag" in workflow_text or "await_release.sh" in workflow_text
+
+
+def test_the_build_arg_override_still_matches_the_dockerfile(workflow_text: str) -> None:
+    """Docker only *warns* about a --build-arg naming an ARG that does not exist."""
     declared = set(re.findall(r"^ARG\s+([A-Z_]+)", DOCKERFILE.read_text(), re.MULTILINE))
-
-    assert passed, "the deploy workflow passes no build args; the image would have no model"
-    unknown = passed - declared
-    assert not unknown, (
-        f"the workflow passes {sorted(unknown)}, which the Dockerfile does not declare. "
-        "Docker only warns about that, so the build would succeed and deploy the "
-        "no-artifact image — a service that answers 503 to everyone."
+    assert {"ARTIFACT_TAG", "ARTIFACT_REPO"} <= declared, (
+        "the local override documented in the Dockerfile header and docs/deploy.md relies on "
+        f"these build args; the Dockerfile declares {sorted(declared)}"
     )
-    assert "ARTIFACT_TAG" in passed, "without ARTIFACT_TAG the deployed image has no model in it"
+    for passed in set(re.findall(r'--build-arg\s+"?([A-Z_]+)=', workflow_text)):
+        assert passed in declared, (
+            f"the workflow passes --build-arg {passed}, which the Dockerfile does not declare. "
+            "Docker only warns, so the build would succeed and produce the no-artifact image."
+        )
 
 
-def test_the_tag_trigger_matches_the_tags_the_runbook_tells_you_to_push(workflow) -> None:
-    # `on:` is YAML's `True`. Ask for both rather than pretending to be surprised.
-    triggers = workflow.get("on") or workflow.get(True)
-    patterns = triggers["push"]["tags"]
-
-    documented = set(re.findall(r"artifact-[\w<>{}$()+%\-]+", RUNBOOK.read_text()))
-    assert documented, "the runbook documents no artifact tag at all"
-    assert any(
-        pattern.rstrip("*") and tag.startswith(pattern.rstrip("*"))
-        for pattern in patterns
-        for tag in documented
-    ), f"the workflow triggers on {patterns}, which no tag in the runbook would match"
+def test_the_workflow_verifies_rather_than_assumes(workflow_text: str) -> None:
+    """A deploy check that cannot fail is decoration."""
+    for script in ("scripts/await_release.sh", "scripts/smoke.sh"):
+        assert script in workflow_text, f"the workflow never runs {script}"
+        path = ROOT / script
+        assert path.exists() and os.access(path, os.X_OK), f"{path} is missing or not executable"
 
 
-def test_preflight_checks_every_variable_the_workflow_later_uses(workflow_text: str) -> None:
-    """A variable used but not preflighted fails four minutes later, in gcloud's words."""
-    used = set(re.findall(r"vars\.([A-Z_]+)", workflow_text))
-    preflight = workflow_text.split("Preflight — is this repository configured")[1]
-    checked = set(re.findall(r"\b(GCP_[A-Z_]+)\b", preflight.split("- name:")[0]))
-
-    missing = used - checked
-    assert not missing, (
-        f"{sorted(missing)} is used by the deploy but not checked by the preflight, so a "
-        "repository missing it fails deep inside gcloud instead of in the first ten seconds"
+def test_the_health_check_path_is_one_the_api_serves(render: dict) -> None:
+    main = (ROOT / "api" / "main.py").read_text()
+    served = set(re.findall(r'@app\.(?:get|post)\("([^"]+)"', main))
+    assert render["healthCheckPath"] in served, (
+        f"render.yaml health-checks {render['healthCheckPath']}, which the API does not serve; "
+        f"it serves {sorted(served)}"
     )
 
 
-def test_the_workflow_smoke_tests_what_it_deployed(workflow_text: str) -> None:
-    """`gcloud run deploy` succeeding is not evidence that a model is serving."""
-    assert "scripts/smoke.sh" in workflow_text, (
-        "the workflow deploys without smoke-testing; a revision that answers 503 to "
-        "every caller is a successful deploy"
-    )
-    smoke = ROOT / "scripts" / "smoke.sh"
-    assert smoke.exists() and os.access(smoke, os.X_OK), f"{smoke} is missing or not executable"
-
-
-def test_the_smoke_test_refuses_to_pass_a_synthetic_model() -> None:
+def test_the_smoke_test_refuses_a_synthetic_model() -> None:
     """The rehearsal model must not reach a public URL unannounced.
 
     Every component in this project is exercised on a synthetic panel whose label
@@ -102,6 +137,9 @@ def test_the_smoke_test_refuses_to_pass_a_synthetic_model() -> None:
     """
     smoke = (ROOT / "scripts" / "smoke.sh").read_text()
     assert "synthetic" in smoke and "ALLOW_SYNTHETIC" in smoke
+
+
+# --- the ones about the UI's boundary ----------------------------------------
 
 
 def _third_party_imports(directory: Path) -> set[str]:
@@ -117,40 +155,70 @@ def _third_party_imports(directory: Path) -> set[str]:
     return {name for name in found if name not in stdlib and name != "app"}
 
 
-def _space_requirements() -> set[str]:
-    """The distribution names the Space installs. Comments are prose, not dependencies."""
+def _ui_requirements() -> set[str]:
+    """What Streamlit Community Cloud installs. Comments are prose, not dependencies."""
     return {
         re.split(r"[<>=!~ ]", line, maxsplit=1)[0].strip().lower()
-        for line in (SPACE / "requirements.txt").read_text().splitlines()
+        for line in REQUIREMENTS.read_text().splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     }
 
 
-def test_the_space_requirements_cover_everything_the_ui_imports() -> None:
-    """A missing line here is a Space that crashes on its first page load."""
-    required = _third_party_imports(ROOT / "app")
-    declared = _space_requirements()
-    missing = {name for name in required if name.lower() not in declared}
+def test_the_ui_requirements_cover_everything_the_ui_imports() -> None:
+    """A missing line here is a UI that crashes on its first page load."""
+    missing = {n for n in _third_party_imports(ROOT / "app") if n.lower() not in _ui_requirements()}
     assert not missing, (
-        f"app/ imports {sorted(missing)}, which deploy/space/requirements.txt does not "
-        "install. The Space installs that file and nothing else."
+        f"app/ imports {sorted(missing)}, which requirements.txt does not install. "
+        "Streamlit Community Cloud installs that file and nothing else."
     )
 
 
-def test_the_space_cannot_install_a_model() -> None:
-    """UI ≠ API ≠ model. On the Space that is enforced by what is not installed."""
-    declared = _space_requirements()
+def test_the_ui_cannot_install_a_model() -> None:
+    """UI ≠ API ≠ model, enforced by what the UI's host is never given.
+
+    Weaker than the previous arrangement, where `src/` was not deployed alongside
+    the UI at all and the boundary held by physics. Community Cloud checks out
+    the whole repository, so this list and `tests/test_app.py` are what remain.
+    `docs/design.md` §7c records that as a downgrade rather than a preference.
+    """
+    declared = _ui_requirements()
     for forbidden in ("scikit-learn", "sklearn", "xgboost", "joblib"):
         assert forbidden not in declared, (
-            f"deploy/space/requirements.txt installs {forbidden}. The UI calls the API over "
-            "HTTP; a UI that can load a model is a second copy of it, silently different."
+            f"requirements.txt installs {forbidden}, so the UI could load the artifact "
+            "directly. A UI that can load a model is a second copy of it, silently different."
         )
 
 
-def test_the_space_points_at_a_file_that_exists() -> None:
-    front_matter = (SPACE / "README.md").read_text().split("---")[1]
-    app_file = yaml.safe_load(front_matter)["app_file"]
-    assert (ROOT / app_file).exists(), f"the Space would launch {app_file}, which is not here"
+# --- the one about which model is answering ----------------------------------
+
+
+def test_health_reports_the_release_only_when_the_build_recorded_one(monkeypatch, tmp_path) -> None:
+    """Intent and fact are different questions, and /health answers the second.
+
+    `MODEL_TAG` says which release the repository *wants* deployed. The file the
+    Dockerfile writes says which one the build actually fetched. Reporting the
+    first as if it were the second would make the verify workflow unable to
+    detect the one thing it exists to detect: a push whose image never got built.
+    """
+    from api import main
+
+    monkeypatch.delenv(main.ARTIFACT_TAG_ENV, raising=False)
+
+    recorded = tmp_path / "ARTIFACT_TAG"
+    monkeypatch.setattr(main, "ARTIFACT_TAG_FILE", recorded)
+    assert main.artifact_tag() is None, "no recorded tag must read as None, not as an empty string"
+
+    recorded.write_text("artifact-2026-09-08\n")
+    assert main.artifact_tag() == "artifact-2026-09-08"
+
+    recorded.write_text("")
+    assert main.artifact_tag() is None, "the no-artifact image writes an empty file, not a tag"
+
+    monkeypatch.setenv(main.ARTIFACT_TAG_ENV, "artifact-override")
+    assert main.artifact_tag() == "artifact-override", "the environment must win over the file"
+
+
+# --- the one about documentation that has rotted -----------------------------
 
 
 def test_every_module_the_runbook_tells_you_to_run_exists() -> None:

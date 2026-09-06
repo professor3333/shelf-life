@@ -520,7 +520,7 @@ python -m src.models.evaluate                  # compare, threshold, calibrate �
 python -m src.models.freeze --run <spec>       # opens the test block, once
 python -m src.inference.fetch --checksums models
 gh release create artifact-<date> models/*     # the model becomes a version
-git push origin artifact-<date>                # pushing the tag is the deploy
+echo artifact-<date> > MODEL_TAG && git push   # committing the tag is the deploy
 ```
 
 The last two lines are the whole of the deployment, because the path around them
@@ -596,16 +596,18 @@ shelf-life/
 │   └── inference/    contract.py artifact.py predict.py fetch.py
 ├── api/              main.py schemas.py
 ├── app/              streamlit_app.py client.py
-├── scripts/          smoke.sh cold_start.sh
-├── deploy/space/     what a Hugging Face Space needs and this repo does not
-├── tests/            282 tests, no network, no data files
+├── scripts/          smoke.sh await_release.sh cold_start.sh
+├── render.yaml       the API service, as configuration rather than clicks
+├── MODEL_TAG         which release is deployed; empty until one exists
+├── requirements.txt  what the UI's host installs — and nothing that loads a model
+├── tests/            285 tests, no network, no data files
 ├── docs/             problem_definition.md design.md leakage_audit.md
 │                     data_dictionary.md deploy.md
 ├── reports/          generated: profile, baselines, model results, comparison,
 │                     experiment log, test results, feature hypotheses
 ├── data/             not committed — snapshots and derived frames
 ├── models/           not committed — the frozen artifact
-├── Dockerfile        .github/workflows/  ci.yml deploy.yml
+├── Dockerfile        .github/workflows/  ci.yml verify-deployment.yml
 └── pyproject.toml
 ```
 
@@ -907,61 +909,81 @@ synthetic fixture, and a link a stranger can hit should return a number that
 means something. The deploy happens when the panel clears the depth gate and a
 real artifact exists.
 
-**Where it will go, decided 2026-09-05:** the API on Google Cloud Run, the
-Streamlit UI on a Hugging Face Space, and the frozen model shipped as a release
-asset rather than copied from a laptop — `models/` is derived output and is not
-committed, so an image built from a clean clone has no model in it and says so
-through `/health`. The reasoning, the rejected alternatives and the plan for a
-sleeping container are in [`docs/design.md`](docs/design.md) §7.
+**Where it goes, revised 2026-09-06:** the API on a **Render free web service**,
+the Streamlit UI on **Streamlit Community Cloud**, and the frozen model shipped
+as a GitHub release asset rather than copied from a laptop — `models/` is derived
+output and is not committed, so an image built from a clean clone has no model in
+it and says so through `/health`.
 
-**The path itself is built and waiting on the artifact**, so the day the panel
-clears there is nothing left to invent:
+**This replaces yesterday's answer, and the reason is worth reading.** The
+2026-09-05 plan was Cloud Run plus a Hugging Face Space. Two things killed it:
+the constraint became *genuinely* $0 with no card and no billing account, which
+Cloud Run cannot meet; and checking the Hub's documentation rather than trusting
+a pricing table showed that **Spaces running on compute require a paid plan** —
+"CPU Basic — FREE" describes the hourly cost of hardware you must already be
+subscribed to use. The full comparison of what is actually free, verified on the
+day, is in [`docs/design.md`](docs/design.md) §7.
+
+**Deploying is a commit.** There is no deploy command and no deployment
+credential anywhere in CI, because the platforms build from the repository they
+are connected to:
 
 ```
 gh release create artifact-<date> …    the model becomes a version
         │
         ▼
-.github/workflows/deploy.yml           pushing that tag is the deploy
+echo <tag> > MODEL_TAG ; git push      the version becomes the deployed one
         │
         ▼
-scripts/smoke.sh                       is a model actually serving?
+Render rebuilds, by itself             fetch + checksum + load, at build time
+        │
+        ▼
+await_release.sh → smoke.sh            is the NEW model actually serving?
         │
         ▼
 scripts/cold_start.sh                  the number this section still owes you
 ```
 
-Pushing an `artifact-*` tag builds the image with `--build-arg ARTIFACT_TAG`,
-which fetches the release's assets and verifies them against the `SHA256SUMS`
-published beside them **during the build** — so a bad artifact fails the build
-rather than a stranger's first request. Authentication to Google is keyless
-(Workload Identity Federation, restricted to this repository); there is no
-service-account key in a repository secret.
+The build reads `MODEL_TAG`, downloads that release's assets, and verifies them
+against the `SHA256SUMS` published beside them **during the build** — so a bad
+artifact fails the build rather than a stranger's first request, and a failed
+build leaves the previous revision serving. Putting the tag in a committed file
+rather than a platform dashboard means *which model is serving* is answerable
+from git history.
 
-**The smoke test refuses a synthetic model.** `gcloud run deploy` succeeding
-proves a container started, not that it has a model: the image boots happily
-with none and reports `model_loaded: false` on purpose. So the deploy is only
-green if `/health` reports a loaded model, `/predict` returns a probability
-*with* the threshold it was compared against, a malformed payload still gets a
-422, and the loaded model was **not** fitted on the synthetic fixture. That last
-check is why the placeholder currently in `models/` cannot reach a public URL by
-accident. Setup, release ritual, rollback and teardown: [`docs/deploy.md`](docs/deploy.md).
+**The verification refuses three things.** A deploy is only green if the URL is
+serving the release the commit named — not the one it replaced, which is what an
+unwaited smoke test would happily confirm; if `/predict` returns a probability
+*with* the threshold it was compared against and a malformed payload still gets a
+422; and if the loaded model was **not** fitted on the synthetic fixture. That
+last check is why the placeholder currently in `models/` cannot reach a public
+URL by accident. Setup, release ritual, rollback and teardown:
+[`docs/deploy.md`](docs/deploy.md).
 
-The free-tier cost is known in advance, and measured rather than assumed. The
-image is 1.08 GB. The container settles at **377 MiB** resident with the model
-loaded, flat across repeated requests. Locally it answers `/health` **2.06 s**
-after start and serves its first prediction at **2.12 s** — but that is a warm
-page cache with no image pull, so treat it as a floor, not a forecast. The real
-cold start includes pulling a 1.08 GB image onto a cold instance; it gets
-measured and written here as a number before the link is given to anyone, and
-the UI's HTTP timeout is already set at 30 seconds for exactly that reason.
+**What the free tier costs, stated before the demo rather than during it.** The
+API instance has **512 MB of memory and 0.1 of a CPU**, spins down after 15 idle
+minutes, and takes about a minute to come back. Measured locally, the container
+settles at **377 MiB** resident with the model loaded, flat across repeated
+requests — so memory fits, with roughly 135 MB of headroom. It answers `/health`
+**2.06 s** after start *on a full core*, which is exactly why that figure is not
+a forecast: the expensive part of a cold start is importing scikit-learn and
+XGBoost and unpickling the artifact, and that is pure CPU, of which this instance
+has a tenth. **The real number is unmeasured until something is deployed**, and
+it gets written here before the link is given to anyone.
 
-That measurement is deliberately **not** taken by the deploy workflow. Deploying
-a revision starts an instance to check that it serves, so the first request
-afterwards finds a warm one and would report a comfortable number that is not a
-cold start. `scripts/cold_start.sh` waits out the idle window first and prints
-the cold and warm figures side by side, because the difference between them is
-the cost, and the absolute figure alone hides how much of it is just scoring a
-row.
+Two things follow from that and are already in the code. The UI's HTTP timeout is
+**90 seconds**, not 30, because a timeout tuned for a fast platform reports a
+working service as a dead one. And the UI fires `/health` when the page loads,
+with a "waking the prediction service" message on screen — spending the wake-up
+on the time a visitor was going to spend reading the form anyway. That is the
+only cold-start mitigation this architecture gets for free, now that there is no
+warm-instance knob to buy.
+
+That measurement is deliberately **not** taken by CI, which runs right after a
+rebuild when the service is warm. `scripts/cold_start.sh` waits out the idle
+window first and prints the cold and warm figures side by side, because the
+difference between them is the cost, and the absolute figure alone hides how much
+of it is just scoring a row.
 
 ---
 
