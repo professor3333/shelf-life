@@ -444,13 +444,59 @@ every figure above is as understood on 2026-09-06 — a day on which two figures
 believed the previous afternoon turned out to be wrong. None should be trusted
 without checking on the day.
 
-**Would change my mind:** a measured cold start past roughly 90 seconds, which
-would make the API unusable behind a form and would argue for the static-page
-fallback in §7c with the model served some other way; a resident-memory reading
-above ~450 MiB on the deployed instance, which would make 512 MB a coin flip
-rather than a fit; or Render requiring a payment method, which would end the
-option outright and promote the Koyeb question from "unverified" to "worth an
-afternoon".
+### The acceptance criterion — **ADDED 2026-09-06**
+
+Promoted from "would change my mind" to a **stop rule**, because the two are not
+the same thing and this one needed to be the second:
+
+> **If the measured cold start on the free instance exceeds 90 seconds, stop and
+> reassess the architecture. Do not raise the timeout.**
+
+The value of stating it now is that it is stated *before the number exists*. A
+threshold chosen after seeing the measurement is not a threshold, it is a
+description — and the specific way this one would have been quietly abandoned is
+obvious enough to name: a disappointing cold start arrives with its own fix
+already in reach, because `app/client.py` has a timeout and widening it makes the
+symptom go away. It changes nothing except who finds out. The stranger still
+waits; they just wait without a CI job objecting.
+
+So the rule is enforced rather than recorded. `scripts/cold_start.sh` exits
+non-zero past 90 seconds and prints the questions to ask instead, and
+`tests/test_deploy.py::test_the_ui_timeout_never_exceeds_the_cold_start_stop_rule`
+fails if the client timeout is raised above the criterion. Raising *both*
+together still works, which is correct: renegotiating the criterion should cost a
+diff and an entry here, not an afternoon's convenience.
+
+**What "reassess" means concretely**, so that the rule cannot be satisfied by
+staring at it:
+
+- Does this demonstration need a live API at all, or would a static page over
+  pre-computed examples show the same engineering? That trades interactivity for
+  a page that is never asleep, and it is the honest option rather than the
+  defeated one.
+- Does the served image have to carry XGBoost? Import-and-unpickle is what the
+  tenth of a CPU is spending its time on, and a convex model on the same
+  pipeline would start far faster — at a cost in PR-AUC that the model comparison
+  can price exactly, which makes it a measurable trade rather than a guess.
+- Is a different free host's instance meaningfully less starved? §7's table is
+  dated; the row that matters is CPU, and that is not the column any of them
+  advertise.
+
+**The invariant this must not violate**, stated because the pressure runs the
+other way when a demo is slow: **no deployment optimisation may modify
+`src/data`, `src/features` or `src/models`.** The hosting layer changed twice in
+two days and the ML system did not change at all, which is the property that
+makes the modelling numbers still mean what the reports say they mean. The
+regression guard is not the diff — it is the pinned-prediction test, which fails
+if the pipeline's output moves for any reason at all. Serving may be made faster;
+the model may not be made *different* in the process without that being its own
+decision, with its own entry, and its own re-measured numbers.
+
+**Would change my mind about the platform** (as opposed to the criterion): a
+resident-memory reading above ~450 MiB on the deployed instance, which would make
+512 MB a coin flip rather than a fit; or Render requiring a payment method, which
+would end the option outright and promote the Koyeb question from "unverified" to
+"worth an afternoon".
 
 ---
 

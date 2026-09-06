@@ -189,8 +189,23 @@ surprise being saved up for whoever is being shown the link.
 
 Two multipliers make the estimate untrustworthy until it is measured: the
 container's start is import-and-unpickle, which is pure CPU, and the free
-instance has **0.1** of one. If the measured figure is past roughly 90 seconds,
-§7e says that reopens the hosting decision rather than being tuned around.
+instance has **0.1** of one.
+
+**The script applies the acceptance criterion and exits non-zero past 90
+seconds.** That is a stop rule, not a warning: §7e says the architecture gets
+reassessed rather than tuned around, and the tuning knob — widening the UI's
+timeout until the slow service stops timing out — is blocked by
+`tests/test_deploy.py`, which fails if `app/client.py`'s timeout is raised above
+the criterion. Both numbers can be changed together, and that is a decision with
+a diff and a design-doc entry.
+
+**Set Render up before there is a model.** The measurement does not need one:
+importing scikit-learn and XGBoost and starting the process is the expensive
+part, and it happens whether or not an artifact loads. So deploy the
+no-artifact image, confirm `/health` reports `model_loaded: false`, and take the
+cold-start reading then — it is the one number that could still send the hosting
+decision back to §7, and it is available today rather than after the panel
+clears.
 
 ---
 
