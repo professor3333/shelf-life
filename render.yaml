@@ -1,0 +1,37 @@
+# The API service, as configuration rather than as a sequence of clicks.
+#
+# Render reads this file on connect and creates the service from it, so the
+# deployment is reviewable in a diff and reproducible by anyone who forks the
+# repository. `docs/deploy.md` §1 is the two-step version for a human.
+#
+# Free plan, deliberately and permanently: 0.1 CPU and 512 MB, no payment method
+# on file, and — the property that made this the choice — Render *suspends* free
+# services when a limit is reached rather than billing for the overage, because
+# with no card there is nothing to bill. `docs/design.md` §7b has the comparison
+# this came out of.
+
+services:
+  - name: shelf-life
+    type: web
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+
+    # The container reads $PORT; Render sets it. Nothing to configure.
+    #
+    # `/health` answers 200 whether or not a model loaded, and that is on
+    # purpose: it reports "the port is open" and "a model is loaded" as two
+    # separate facts, so a platform health check and a human debugging a bad
+    # deploy do not have to share one signal. It follows that a green health
+    # check here is NOT evidence that predictions work — `scripts/smoke.sh` is
+    # what asserts that, after the deploy, from outside.
+    healthCheckPath: /health
+
+    # Every push to the default branch rebuilds. That is how a model reaches
+    # production: `MODEL_TAG` changes in a commit, the image is rebuilt, and the
+    # build fetches that release and verifies it against its published
+    # checksums. There is no deploy credential in CI because there is no deploy
+    # step in CI — see `docs/design.md` §7f.
+    autoDeployTrigger: commit

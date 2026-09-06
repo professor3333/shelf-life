@@ -171,13 +171,63 @@ different days are not comparable.
 
 ---
 
-## 7. Where it deploys — **DECIDED 2026-09-05**
+## 7. Where it deploys — **REVISED 2026-09-06** (supersedes 2026-09-05)
 
-**The API on Google Cloud Run. The Streamlit UI on a Hugging Face Space. The
-frozen artifact ships as a release asset, not from a laptop.**
+**The API on a Render free web service. The Streamlit UI on Streamlit Community
+Cloud. The frozen artifact still ships as a GitHub release asset.**
 
-Three answers, because the question has three parts, and the third was the one
-actually blocking.
+The 2026-09-05 entry decided Cloud Run plus a Hugging Face Space. It is
+superseded on two counts, and only one of them is a change of mind.
+
+**The constraint changed.** No card, no billing account, genuinely $0 — not
+"free tier" but *free*. Cloud Run fails that on its own terms: §7b below said
+so a day ago, in the paragraph beginning "Not literally free, and worth saying
+so." A decision that already names its own disqualifier is not overturned by
+this constraint so much as read properly under it.
+
+**And the facts were wrong.** Verifying rather than assuming — which the old
+entry told itself to do, in the line "Verify the terms before deploying" — turned
+up that **Hugging Face Spaces running on compute are not free.** The Hub's own
+documentation:
+
+> Static Spaces are free for everyone. Gradio and Docker Spaces run on compute
+> and require a paid plan to create: PRO for personal accounts, Team or
+> Enterprise for organizations.
+
+The hardware table still lists **CPU Basic — 2 vCPU, 16 GB — FREE**, and that is
+the trap: the *hardware* costs nothing per hour, while the *right to create a
+Space that runs any* requires a subscription. Both readings fit the pricing
+page; only one fits the docs. The old §7c chose the wrong one and never checked,
+which is the same failure as §7d's 139.6 MiB reading — a number that looked
+right, taken once, believed.
+
+So the UI's home decided yesterday does not exist on a free account either, and
+Streamlit is no longer even a Spaces SDK: it is a Docker template, and therefore
+paid.
+
+### What is actually free, verified 2026-09-06
+
+| Option | $0? | Card? | Fits the API? | Verdict |
+|---|---|---|---|---|
+| **Render free web service** | yes, 750 instance-h/month | **no card** | 512 MB, 0.1 CPU, Docker | **chosen for the API** |
+| **Streamlit Community Cloud** | yes | **no card** | UI only, ~1 GB, GitHub-connected | **chosen for the UI** |
+| HF Docker Space | no — PRO required to create | — | would fit technically | rejected: not free |
+| HF Gradio on ZeroGPU | yes, 2 per free account | no | **Gradio SDK only** | rejected: cannot host FastAPI |
+| HF Static Space | yes | no | no server-side execution | rejected for the API; a UI fallback |
+| Google Cloud Run | no — billing account required | **yes** | fits well | rejected: excluded by the constraint |
+| Fly.io | no — free allowance withdrawn | yes | fits well | rejected: excluded by the constraint |
+| Koyeb | free plan exists | **unclear** — reports of card-on-file for human verification | 512 MB | rejected: cannot verify "no card" |
+| Northflank | free plan exists | **card required** | fits | rejected |
+| Railway | trial credit, not a free tier | yes | fits | rejected |
+| Vercel / Netlify functions | yes | no | bundle limits far below scikit-learn + XGBoost | rejected: wrong shape |
+
+**The requirement doing the most work is "no risk of accidental charges,"** and
+it is not satisfied by a generous allowance. It is satisfied by a platform that
+*cannot* bill me, because no payment instrument exists for it to charge. Render
+is chosen partly because its documented behaviour when a limit is hit is exactly
+that: *"If you haven't added a payment method, Render instead suspends all of
+your Free services."* Suspension is the correct failure mode here. A dead demo
+is recoverable; a surprise invoice on a portfolio project is not.
 
 ### 7a. Where the served model comes from
 
@@ -201,64 +251,121 @@ of a file that happened to be on a laptop that afternoon. And it leaves the
 of the scraper running. *Rejected:* building the image locally and pushing it —
 it works, and the answer to "what is serving right now?" becomes "trust me".
 
-### 7b. The API — Google Cloud Run
+**Amended 2026-09-06:** the decision above is unchanged — the artifact is a
+release asset and the build fetches it by tag. What changed is where the *tag*
+comes from: a committed `MODEL_TAG` file rather than a build argument passed by
+CI, because the platform now builds the image and CI no longer can pass one.
+§7f has the reasoning.
 
-The container is already the deployment unit and nothing has to change to ship
-it: `$PORT` is honoured, the process is non-root, and `/health` reports "port
-open" and "model loaded" as separate facts, which is exactly what a platform
-health check and a human need to distinguish during a bad deploy.
+### 7b. The API — a Render free web service
 
-It scales to zero, so an idle service costs nothing, and this service is idle
-almost always. The always-free allowance is orders of magnitude above anything
-a portfolio endpoint will see. And the cold start is **a knob rather than a
-fate** — startup CPU boost, and `--min-instances=1` when it matters — which is
-the property Render does not offer at any price on its free tier.
+Nothing about the container changes: `$PORT` is honoured, the process is
+non-root, and `/health` reports "port open" and "model loaded" as separate
+facts. Render builds from the `Dockerfile` in the repository, and — usefully —
+**translates a service's environment variables into Docker build arguments**, so
+`ARTIFACT_TAG` reaches the build exactly as it does locally and §7a survives
+untouched.
 
-**Not literally free, and worth saying so.** Artifact Registry storage for a
-~1 GB image sits just above the 0.5 GB free allowance — pennies a month — and
-Cloud Run requires a billing account with a card on file. A "free tier" that
-needs a card is a thing to learn now rather than mid-deploy.
+What the free instance actually is, and both numbers matter:
 
-*Rejected — Render free web service:* **and the stated reason has changed now
-that it is measured.** The first draft of this entry rejected Render on memory,
-guessing 300–500 MB resident and calling 512 MB a coin flip. Measured (§7e), the
-container settles at **377 MiB**, which fits — with about 135 MB of headroom.
-Thin, and thinner still because that figure is the synthetic model on arm64, but
-not the disqualification I claimed before measuring. Render is rejected on the
-other two: it sleeps after 15 minutes idle where a Space sleeps after days, and
-its free tier offers no equivalent of startup CPU boost or `--min-instances`, so
-the cold start is a fate rather than a knob. Memory is now a caution, not a
-verdict.
+| | |
+|---|---|
+| Memory | **512 MB** |
+| CPU | **0.1 vCPU** |
+| Included | 750 instance-hours per month per workspace |
+| Idle behaviour | spins down after **15 minutes** without inbound traffic |
+| Wake | about **one minute**, serving a loading page meanwhile |
+| Disk | none persistent; filesystem changes are lost on spin-down |
+| Build | 500 build-minutes per month, 100 GB bandwidth |
+| Payment method | **not required** |
 
-*Rejected — Fly.io:* scale-to-zero is good and the ergonomics are pleasant, but
-the free allowance is gone, so it is the *cheap* option rather than the free
-one. It stays the fallback if the card requirement is unacceptable.
+**512 MB is thin but measured.** §7d put the container at 377 MiB resident with
+the model loaded, flat across repeated requests — about 135 MB of headroom. That
+was measured on arm64 serving the synthetic artifact, so it is an estimate for
+this instance rather than a reading of it, and it is the first thing to
+re-measure once something real is deployed.
 
-*Rejected — function-shaped hosts* (Vercel, Netlify, a zipped Lambda): a 1 GB
-image whose whole job is to hold a fitted pipeline in memory between requests
-is the wrong shape for a platform that bills per invocation and rebuilds state
-each time.
+**0.1 CPU is the number that hurts, and the old entry never considered it.**
+Every previous paragraph about cold starts reasoned about *memory* and image
+pull. But the expensive part of this container's start is importing
+scikit-learn and XGBoost and unpickling the artifact, and that is pure CPU. The
+2.06 s measured in §7d was on a full core; at one tenth of a core the arithmetic
+is not encouraging, and Render's own documented wake time is "about one minute."
+**This is an unmeasured number that a demo depends on**, which is precisely the
+species of claim §7e exists to forbid. It gets measured before the link is given
+to anyone, and if it lands somewhere absurd the fallback in §7c applies.
 
-### 7c. The UI — a Hugging Face Space
+Render says of these instances: *"Do not use them for production applications."*
+Quoted rather than hidden, because it is the correct expectation to set. This is
+a portfolio demonstration, the failure mode is a slow first request, and the
+alternative that removes it costs money.
 
-Free without a card, a native Streamlit runtime, and therefore none of the
-websocket and session-affinity configuration that Streamlit needs to survive on
-a general-purpose container host. It sleeps after roughly two days idle rather
-than fifteen minutes, which is the right behaviour for a link someone opens
-three days after being sent it.
+*Rejected — Google Cloud Run:* the best technical fit and still the answer if
+the constraint ever relaxes. Scale-to-zero, startup CPU boost, `--min-instances`
+as a knob. It needs a billing account with a card, which is now disqualifying on
+its own, independent of whether a charge would ever arrive.
 
-The property worth the most is architectural. `app/` may not import `src/` —
-today that is a rule enforced by a test. Put the UI on a different host and it
-becomes enforced by physics: the model code is not there to import. The UI
-reaches the model the only way it is allowed to, over HTTP, because there is no
-other way left.
+*Rejected — Hugging Face Docker Space:* would have been ideal — 2 vCPU and 16 GB
+would erase both of the concerns above, and it would have put the API and UI on
+one platform. Creating a Space that runs on compute requires PRO. The hardware is
+free; permission to use it is not.
 
-Configuration is one variable: `SHELF_LIFE_API` points at the Cloud Run URL, set
-as a Space secret.
+*Rejected — Koyeb:* a real free plan with scale-to-zero, but the card question
+could not be settled: Koyeb states it may request a card when it cannot
+otherwise verify a human. "Probably no card" does not satisfy a requirement
+whose whole point is certainty. Worth revisiting if that is ever verified.
 
-*Rejected, but only just — both services on Cloud Run:* one platform, one auth
-model, one deploy shape. The argument is real and it is the thing to revisit if
-running two platforms turns out to be a nuisance rather than a separation.
+*Rejected — Fly.io, Northflank, Railway:* the free allowance is gone, a card is
+required, and a trial credit is not a free tier, respectively.
+
+*Rejected — function-shaped hosts:* unchanged from yesterday, and now doubly so.
+Vercel and Netlify cap a Python bundle far below what scikit-learn and XGBoost
+weigh, before the fitted pipeline is even considered.
+
+### 7c. The UI — Streamlit Community Cloud
+
+Free, no card, roughly 1 GB of memory, deployed straight from this GitHub
+repository, and — the reason it wins over every alternative — **it runs the
+Streamlit app that already exists, unchanged.** Every other free option for the
+UI required rewriting it.
+
+It sleeps after **12 hours** without traffic and shows a wake-up page to the next
+visitor, who can start it. That is a far better idle story than the API's 15
+minutes, which produces a small irony worth naming: *the form will usually be
+awake while the service behind it is asleep.* §7e is about what to do with that.
+
+*Rejected — a Hugging Face Space:* yesterday's answer, and it is gone rather
+than outvoted. Streamlit is no longer a Spaces SDK; it is a Docker template, and
+Docker Spaces require PRO.
+
+*Rejected — a Hugging Face Static Space, or GitHub Pages:* genuinely free, never
+sleeps, and would mean rewriting the form as HTML and JavaScript and adding CORS
+to the API. It stays the fallback if Streamlit Community Cloud changes terms,
+and the cost of taking it is a rewrite plus losing Streamlit from the skill list
+this build was supposed to produce.
+
+*Rejected — a Gradio Space on ZeroGPU:* free for up to two Spaces on a personal
+account in good standing, and the only free compute Hugging Face offers. It is
+Gradio-only and GPU-oriented; using a GPU allocation to host a form that calls a
+CPU model over HTTP is off-label enough to risk being flagged, and it would also
+mean a rewrite.
+
+*Rejected — putting the model inside the Streamlit app:* one deployment, no cold
+start between two hosts, 1 GB of memory, and it would work. It is rejected
+because it deletes the boundary this project is partly *about*: `app/` must not
+import `src/`, the UI must reach the model over HTTP, and a UI that loads the
+artifact directly is a second copy of the model wearing the same name. The
+constraint is $0, not "$0 at any architectural price."
+
+**What the boundary costs now that both halves live in one repository.**
+Yesterday the separation was enforced by physics: `src/` was not deployed to the
+Space, so the UI could not import it if it tried. Streamlit Community Cloud
+checks out the whole repository, so that is no longer true. Two things hold the
+line instead — `tests/test_app.py`, which parses the UI for imports of `src/` and
+fails, and the dependency list the UI installs, which contains no scikit-learn,
+no XGBoost and no joblib, so an import added in a hurry fails at load rather than
+succeeding quietly. **That is weaker than physics and it is worth writing down
+as a downgrade** rather than pretending the test was always the point.
 
 ### 7d. What it measures, on 2026-09-05
 
@@ -275,9 +382,18 @@ decision above.
 | Container start → first `/predict` | 2.12 s |
 
 **What these are not.** The 2-second start is a *local* container on a warm
-page cache with no image pull — a lower bound for Cloud Run, not a prediction of
-it. The real cold start includes pulling a 1.08 GB image onto a cold instance,
-and it is the number §7e promises to measure and publish at deploy.
+page cache with no image pull, **on a full core** — a lower bound, not a
+prediction. The real cold start includes fetching a 1.08 GB image onto a cold
+instance and then doing that same import-and-unpickle work on **0.1 vCPU**, and
+it is the number §7e promises to measure and publish at deploy.
+
+**Re-read under the 2026-09-06 constraint, these numbers say something
+different.** They were taken to answer "does it fit in memory?", and the answer
+— 377 MiB against 512 MB — still holds. They were never taken to answer "how
+long does this take on a tenth of a core?", which is now the question that
+decides whether the demo is pleasant, and none of the figures above bear on it.
+A measurement kept past the question it was taken for is a number looking for a
+claim to support.
 
 **One measurement was nearly wrong in the honest direction.** A first
 `docker stats --no-stream` taken immediately after startup read 139.6 MiB — the
@@ -288,77 +404,120 @@ still starting is not a measurement of that process.
 
 ---
 
-### 7e. What happens when it sleeps
+### 7e. What happens when it sleeps — **REVISED 2026-09-06**
 
-The open question from the build rules, answered as a plan rather than a hope:
+Under the old plan this had a knob. Under this one it does not, and that is the
+price of the constraint: the API spins down after **15 minutes** idle and takes
+**about a minute** to come back, and there is no `--min-instances`, no startup
+CPU boost, and no paid escape hatch. So the plan is about *managing* a cold start
+rather than shortening one.
 
-1. **Measure it.** Time the first request after thirty minutes idle and put the
-   number in the README. A cold start nobody has timed is a surprise being saved
-   up for whoever is being shown the link.
-2. **Startup CPU boost on**, because the expensive part is import and unpickle,
-   which is exactly the window it covers.
-3. **Say so in the UI.** The client already sets a 30-second timeout for this
-   reason; the first request gets a "waking the service" message rather than a
-   spinner that looks like a hang.
-4. **No keep-warm cron.** Pinging a scale-to-zero service every ten minutes
-   converts it into an always-on one in order to hide a delay — it spends the
-   free tier to avoid explaining a spinner, and it makes the idle cost real.
-5. **For a live demo, `--min-instances=1` beforehand and back to 0 after.** A
-   deliberate, temporary, costed decision, which is a different thing from
-   leaving it on.
+1. **Measure it, on the deployed service, before showing anyone.** Unchanged and
+   more important than before, because the estimate now has two unmeasured
+   multipliers in it — 0.1 CPU and a platform wake. `scripts/cold_start.sh`
+   already does this; only the idle wait changes, from 20 minutes to 16.
+2. **The UI wakes the API while the form is being filled in.** This is the one
+   real mitigation the architecture makes free. Streamlit Community Cloud sleeps
+   after 12 hours and the API after 15 minutes, so in practice a visitor arrives
+   at a *live* form in front of a *sleeping* service. Firing `GET /health` when
+   the page loads spends the user's form-filling time on the spin-up instead of
+   making them wait for it afterwards. It costs one request and turns the
+   asymmetry between the two sleep timers from a problem into the fix.
+3. **Say so on screen**, and raise the client timeout. 30 seconds was chosen
+   against a platform that promised a fast start; against "about one minute" it
+   is a timeout that fires on the normal case. It goes to 90 seconds, with a
+   "waking the service, this takes up to a minute on the free tier" message —
+   the honest sentence, not a spinner.
+4. **Still no keep-warm cron, and now the arithmetic says so too.** Render
+   includes 750 instance-hours a month; a 31-day month is 744. Pinging every ten
+   minutes to stay always-on would consume essentially the entire allowance to
+   hide a delay, leaving nothing for a second service and no margin for a long
+   month — and when the allowance runs out, free services are suspended until the
+   month turns. That trade is bad: it converts a one-minute wait into a
+   multi-day outage risk.
+5. **For a live demo, warm it by hand.** Open the URL a minute before. That is
+   the whole procedure, it costs nothing, and it is the honest replacement for
+   the `--min-instances=1` line this entry used to carry.
 
 **Verify the terms before deploying.** Free-tier allowances change often and
-every figure above is as understood at the time of writing. None of them should
-be trusted without checking on the day.
+every figure above is as understood on 2026-09-06 — a day on which two figures
+believed the previous afternoon turned out to be wrong. None should be trusted
+without checking on the day.
 
-**Would change my mind:** a measured cold start much past ~20 seconds, which
-would make the demo worse than the caveat is worth and would argue for a small
-always-on instance instead; a resident-memory measurement that does not fit the
-tier; or the two-platform split costing more attention than the separation
-buys.
+**Would change my mind:** a measured cold start past roughly 90 seconds, which
+would make the API unusable behind a form and would argue for the static-page
+fallback in §7c with the model served some other way; a resident-memory reading
+above ~450 MiB on the deployed instance, which would make 512 MB a coin flip
+rather than a fit; or Render requiring a payment method, which would end the
+option outright and promote the Koyeb question from "unverified" to "worth an
+afternoon".
 
 ---
 
-### 7f. The deploy path, and the gate on it — **DECIDED 2026-09-06**
+### 7f. The deploy path, and the gate on it — **REVISED 2026-09-06**
 
-The decisions above were made before there was anything to run them with. The
-path is now built — `.github/workflows/deploy.yml`, `scripts/smoke.sh`,
-`scripts/cold_start.sh`, `deploy/space/`, and the runbook in `docs/deploy.md` —
-and building it forced one decision the earlier entries did not make.
+Written first against Cloud Run, then rewritten the same day when the platform
+changed. Most of it survived, which is the useful part of the story: the
+decisions that were about *the shape of a deploy* outlived the decision about
+where it lands, and the ones that were about a particular vendor did not.
 
-**A deploy is not green because it deployed.** The image boots with no artifact
-on purpose (§7a), reports `model_loaded: false`, and answers 503. That is a
-successful `gcloud run deploy` and a useless service, so the workflow's last step
-is a smoke test against the live URL and the deploy fails if it fails.
+**What survived, unchanged.**
 
-**The gate: the smoke test refuses a model whose `dataset` is `synthetic`.**
-Every component here is exercised on a synthetic panel whose label is drawn
+*A deploy is not green because it deployed.* The image boots with no artifact on
+purpose (§7a), reports `model_loaded: false`, and answers 503. That is a
+successful deploy of a useless service on any platform, so the last step is a
+smoke test against the live URL and the deploy fails if it fails.
+
+*The gate: the smoke test refuses a model whose `dataset` is `synthetic`.* Every
+component here is exercised on a synthetic panel whose label is drawn
 independently of every feature — the right thing to build against, and a
-placeholder whose predictions are noise. On a laptop that is obvious, because
-whoever is running it knows. Behind a public URL it is invisible: the response
-carries `dataset` for exactly this reason, but nobody reads a field to find out
-whether the number they were given means anything. `ALLOW_SYNTHETIC=1` overrides
-it for a deliberate rehearsal, which is a different act from forgetting.
+placeholder whose predictions are noise. On a laptop that is obvious. Behind a
+public URL it is invisible. `ALLOW_SYNTHETIC=1` overrides it for a deliberate
+rehearsal, which is a different act from forgetting.
 
-Chosen over the alternative of simply not deploying until the panel clears: that
-is what is happening anyway, but "we will remember" is not a mechanism, and the
-mechanism costs four lines.
+*The cold start is not measured by the deploy*, because deploying starts an
+instance to verify it serves. Only an idle service gives the number.
 
-**Authentication is keyless** — Workload Identity Federation, with an attribute
-condition restricting the provider to this repository. Rejected: a
-service-account JSON key in a repository secret, which is a permanent credential
-in a place that gets copied, and which outlives the laptop that created it.
+**What changed, and why.**
 
-**The cold start is not measured by the deploy.** Deploying a revision starts an
-instance to verify it serves, so the first request after a deploy finds a warm
-one — the same class of mistake as §7d's 139.6 MiB reading, and caught this time
-before it was published rather than after. `scripts/cold_start.sh` waits out the
-idle window and prints cold beside warm.
+*Keyless authentication is gone, because there is nothing to authenticate to.*
+Workload Identity Federation was the right answer to "how does CI get a Google
+credential without storing one." Render and Streamlit Community Cloud both build
+from the GitHub repository they are connected to, so the honest answer is now
+that CI holds no deployment credential at all. That is strictly better and it is
+not to my credit — the constraint removed the problem.
 
-**Would change my mind:** if the artifact-tag trigger turns out to conflate two
-things that should stay separate — "a new model" and "a new deploy of the same
-model" — the manual `workflow_dispatch` path becomes the primary one and the tag
-trigger goes.
+*The tag moves from a build argument into the repository.* Under the old design
+the workflow built the image itself and passed `--build-arg ARTIFACT_TAG`. Render
+builds the image, so the tag has to reach it some other way. Render does
+translate a service's environment variables into build arguments, which would
+work — but setting one from CI needs a Render API key, which reintroduces the
+credential that the previous paragraph just celebrated losing.
+
+**Decision: a one-line `MODEL_TAG` file, committed.** The Dockerfile reads it
+when no `ARTIFACT_TAG` build argument is supplied, so local builds keep their
+override and the deployed build needs no configuration at all. Releasing a model
+becomes: cut the release, write the tag into `MODEL_TAG`, push. Render redeploys
+on the push, and **"which model is serving?" becomes a question answerable from
+git history alone** — better than the build-argument version, which answered it
+from a dashboard.
+
+*Rejected — the Render API from CI:* one more key, one more thing to rotate, to
+set a value that wants to be version-controlled anyway.
+
+*The trigger changes shape.* Pushing an `artifact-*` tag no longer *performs* the
+deploy — the platform does, on the push to `main` that carries the new
+`MODEL_TAG`. What remains for GitHub Actions is the half that is still worth
+automating: wait for the new revision to answer, then smoke-test it, and fail
+loudly if a placeholder or a model-less container reached the URL. A workflow
+that verifies someone else's deploy is a smaller thing than one that performs the
+deploy, and it is the correct size for the job that is left.
+
+**Would change my mind:** if Render's free tier disappears or grows a card
+requirement, this whole entry reopens and §7c's static-page fallback is the first
+thing to price. If the measured cold start makes the demo unusable, the question
+stops being "where does the API live" and becomes "does this demo need a live API
+at all", which is a genuinely different design.
 
 ---
 

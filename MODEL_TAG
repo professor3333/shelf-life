@@ -1,0 +1,12 @@
+# Which released model this image serves.
+#
+# One line: the GitHub release tag carrying `shelf_life.joblib`,
+# `shelf_life.json` and `SHA256SUMS` — for example `artifact-2026-09-08`.
+# The Dockerfile fetches that release at build time and verifies it against the
+# published checksums; `docs/design.md` §7f says why the tag lives here rather
+# than in a platform dashboard.
+#
+# Empty below on purpose. The panel is not yet deep enough to freeze a model
+# against (`reports/test_results.md` records the shortfall), so there is no
+# release to name, and an image built today is deliberately the no-artifact one:
+# it starts, reports `model_loaded: false`, and refuses to predict.

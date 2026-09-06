@@ -1,0 +1,18 @@
+# What Streamlit Community Cloud installs to run the UI — and nothing else.
+#
+# This file is the deployment boundary made physical. Community Cloud checks out
+# the whole repository, so `app/` sits next to `src/` and could import it; what
+# stops that is this list, which contains no scikit-learn, no XGBoost and no
+# joblib. An import of `src/` added in a hurry fails at load rather than quietly
+# succeeding and serving a second, silently different, copy of the model.
+#
+# `tests/test_app.py` asserts the same rule by parsing the UI's imports, and
+# `tests/test_deploy.py` asserts that this file covers everything `app/` does
+# import. Two checks, because the consequence of missing it is a deployment where
+# the UI and the API answer from different models and nothing says so.
+#
+# The API is not installed from here. It is a container, built from the
+# Dockerfile, deployed separately — `docs/design.md` §7b.
+streamlit>=1.36
+requests>=2.32
+pandas>=2.2

@@ -52,6 +52,13 @@ from src.inference.predict import Predictor
 #: and a test can point at one it built itself.
 ARTIFACT_ENV = "SHELF_LIFE_ARTIFACT"
 
+#: The release tag the image was built from. Set by the Dockerfile from
+#: `MODEL_TAG`, absent everywhere else. Reported by `/health` so that a deploy
+#: can be verified from outside as *the new one* rather than merely as *a live
+#: one* — polling an endpoint that cannot tell you which version answered is how
+#: a smoke test passes against the revision it was supposed to replace.
+ARTIFACT_TAG_ENV = "SHELF_LIFE_ARTIFACT_TAG"
+
 DESCRIPTION = """
 Predicts whether a job posting will be **removed from the board** within the
 model's horizon, from information available at the moment it is first seen.
@@ -66,11 +73,29 @@ a probability alone is not a decision.
 """
 
 
+#: Written by the Dockerfile with the tag the build actually fetched. Absent
+#: outside a container, which is why `/health` reports `null` locally rather
+#: than guessing from `MODEL_TAG` — that file states an intention, and reporting
+#: an intention as a fact is the drift this field exists to expose.
+ARTIFACT_TAG_FILE = Path(__file__).resolve().parent.parent / "ARTIFACT_TAG"
+
+
 def artifact_path(override: Path | str | None = None) -> Path:
     """Explicit argument, then environment, then the default location."""
     if override is not None:
         return Path(override)
     return Path(os.environ.get(ARTIFACT_ENV, DEFAULT_ARTIFACT))
+
+
+def artifact_tag() -> str | None:
+    """The release this image was built from, or `None` if it was not built from one."""
+    from_env = os.environ.get(ARTIFACT_TAG_ENV)
+    if from_env:
+        return from_env
+    try:
+        return ARTIFACT_TAG_FILE.read_text().strip() or None
+    except OSError:
+        return None
 
 
 def create_app(artifact: Path | str | None = None) -> FastAPI:
@@ -137,6 +162,7 @@ def create_app(artifact: Path | str | None = None) -> FastAPI:
                 status="degraded",
                 model_loaded=False,
                 artifact=str(app.state.artifact_path),
+                artifact_tag=artifact_tag(),
                 detail=getattr(app.state, "detail", None),
             )
         metadata = predictor.metadata
@@ -144,6 +170,7 @@ def create_app(artifact: Path | str | None = None) -> FastAPI:
             status="ok",
             model_loaded=True,
             artifact=str(app.state.artifact_path),
+            artifact_tag=artifact_tag(),
             model=metadata.run_name,
             dataset=metadata.dataset,
             horizon_days=metadata.horizon_days,

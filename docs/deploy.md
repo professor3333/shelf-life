@@ -1,148 +1,108 @@
 # Deploying
 
-> The decisions are in `docs/design.md` §7 — *why* Cloud Run, why a Hugging Face
-> Space, why the model arrives by release tag. This file is the runbook: the
-> commands, in order, and what each one is for.
+> The decisions are in `docs/design.md` §7 — why Render, why Streamlit Community
+> Cloud, what was verified on 2026-09-06 and what that overturned. This file is
+> the runbook: the commands, in order, and what each one is for.
+
+**Everything here is free and stays free.** No payment method, no billing
+account, no card on either platform. That is a hard constraint, not a
+preference, and §7b explains why Render was chosen partly *for its failure
+mode*: with no card on file it suspends a service that exceeds a limit rather
+than billing for the overage, because there is nothing to bill.
 
 ```
-python -m src.models.freeze          the model becomes a file
+python -m src.models.freeze        the model becomes a file
         │
         ▼
-gh release create artifact-<date>    the file becomes a version
+gh release create artifact-<date>  the file becomes a version
         │
         ▼
-.github/workflows/deploy.yml         the version becomes an image, then a URL
+echo <tag> > MODEL_TAG ; git push  the version becomes the deployed one
         │
         ▼
-scripts/smoke.sh                     the URL becomes a service that answers
+Render rebuilds, by itself         no deploy credential anywhere in CI
         │
         ▼
-scripts/cold_start.sh                the service becomes a number in the README
+Verify deployment workflow         await_release.sh, then smoke.sh
+        │
+        ▼
+scripts/cold_start.sh              the number the README owes a visitor
 ```
 
-Four things must be true before any of it runs, and the workflow's preflight
-checks the first two so a misconfiguration fails in ten seconds rather than in
-four minutes:
+Two things must be true before any of it matters, and the workflow checks both
+and exits **green** if either is missing, because a check that fails on every
+push before the service exists is a check people learn to ignore:
 
-1. The repository has the six deploy variables set (§1).
-2. A release tag exists carrying the three artifact assets (§2).
-3. The artifact was fitted on the **real** panel, not the synthetic one. The
-   smoke test refuses a deploy serving a model whose `dataset` is `synthetic`,
-   because a placeholder behind a public URL is indistinguishable from a
-   prediction to everyone except the person who built it.
-4. `main` is green.
+1. The repository variable `SHELF_LIFE_API` names the deployed API.
+2. `MODEL_TAG` names a release. Until the panel clears its depth gate there is
+   no model to release, the file is deliberately empty, and the deployed service
+   is deliberately model-less.
 
 ---
 
-## 1. One-time Google Cloud setup
+## 1. One-time setup
 
-Done once, by hand, from a machine with `gcloud` installed and authenticated
-(`gcloud auth login`). Nothing here is secret — a project id is not a
-credential — so all of it ends up in repository **variables**, which are
-readable in the workflow log and therefore debuggable.
+### The API — a Render web service
 
-Set the shell variables once and paste the rest:
+No CLI, no key, no local Docker. Render reads `render.yaml` from the repository.
 
-```bash
-export PROJECT_ID=shelf-life-prod          # yours; must have billing enabled
-export REGION=europe-west1                 # near you, and near nothing else
-export REPO=containers                     # the Artifact Registry repository
-export SERVICE=shelf-life
-export GH_REPO=professor3333/shelf-life
-```
+1. Sign up at <https://render.com> with the GitHub account. **Do not add a
+   payment method.** Its absence is what makes the $0 guarantee mechanical
+   rather than aspirational.
+2. **New → Blueprint**, pick this repository. Render finds `render.yaml` and
+   proposes one free web service named `shelf-life`.
+3. Apply. The first build takes a while — it installs scikit-learn and XGBoost
+   into a ~1 GB image on a shared builder.
+4. Copy the service URL (`https://shelf-life-<something>.onrender.com`) and tell
+   the repository about it:
 
-**A billing account is required even though the usage is free.** Cloud Run's
-always-free allowance is far above anything a portfolio endpoint will see, but
-the project will not accept a deploy without a card on file, and Artifact
-Registry storage for a ~1 GB image sits just above the 0.5 GB free tier —
-pennies a month, not zero. `docs/design.md` §7b says so at greater length. Check
-the current terms rather than trusting that paragraph: free-tier allowances move.
+   ```bash
+   gh variable set SHELF_LIFE_API --body "https://shelf-life-xxxx.onrender.com"
+   ```
 
-```bash
-gcloud config set project "${PROJECT_ID}"
+The service is public and unauthenticated by design: the point of the build is
+that a stranger can POST to it.
 
-gcloud services enable \
-  run.googleapis.com \
-  artifactregistry.googleapis.com \
-  iamcredentials.googleapis.com
+**What you get, and it is worth knowing before the demo rather than during it:**
+0.1 CPU, 512 MB of memory, a spin-down after 15 idle minutes, and about a minute
+to come back. Render's own documentation says of these instances: *"Do not use
+them for production applications."* That is the correct expectation. This is a
+portfolio demonstration and the failure mode is a slow first request.
 
-# Somewhere to push the image.
-gcloud artifacts repositories create "${REPO}" \
-  --repository-format=docker --location="${REGION}" \
-  --description="Container images for shelf-life"
-```
+### The UI — Streamlit Community Cloud
 
-### The identity GitHub Actions deploys as
+1. Sign in at <https://share.streamlit.io> with the same GitHub account. No card.
+2. **Create app → deploy from a repo**, with:
 
-The workflow authenticates **without a key**. GitHub mints a short-lived OIDC
-token for each run and Google trades it for a short-lived access token, scoped
-to one service account. The alternative — a service-account JSON key pasted into
-a repository secret — is a permanent credential living somewhere that gets
-copied, and it stays valid long after the laptop that made it is gone.
+   | Field | Value |
+   |---|---|
+   | Repository | `professor3333/shelf-life` |
+   | Branch | `main` |
+   | Main file path | `app/streamlit_app.py` |
 
-```bash
-gcloud iam service-accounts create github-deployer \
-  --display-name="GitHub Actions deployer"
+3. In **Advanced settings → Secrets**, point the UI at the API:
 
-DEPLOYER="github-deployer@${PROJECT_ID}.iam.gserviceaccount.com"
+   ```toml
+   SHELF_LIFE_API = "https://shelf-life-xxxx.onrender.com"
+   ```
 
-# Exactly three permissions: push an image, deploy a revision, and act as the
-# service's own runtime identity. Not Editor.
-for role in roles/run.admin roles/artifactregistry.writer roles/iam.serviceAccountUser; do
-  gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-    --member="serviceAccount:${DEPLOYER}" --role="${role}"
-done
+Dependencies come from `requirements.txt` at the repository root, which installs
+Streamlit, requests and pandas — **and nothing that could load a model**. That
+is deliberate: Community Cloud checks out the whole repository, so `app/` sits
+next to `src/` and could import it. The dependency list and `tests/test_app.py`
+are what stop that. `docs/design.md` §7c records this as a downgrade from the
+previous arrangement, where the UI was deployed without `src/` present at all.
 
-# The pool, and the provider that trusts GitHub's OIDC issuer.
-gcloud iam workload-identity-pools create github \
-  --location=global --display-name="GitHub"
-
-gcloud iam workload-identity-pools providers create-oidc github-provider \
-  --location=global --workload-identity-pool=github \
-  --display-name="GitHub provider" \
-  --issuer-uri="https://token.actions.githubusercontent.com" \
-  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
-  --attribute-condition="assertion.repository == '${GH_REPO}'"
-```
-
-**The `--attribute-condition` is the load-bearing line.** Without it the
-provider trusts *every* repository on GitHub, and any workflow anywhere could
-request a token for this service account. With it, only this repository can.
-
-```bash
-PROJECT_NUMBER=$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')
-POOL="projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github"
-
-# Let workflows from this repository impersonate the deployer.
-gcloud iam service-accounts add-iam-policy-binding "${DEPLOYER}" \
-  --role=roles/iam.workloadIdentityUser \
-  --member="principalSet://iam.googleapis.com/${POOL}/attribute.repository/${GH_REPO}"
-
-echo "${POOL}/providers/github-provider"   # ← the value of GCP_WORKLOAD_IDENTITY_PROVIDER
-```
-
-### Tell the repository where all that is
-
-```bash
-gh variable set GCP_PROJECT_ID  --body "${PROJECT_ID}"
-gh variable set GCP_REGION      --body "${REGION}"
-gh variable set GCP_ARTIFACT_REPO --body "${REPO}"
-gh variable set GCP_SERVICE     --body "${SERVICE}"
-gh variable set GCP_SERVICE_ACCOUNT --body "${DEPLOYER}"
-gh variable set GCP_WORKLOAD_IDENTITY_PROVIDER \
-  --body "${POOL}/providers/github-provider"
-
-gh variable list
-```
+Without the secret the UI defaults to `http://localhost:8000` and shows the
+error saying so.
 
 ---
 
-## 2. Release the artifact
+## 2. Release a model
 
-The image does not contain a model until a release does. `models/` is derived
-output and is not committed (`docs/design.md` §7a), so the artifact reaches the
-build the only way that leaves "which model is serving?" answerable: as a
-version.
+The image contains no model until a release exists. `models/` is derived output
+and is not committed (`docs/design.md` §7a), so the artifact reaches the build
+the only way that leaves "which model is serving?" answerable: as a version.
 
 ```bash
 python -m src.models.freeze --run <spec>              # opens the test block, once
@@ -152,7 +112,7 @@ TAG="artifact-$(date -u +%Y-%m-%d)"
 gh release create "${TAG}" \
   models/shelf_life.joblib models/shelf_life.json models/SHA256SUMS \
   --title "Model ${TAG}" \
-  --notes "Fitted on <panel snapshot>. Validation and test numbers: reports/test_results.md"
+  --notes "Fitted on <panel snapshot>. Numbers: reports/test_results.md"
 ```
 
 Write the checksums **immediately after** freezing and before uploading, so they
@@ -163,124 +123,106 @@ from a panel that has since grown.
 
 ## 3. Deploy
 
-Pushing the tag is the deploy:
+Deploying is a commit. There is no deploy command, no CLI, and no credential.
 
 ```bash
-git push origin "${TAG}"
-gh run watch
+printf '%s\n' "${TAG}" > MODEL_TAG
+git add MODEL_TAG && git commit -m "deploy: serve ${TAG}"
+git push
 ```
 
-Or re-deploy an existing artifact — after an API fix, say — without cutting a
-new model version:
+Render rebuilds on the push. The build reads `MODEL_TAG`, downloads that
+release's assets, **verifies them against the `SHA256SUMS` published with the
+release**, and then loads the artifact to prove it is a fitted end-to-end
+pipeline in the environment that will serve it. A bad artifact fails the build
+rather than a stranger's first request, and a failed build leaves the previous
+revision serving.
+
+`MODEL_TAG` may carry `#` comments; the first non-comment, non-blank line is the
+tag. An effectively empty file means "no model", and the image built from it
+starts, reports `model_loaded: false`, and answers 503 — deliberately, because a
+container that refuses to boot over a missing file turns a one-line diagnosis
+into a log-reading exercise.
+
+### What the CI workflow then does
+
+`.github/workflows/verify-deployment.yml` does **not** deploy. It waits for the
+URL to report the release this commit named, then smoke-tests it:
 
 ```bash
-gh workflow run deploy.yml -f tag=artifact-2026-09-08
+./scripts/await_release.sh "$SHELF_LIFE_API" "$TAG" 20
+./scripts/smoke.sh         "$SHELF_LIFE_API" "$TAG"
 ```
 
-What the workflow does, in the order it does it: checks the six variables,
-checks the release carries all three assets, authenticates keylessly, builds the
-image with `--build-arg ARTIFACT_TAG` (which fetches and checksum-verifies the
-artifact *during the build*, so a bad artifact fails the build rather than the
-stranger's first request), pushes it tagged with both the artifact tag and the
-commit SHA, deploys with `--cpu-boost` and `--min-instances=0`, and finally runs
-`scripts/smoke.sh` against the live URL.
+Both are runnable by hand against any URL. The wait exists because the build
+takes minutes, during which the service is up, healthy, and answering **from the
+previous model** — a smoke test run inside that window passes and proves nothing.
 
-**The deploy is not the test.** A revision that answers 503 to every caller is a
-successful `gcloud run deploy`: the image boots happily with no artifact and
-reports `model_loaded: false` on purpose. The smoke step is what turns that into
-a failed workflow.
-
-### Verifying by hand
-
-```bash
-./scripts/smoke.sh "$(gcloud run services describe "${SERVICE}" \
-    --region "${REGION}" --format 'value(status.url)')"
-```
+The smoke test fails the deployment unless a model is loaded, the response
+carries the threshold it was compared against, a malformed payload still gets a
+422, the release serving is the expected one, and the model was **not** fitted on
+the synthetic panel. `ALLOW_SYNTHETIC=1` overrides the last check for a
+deliberate rehearsal.
 
 ### Which model is actually serving
 
 ```bash
-curl -s "${URL}/health" | python3 -m json.tool     # run name, dataset, threshold
-gcloud run services describe "${SERVICE}" --region "${REGION}" \
-  --format 'value(spec.template.spec.containers[0].image)'   # → :artifact-<date>
+curl -s "$SHELF_LIFE_API/health" | python3 -m json.tool
 ```
 
-Those two must agree. The image tag says which release the artifact came from;
-`/health` says which run is loaded in the process that is answering.
+`artifact_tag` is the release the running image was built from; `model` is the
+experiment that was frozen; `dataset` says whether that run saw the real panel or
+the synthetic one. Three different questions, three fields.
 
 ---
 
 ## 4. Measure the cold start, and publish it
 
 ```bash
-./scripts/cold_start.sh "${URL}"        # waits 20 minutes, then times one request
+./scripts/cold_start.sh "$SHELF_LIFE_API" 16
 ```
 
-The deploy cannot measure this: deploying a revision starts an instance to check
-it serves, so the first request afterwards finds a warm one. Only a genuinely
-idle service gives the number, and the number belongs in the README beside the
-caveat — `docs/design.md` §7e, which also says what a figure much past ~20
-seconds would argue for.
+16 minutes of idle, because Render spins down after 15. The CI workflow cannot
+produce this number — it runs right after a rebuild, when the service is warm —
+and `docs/design.md` §7e is explicit that a cold start nobody has timed is a
+surprise being saved up for whoever is being shown the link.
+
+Two multipliers make the estimate untrustworthy until it is measured: the
+container's start is import-and-unpickle, which is pure CPU, and the free
+instance has **0.1** of one. If the measured figure is past roughly 90 seconds,
+§7e says that reopens the hosting decision rather than being tuned around.
 
 ---
 
-## 5. The UI
-
-The Streamlit form deploys separately, to a Hugging Face Space, and reaches the
-model the only way it is allowed to: over HTTP. `deploy/space/` holds the two
-files a Space needs that this repository does not.
-
-```bash
-hf auth login                                   # or: huggingface-cli login
-hf repo create shelf-life --repo-type space --space_sdk streamlit
-
-git clone https://huggingface.co/spaces/<you>/shelf-life /tmp/shelf-life-space
-cp -r app /tmp/shelf-life-space/app
-cp deploy/space/README.md deploy/space/requirements.txt /tmp/shelf-life-space/
-
-cd /tmp/shelf-life-space && git add -A && git commit -m "UI" && git push
-```
-
-Then set one Space secret, `SHELF_LIFE_API`, to the Cloud Run URL (Settings →
-Variables and secrets). Without it the UI defaults to `http://localhost:8000`
-and shows the error that says so.
-
-Only `app/` is copied. `src/` is not, and that is the deployment enforcing what
-a test already asserts: the UI holds no model, so it cannot drift into serving a
-different one.
-
----
-
-## 6. When it goes wrong
+## 5. When it goes wrong
 
 | Symptom | What it means | What to do |
 |---|---|---|
-| Preflight: "Missing repository variables" | §1 was never run, or a name is misspelt | `gh variable list` |
-| Preflight: "release has no SHA256SUMS" | the release exists but the assets were not attached | redo §2's `gh release create` |
+| Workflow notice: "No SHELF_LIFE_API variable set" | the service does not exist yet, or was never recorded | §1, then `gh variable set` |
+| Workflow notice: "MODEL_TAG names no release" | working as designed; no model has been frozen | nothing, until the panel clears |
+| `await_release.sh` times out | the build failed, so the old revision is still serving | read Render's build log |
 | Build fails in `src.inference.fetch` | the published bytes do not match the published checksums | re-cut the release; do not force it |
-| Build fails in `assert_is_full_pipeline` | the artifact is not a fitted end-to-end pipeline in the serving environment — usually a booster written by a different XGBoost than the image installs | re-freeze in an environment matching the image |
-| Smoke: "model_loaded: false" | the image was built without `ARTIFACT_TAG` | check the build step's `--build-arg` |
+| Build fails in `assert_is_full_pipeline` | the artifact is not a fitted pipeline in the serving environment — usually a booster written by a different XGBoost than the image installs | re-freeze in an environment matching the image |
+| Smoke: "model_loaded: false" | `MODEL_TAG` was empty when the image was built | check the build log's `artifact tag:` line |
 | Smoke: "fitted on the SYNTHETIC panel" | working as designed | freeze against the real panel first |
 | Smoke: malformed payload returned 500 | a validation gap; bad input must be a 4xx | fix `api/schemas.py`, add the case to `tests/test_api.py` |
+| First request hangs, then works | the free tier spun down; this is the 15-minute idle behaviour | expected — and the UI says so on screen |
+| Service suspended until next month | the 750 monthly instance-hours ran out | wait, or stop pinging it; **no charge can occur** |
 
 ### Rolling back
 
-Revisions are immutable, so the previous model is still there:
+A rollback is a commit, which is the upside of putting the tag in the repository:
 
 ```bash
-gcloud run revisions list --service "${SERVICE}" --region "${REGION}"
-gcloud run services update-traffic "${SERVICE}" --region "${REGION}" \
-  --to-revisions "${SERVICE}-00003-abc=100"
+printf '%s\n' "artifact-2026-09-07" > MODEL_TAG    # the previous release
+git commit -am "deploy: roll back to artifact-2026-09-07" && git push
 ```
 
-That is a traffic change, not a rebuild: it takes seconds and needs no release.
+Render rebuilds and the old model is serving again. Slower than a traffic split,
+and it leaves the reason in the history where the next person can read it.
 
 ### Turning it off
 
-```bash
-gcloud run services delete "${SERVICE}" --region "${REGION}"
-gcloud artifacts repositories delete "${REPO}" --location "${REGION}"
-```
-
-Deleting the service stops the compute; deleting the repository stops the
-storage charge, which is the only line that accrues while nothing is running.
+Delete the service in Render's dashboard and the app in Streamlit Community
+Cloud. Neither leaves anything behind that accrues, because neither could
+charge for it in the first place.

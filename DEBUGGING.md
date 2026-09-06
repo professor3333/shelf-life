@@ -4,6 +4,38 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-06 — A platform chosen from a pricing table instead of the documentation
+
+- **Problem:** `docs/design.md` §7c committed the Streamlit UI to a Hugging Face
+  Space on 2026-09-05, and the following day the plan was extended to put the
+  FastAPI service on a Docker Space too. Both were wrong. The Hub's own
+  documentation says Spaces that run on compute — Gradio and Docker — **require
+  a paid plan to create**; only Static Spaces are free, plus up to two
+  Gradio-on-ZeroGPU Spaces. Nothing failed and nothing errored: the decision was
+  written, defended in prose, and a deploy path was built on top of it.
+
+- **Root cause:** the pricing table says **"CPU Basic — 2 vCPU — 16 GB — FREE"**,
+  and that sentence is true about the *hardware's hourly cost* while saying
+  nothing about the *right to create a Space that uses it*. The reading that fit
+  was chosen over the reading that was checked. The evidence I did consult —
+  search results and summaries — repeated the same table, so agreement between
+  sources was mistaken for verification when all of them had one origin.
+
+- **Solution:** re-verified against `huggingface.co/docs/hub` directly before
+  writing any code, along with Render's compute plans and Streamlit Community
+  Cloud. §7 rewritten with a comparison table dated to the day it was checked,
+  each row naming the requirement it fails. The architecture moved to a Render
+  free web service plus Streamlit Community Cloud, and `render.yaml` now carries
+  `plan: free` with `tests/test_deploy.py::test_the_service_plan_is_free`
+  asserting it, because that field is the one whose drift costs money.
+
+- **Lesson:** **a price is not a permission.** For any "free tier", the question
+  to answer is not "what does this cost per hour" but "what must be true about my
+  account before I am allowed to create one", and only the vendor's documentation
+  answers the second. Corroboration from three summaries of one table is one
+  source, not three. This is the same failure as the 139.6 MiB reading directly
+  below: a single observation, taken once, believed because it was convenient.
+
 ## 2026-09-05 — A memory reading taken before the process had finished starting
 
 - **Problem:** `docker stats --no-stream` on the freshly started API container

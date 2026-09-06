@@ -70,8 +70,20 @@ st.caption(
 
 # --- is there anything to talk to? ------------------------------------------
 
+# This call is also the wake-up. The API is hosted on a free tier that spins the
+# container down after 15 idle minutes and takes about a minute to come back, so
+# the first request of a visit pays for a cold start whether it asks for one or
+# not. Making that request *here*, while the form is still being read and filled
+# in, spends the wait on time the visitor was going to use anyway — which is the
+# only cold-start mitigation this architecture gets for free, now that there is
+# no warm-instance knob to buy (`docs/design.md` §7e).
+#
+# The spinner text is the honest version rather than a bare spinner: a minute of
+# silence reads as broken, and the same minute with a sentence explaining it
+# reads as a free tier.
 try:
-    health = api.health()
+    with st.spinner("Waking the prediction service — the free tier takes up to a minute…"):
+        health = api.health()
 except ApiError as error:
     st.error(f"{error}\n\nStart the API with `uvicorn api.main:app`, or set `SHELF_LIFE_API`.")
     st.stop()
