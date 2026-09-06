@@ -19,7 +19,7 @@ freezing a model against one would produce a README number that means nothing.
 the 'val' block is empty under cuts Cuts(train_end=Timestamp('2026-09-02 03:45:45.645648+0000', tz='UTC'), val_end=Timestamp('2026-09-03 03:45:42.003096+0000', tz='UTC')) with an embargo of 2 days 10:21:37.132005.
 ```
 
-**How much longer.** 5 labelled crawl wave(s) against a minimum of 7 — 2 more labelled wave(s) needed. The embargo is 2 days 10:21:37.132005 and waves arrive every 1 days 00:00:12.203210, so each of the two block boundaries discards 3 wave(s).
+**How much longer.** 6 labelled crawl wave(s) against a minimum of 7 — 1 more labelled wave(s) needed. The embargo is 2 days 10:21:37.132005 and waves arrive every 0 days 23:59:56.357448, so each of the two block boundaries discards 3 wave(s).
 
 The packaging around it is built and tested — `src/inference/artifact.py`,
 `src/inference/contract.py` and `src/inference/predict.py`, exercised end to end
