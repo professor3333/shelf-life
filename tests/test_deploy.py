@@ -139,6 +139,52 @@ def test_the_smoke_test_refuses_a_synthetic_model() -> None:
     assert "synthetic" in smoke and "ALLOW_SYNTHETIC" in smoke
 
 
+# --- the one about hiding a bad measurement ----------------------------------
+
+
+def _stop_rule_seconds() -> float:
+    """The cold-start acceptance criterion, read from the script that enforces it."""
+    script = (ROOT / "scripts" / "cold_start.sh").read_text()
+    match = re.search(r'STOP_RULE_SECONDS="\$\{STOP_RULE_SECONDS:-(\d+(?:\.\d+)?)\}"', script)
+    assert match, "scripts/cold_start.sh no longer declares a STOP_RULE_SECONDS default"
+    return float(match.group(1))
+
+
+def test_the_ui_timeout_never_exceeds_the_cold_start_stop_rule() -> None:
+    """The shortcut this forbids is the one that will be available at the worst moment.
+
+    `docs/design.md` §7e sets an acceptance criterion: if the measured cold start
+    on the free instance exceeds the stop rule, the hosting decision is reassessed
+    rather than tuned around. The tuning knob is right there — raise
+    `app.client.TIMEOUT` until the slow service stops timing out — and it changes
+    nothing except who finds out. So the two numbers are coupled here: a timeout
+    raised past the stop rule fails CI, and the failure names the rule it broke.
+
+    Raising *both* together is possible and is exactly what should happen if the
+    criterion is ever deliberately renegotiated — which is a decision with a diff
+    and a design-doc entry, not an afternoon's convenience.
+    """
+    from app.client import TIMEOUT
+
+    stop_rule = _stop_rule_seconds()
+    assert TIMEOUT <= stop_rule, (
+        f"app/client.py waits {TIMEOUT:.0f}s for a service whose cold start is only "
+        f"acceptable up to {stop_rule:.0f}s. If the deployed cold start turned out slower "
+        "than the criterion, docs/design.md §7e says reassess the architecture — widening "
+        "the timeout only moves the disappointment from CI to a stranger."
+    )
+
+
+def test_the_stop_rule_is_the_number_the_documents_quote() -> None:
+    """A criterion enforced at one value and published at another is not a criterion."""
+    stop_rule = int(_stop_rule_seconds())
+    design = (ROOT / "docs" / "design.md").read_text()
+    assert f"{stop_rule} seconds" in design or f"{stop_rule}s" in design, (
+        f"scripts/cold_start.sh enforces {stop_rule}s but docs/design.md §7e never states "
+        "that figure, so the rule people read and the rule that runs are different rules"
+    )
+
+
 # --- the ones about the UI's boundary ----------------------------------------
 
 

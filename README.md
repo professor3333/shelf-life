@@ -600,7 +600,7 @@ shelf-life/
 ├── render.yaml       the API service, as configuration rather than clicks
 ├── MODEL_TAG         which release is deployed; empty until one exists
 ├── requirements.txt  what the UI's host installs — and nothing that loads a model
-├── tests/            285 tests, no network, no data files
+├── tests/            287 tests, no network, no data files
 ├── docs/             problem_definition.md design.md leakage_audit.md
 │                     data_dictionary.md deploy.md
 ├── reports/          generated: profile, baselines, model results, comparison,
@@ -970,6 +970,13 @@ a forecast: the expensive part of a cold start is importing scikit-learn and
 XGBoost and unpickling the artifact, and that is pure CPU, of which this instance
 has a tenth. **The real number is unmeasured until something is deployed**, and
 it gets written here before the link is given to anyone.
+
+**There is a stop rule attached to it.** Past 90 seconds, the hosting decision is
+reassessed rather than tuned around — `scripts/cold_start.sh` exits non-zero, and
+a test fails if the UI's timeout is raised above the criterion to make the
+symptom go away. The measurement does not need a model to be taken, so it can be
+had before the panel clears: import-and-unpickle is the expensive part and it
+happens whether or not an artifact loads.
 
 Two things follow from that and are already in the code. The UI's HTTP timeout is
 **90 seconds**, not 30, because a timeout tuned for a fast platform reports a
