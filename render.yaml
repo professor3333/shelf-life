@@ -63,3 +63,4 @@ services:
         - learning_log/**
         - README.md
         - DEBUGGING.md
+        - .devcontainer/**

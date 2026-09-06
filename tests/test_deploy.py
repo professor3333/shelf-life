@@ -72,6 +72,36 @@ def test_nothing_in_the_blueprint_scales_beyond_the_free_instance(render: dict) 
         )
 
 
+DEVCONTAINER = ROOT / ".devcontainer" / "devcontainer.json"
+
+
+def test_the_dev_container_runs_the_python_the_image_serves() -> None:
+    """A model frozen on one minor version, unpickled on another, is a bad day.
+
+    The dev container is where somebody would run `freeze` most casually, and
+    the artifact it writes has to load in the serving image. `DEBUGGING.md`
+    records the version of this that already happened. The Dockerfile's build
+    checks catch a mismatched artifact, but they catch it late and by failing a
+    deploy; agreeing here costs one line and nothing downstream.
+    """
+    if not DEVCONTAINER.exists():
+        pytest.skip("no dev container in this repository")
+
+    image = re.search(r'"image":\s*"([^"]+)"', DEVCONTAINER.read_text())
+    assert image, "devcontainer.json has no image"
+    dev = re.search(r"python:\d+-(\d+\.\d+)", image.group(1))
+    assert dev, f"cannot read a Python version out of {image.group(1)!r}"
+
+    served = re.search(r"^FROM python:(\d+\.\d+)", DOCKERFILE.read_text(), re.MULTILINE)
+    assert served, "Dockerfile has no `FROM python:<version>` line"
+
+    assert dev.group(1) == served.group(1), (
+        f"the dev container runs Python {dev.group(1)} and the serving image runs "
+        f"{served.group(1)}. An artifact frozen in the container may not unpickle in "
+        "the image, which surfaces as a failed deploy rather than as this mismatch."
+    )
+
+
 #: Everything whose change must still reach the running service. `MODEL_TAG` is
 #: the one that matters most: a model reaches production *only* by a build, so a
 #: pattern that swallowed it would turn every future release into a green commit
