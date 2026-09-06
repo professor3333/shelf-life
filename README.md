@@ -975,8 +975,14 @@ requests — so memory fits, with roughly 135 MB of headroom. It answers `/healt
 **2.06 s** after start *on a full core*, which is exactly why that figure is not
 a forecast: the expensive part of a cold start is importing scikit-learn and
 XGBoost and unpickling the artifact, and that is pure CPU, of which this instance
-has a tenth. **The real number is unmeasured until something is deployed**, and
-it gets written here before the link is given to anyone.
+has a tenth.
+
+**The baseline is now measured: 32.65 s.** Taken on 2026-09-06 against the live
+free instance after 16 minutes of enforced idle, using the no-artifact image —
+so it covers the platform wake, the interpreter and the scikit-learn and XGBoost
+imports, and nothing else. It leaves **57 s of the 90 s budget** for everything a
+real model adds. The definitive figure is still owed and gets written here before
+the link is given to anyone.
 
 **There is a stop rule attached to it.** Past 90 seconds, the hosting decision is
 reassessed rather than tuned around — `scripts/cold_start.sh` exits non-zero, and
