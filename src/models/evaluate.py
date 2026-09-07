@@ -42,6 +42,17 @@ import pandas as pd
 from src.data.split import SplitResult, SplitTooShallow, best_cuts, crawl_waves, temporal_split
 from src.features.preprocessing import features_and_target, fit_on_frame
 from src.models import ledger, provenance
+
+# `verdict` is aliased: `write_report` already has a `verdict` parameter holding
+# the model-selection verdict, and two different verdicts under one name in one
+# module is a bug waiting for someone to move a line.
+from src.models.generalisation import (
+    leave_one_board_out,
+    report_tables,
+)
+from src.models.generalisation import (
+    verdict as transfer_verdict,
+)
 from src.models.metrics import (
     DEFAULT_ALERT_BUDGET,
     alert_budget,
@@ -376,6 +387,63 @@ def select(summary: pd.DataFrame, per_fold: dict[str, pd.DataFrame]) -> dict[str
     }
 
 
+def _generalisation_section(generalisation) -> list[str]:
+    """Leave-one-board-out, or the reason none could be run.
+
+    Placed directly after the per-source breakdown because the two are easy to
+    confuse and one is much weaker evidence than it looks: scoring a board with
+    a model fitted on it says nothing about a board the model has never seen.
+    """
+    lines = [
+        "## Would it work on a board it has never seen?",
+        "",
+        "`docs/design.md` §4 leaves *is `source` a feature?* open and the model card",
+        "calls this a Greenhouse model. Both are the same worry, and this is the",
+        "measurement: hold a whole board out of the fit, then score its rows twice —",
+        "once with a model that never saw it, once with a model that did. The **gap**",
+        "is what board-specific learning was worth. A bare transfer score would not do,",
+        "because boards have different base rates and a low number could be the board",
+        "being harder rather than the model failing to carry over.",
+        "",
+    ]
+    if generalisation is None:
+        return lines + [
+            "Not run on this snapshot: there is no split to fit on.",
+            "",
+        ]
+
+    folds, skipped, scored, refused = generalisation
+    lines += [transfer_verdict(folds), ""]
+    if not scored.empty:
+        lines += [
+            _table(
+                scored,
+                [
+                    "board",
+                    "eval_rows",
+                    "eval_positives",
+                    "base_rate",
+                    "train_share",
+                    "transfer_pr_auc",
+                    "ceiling_pr_auc",
+                    "gap",
+                ],
+            ),
+            "",
+        ]
+    if not refused.empty:
+        lines += [
+            "**Folds refused.** A board is scored only when it keeps enough positives to",
+            "measure and leaves enough behind to fit on. Both guards exist because the",
+            "alternative is a PR-AUC computed on a handful of events, which reads exactly",
+            "like a real one.",
+            "",
+            _table(refused, ["board", "reason"]),
+            "",
+        ]
+    return lines
+
+
 def write_report(
     path: Path,
     frame: pd.DataFrame,
@@ -387,6 +455,7 @@ def write_report(
     by_source: pd.DataFrame | None,
     by_carryover: pd.DataFrame | None,
     blocker: str | None,
+    generalisation: tuple | None = None,
 ) -> None:
     reference = analytic_reference(frame)
     lines = [
@@ -508,6 +577,11 @@ def write_report(
             "",
             _table(by_source, ["source", "n", "positives", "base_rate", "pr_auc", "brier"]),
             "",
+            "**That table scores each board with a model fitted on it**, which answers",
+            "*does it work here* rather than *would it work somewhere new*. The section",
+            "below answers the second question by removing a board from the fit.",
+            "",
+            *_generalisation_section(generalisation),
             "## Carried-over postings against unseen ones",
             "",
             _table(
@@ -529,6 +603,7 @@ def main() -> None:
 
     frame = pd.read_parquet(args.panel)
     summary = per_fold = verdict = thresholds = calibration = None
+    generalisation = None
     by_source = by_carryover = blocker = None
     try:
         split = temporal_split(frame, best_cuts(frame))
@@ -544,6 +619,10 @@ def main() -> None:
         by_carryover = evaluate_by(
             split.val, scores, "seen_in_train", n_days=prediction_days(split.val)
         )
+        # Refits per board, so it is a modelling activity and stays on the
+        # validation block.
+        folds, skipped = leave_one_board_out(split, lambda: build_xgboost(split), args.budget)
+        generalisation = (folds, skipped, *report_tables(folds, skipped))
         print(summary.to_string(index=False))
         print(f"\nchosen: {verdict['chosen']} — {verdict['reason']}")
 
@@ -586,6 +665,7 @@ def main() -> None:
         by_source,
         by_carryover,
         blocker,
+        generalisation,
     )
     print(f"wrote -> {args.out}")
 

@@ -83,7 +83,7 @@ collection started; a model given it learns the scraper's start date.
 
 ---
 
-## 4. Is `source` a feature? — **OPEN**
+## 4. Is `source` a feature? — **OPEN, and now measurable**
 
 Not decided. It cannot be decided until the deployment story is, and the
 deployment story is genuinely ambiguous here.
@@ -127,6 +127,38 @@ excluding `source` alone excludes nothing:
 So the decision is **"is board identity a feature?"**, and whichever way it goes
 it has to be applied to four columns and one missingness pattern together. See
 [`leakage_audit.md`](leakage_audit.md).
+
+**How it gets answered — added 2026-09-07.** This section and the model card's
+"essentially a Greenhouse model" caveat are the same worry, and neither was
+measured. The per-source breakdown `CLAUDE.md` §4.5 requires is weaker evidence
+than it looks: it scores each board with a model **fitted on that board**, which
+answers *does it work here* rather than *would it work somewhere new*.
+
+`src/models/generalisation.py` answers the second question by holding a whole
+board out of the fit, and it scores each fold **twice on the same rows** — once
+with a model that never saw the board, once with a model that did. The gap
+between the two is what board-specific learning was worth. The control is not
+optional: boards differ in base rate from 0.0090 on figma to 0.0173 on discord,
+so a low transfer score alone could be the board being harder rather than the
+model failing to carry over.
+
+**It cannot run on this panel, and the refusals are the finding for now.** Per
+board, positives in the whole labelled frame: anthropic 52, gitlab 24, figma 10,
+discord 6, duolingo 5, python_org 3, airtable 0. Testing on duolingo means a
+five-positive test set; airtable's fold is undefined. And holding out anthropic
+removes 52% of the training positives, so its transfer arm would be fitted on
+half the data *and* one fewer board, with the two effects inseparable in the
+result. Both guards are enforced — `MIN_HELD_OUT_POSITIVES = 10` and
+`MIN_TRAIN_SHARE = 0.6` — and a refused fold is reported with its reason rather
+than dropped, because a board missing from the table is a board nobody knows was
+untested.
+
+**Would change my mind about `source`:** a transfer gap consistently near zero
+would say the model is using properties of postings rather than of boards, which
+weakens the case for excluding `source` and strengthens the deployment story of
+scoring a board the model has never seen. A large gap says the opposite, and is
+the number that should sit beside the model card's caveat instead of the caveat
+standing alone.
 
 ---
 
