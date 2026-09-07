@@ -193,3 +193,167 @@ def test_the_api_contains_no_feature_logic():
                     f"{path} imports {node.module}: serving must go through the "
                     "frozen artifact, not the feature modules"
                 )
+
+
+# --- POST /rank ---------------------------------------------------------------
+
+
+def _postings(n: int) -> list[dict]:
+    return [
+        {
+            "title": f"Engineer {i}",
+            "location": ["Berlin", "Remote", "London"][i % 3],
+            "content_chars": 500 + 37 * i,
+            "first_published": "2026-08-20T00:00:00Z",
+        }
+        for i in range(n)
+    ]
+
+
+def test_a_posting_scores_the_same_through_rank_as_through_predict(client):
+    """The requirement that keeps `/rank` from becoming a second model.
+
+    Both endpoints share one fitted pipeline object and one `build_row`, so the
+    only thing that can separate them is the order of floating-point reductions:
+    `/rank` scores a batch in one `predict_proba` call, and summing a column of
+    250 rows is not bit-identical to summing one. Measured at about 6e-17. The
+    tolerance here is far tighter than any real divergence — a changed feature
+    path, a different imputation, a second preprocessing chain would move the
+    number in the third decimal or worse, not the seventeenth.
+    """
+    single = client.post("/predict", json={**FIXED_POSTING, "as_of": FIXED_T}).json()
+    batch = client.post("/rank", json={"postings": [FIXED_POSTING], "as_of": FIXED_T}).json()
+
+    assert batch["postings"][0]["probability"] == pytest.approx(single["probability"], abs=1e-12)
+    assert batch["horizon_days"] == single["horizon_days"]
+    assert batch["model"] == single["model"]
+    assert batch["dataset"] == single["dataset"]
+
+
+def test_a_posting_in_a_crowd_scores_what_it_scores_alone(client):
+    """Batching must not let one posting's score depend on its neighbours. If it
+    did, a caller could change an answer by padding the request."""
+    alone = client.post("/predict", json={**FIXED_POSTING, "as_of": FIXED_T}).json()
+    crowded = client.post(
+        "/rank", json={"postings": [FIXED_POSTING, *_postings(40)], "as_of": FIXED_T}
+    ).json()
+
+    assert crowded["postings"][0]["probability"] == pytest.approx(alone["probability"], abs=1e-9)
+
+
+def test_postings_come_back_in_the_order_they_were_sent(client):
+    """So a caller can zip the response against their own list. `rank` carries
+    the ordering; the array does not."""
+    sent = _postings(12)
+    body = client.post("/rank", json={"postings": sent, "as_of": FIXED_T}).json()
+
+    assert len(body["postings"]) == len(sent)
+    each = [
+        client.post("/predict", json={**posting, "as_of": FIXED_T}).json()["probability"]
+        for posting in sent
+    ]
+    for returned, expected in zip(body["postings"], each, strict=True):
+        assert returned["probability"] == pytest.approx(expected, abs=1e-9)
+
+
+def test_ranks_are_a_permutation_and_order_by_probability(client):
+    body = client.post("/rank", json={"postings": _postings(15), "as_of": FIXED_T}).json()
+    items = body["postings"]
+
+    assert sorted(item["rank"] for item in items) == list(range(1, 16))
+    by_rank = sorted(items, key=lambda item: item["rank"])
+    probabilities = [item["probability"] for item in by_rank]
+    assert probabilities == sorted(probabilities, reverse=True)
+
+
+def test_the_budget_decides_how_many_are_watched(client):
+    body = client.post(
+        "/rank", json={"postings": _postings(30), "budget": 7, "as_of": FIXED_T}
+    ).json()
+
+    assert body["budget"] == 7
+    assert sum(item["watch"] for item in body["postings"]) == 7
+    watched = [item for item in body["postings"] if item["watch"]]
+    assert {item["rank"] for item in watched} == set(range(1, 8))
+
+
+def test_a_budget_larger_than_the_batch_watches_everything(client):
+    body = client.post(
+        "/rank", json={"postings": _postings(5), "budget": 50, "as_of": FIXED_T}
+    ).json()
+    assert body["budget"] == 5
+    assert all(item["watch"] for item in body["postings"])
+
+
+def test_the_threshold_source_is_named_and_never_substituted(client):
+    """The field that keeps the two operating points apart. `frozen` is the
+    model's calibrated point; `batch_budget` is a property of what was
+    submitted. Reporting only a number would let one be read as the other."""
+    frozen = client.post("/rank", json={"postings": _postings(20), "as_of": FIXED_T}).json()
+    assert frozen["threshold_source"] == "frozen"
+
+    budgeted = client.post(
+        "/rank", json={"postings": _postings(20), "budget": 4, "as_of": FIXED_T}
+    ).json()
+    assert budgeted["threshold_source"] == "batch_budget"
+    assert budgeted["threshold_applied"] != frozen["threshold_applied"]
+
+
+def test_the_frozen_threshold_is_the_artifacts_own(client):
+    body = client.post("/rank", json={"postings": _postings(20), "as_of": FIXED_T}).json()
+    health = client.get("/health").json()
+    assert body["threshold_applied"] == pytest.approx(health["threshold"])
+
+
+def test_board_context_is_not_derived_from_the_batch(client):
+    """A batch is not the board. Fifty postings must not manufacture a board of
+    fifty — the model was fitted on boards of several hundred, and unlike a
+    missing value that the imputer handles, that one is confidently wrong."""
+    body = client.post("/rank", json={"postings": _postings(50), "as_of": FIXED_T}).json()
+    assert all(not item["board_context_supplied"] for item in body["postings"])
+
+    supplied = client.post(
+        "/rank",
+        json={
+            "postings": [{**_postings(1)[0], "board_size_at_t": 600}],
+            "as_of": FIXED_T,
+        },
+    ).json()
+    assert supplied["postings"][0]["board_context_supplied"] is True
+
+
+def test_a_batch_over_the_cap_is_a_422_not_a_timeout(client):
+    """The limit is in the contract, so an oversized batch is refused at
+    validation rather than accepted and left to run out the clock on 0.1 vCPU."""
+    from src.inference.predict import MAX_BATCH
+
+    response = client.post("/rank", json={"postings": _postings(MAX_BATCH + 1), "as_of": FIXED_T})
+    assert response.status_code == 422
+
+
+def test_a_batch_at_the_cap_is_accepted(client):
+    from src.inference.predict import MAX_BATCH
+
+    response = client.post("/rank", json={"postings": _postings(MAX_BATCH), "as_of": FIXED_T})
+    assert response.status_code == 200
+    assert len(response.json()["postings"]) == MAX_BATCH
+
+
+def test_an_empty_batch_is_refused(client):
+    assert client.post("/rank", json={"postings": [], "as_of": FIXED_T}).status_code == 422
+
+
+def test_an_unknown_field_in_a_ranked_posting_is_still_a_422(client):
+    """`/rank` inherits `/predict`'s strictness. Sending `salary` instead of
+    `salary_raw` must not yield a confident probability computed without it."""
+    response = client.post(
+        "/rank", json={"postings": [{**_postings(1)[0], "salary": "120k"}], "as_of": FIXED_T}
+    )
+    assert response.status_code == 422
+
+
+def test_rank_refuses_without_a_model(modelless_client):
+    """Same 503 as `/predict`. A service with no artifact must not answer a
+    ranking request with an empty or invented list."""
+    response = modelless_client.post("/rank", json={"postings": _postings(3)})
+    assert response.status_code == 503

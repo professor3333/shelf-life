@@ -27,10 +27,12 @@ the two regimes apart.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from src.inference.artifact import DEFAULT_ARTIFACT, Artifact, load
@@ -52,6 +54,64 @@ class Prediction:
 
     def as_dict(self) -> dict:
         return asdict(self)
+
+
+@dataclass
+class Ranked:
+    """One posting's place in a ranked batch.
+
+    `rank` is 1-based because the caller reads it as a position in a list, not
+    as an array index, and an off-by-one in a watch list is a posting someone
+    does not open.
+    """
+
+    rank: int
+    probability: float
+    watch: bool
+    board_context_supplied: bool
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
+#: The largest batch `/rank` accepts. Derived from measurement rather than
+#: chosen, because a cap picked for looking round is a cap that is wrong on the
+#: hardware it runs on.
+#:
+#: Measured on the XGBoost artifact at this size: **1.42 s** on a full core,
+#: peak RSS 211 MB with no growth across the batch. The free instance has
+#: 0.1 vCPU, and the cold-start work in `docs/design.md` §7d ran **16x** slower
+#: there than locally (2.06 s against 32.65 s). Applying that factor puts 250 at
+#: roughly 23 s, and a request may already have spent 32.65 s waking the
+#: instance: **55 s worst case against the 90 s stop rule** §7e sets, with 211 MB
+#: against 512 MB.
+#:
+#: Doubling it would put the worst case at 78 s, inside the rule but with no
+#: room for the rule to be wrong. A full day's board is about 1,150 postings, so
+#: this deliberately does not rank a whole day in one request — the caller
+#: pages. Raising it is a measurement against the deployed instance, not an edit
+#: to this line.
+MAX_BATCH = 250
+
+
+@dataclass(frozen=True)
+class RankedBatch:
+    """A scored, ordered batch and the operating point that was applied."""
+
+    postings: list[Ranked]
+    threshold_applied: float
+    threshold_source: str
+    budget: int
+    horizon_days: int
+    model: str
+    dataset: str
+    t: str
+
+
+#: Where `threshold_applied` came from. Named rather than inferred, because the
+#: two can differ and silently substituting one for the other would change what
+#: `watch` means without changing the response's shape.
+FROZEN, BATCH_BUDGET = "frozen", "batch_budget"
 
 
 class Predictor:
@@ -101,6 +161,87 @@ class Predictor:
             closing_soon=probability >= applied,
             horizon_days=self.metadata.horizon_days,
             board_context_supplied=board_context_supplied(payload),
+            model=self.metadata.run_name,
+            dataset=self.metadata.dataset,
+            t=moment.isoformat(),
+        )
+
+    def rank(
+        self,
+        payloads: Sequence[dict],
+        t: pd.Timestamp | str | None = None,
+        budget: int | None = None,
+    ) -> RankedBatch:
+        """Score many postings and order them, applying the alert budget.
+
+        **This is the shape the operating point was designed for.** The frozen
+        threshold is `threshold_for_budget` — literally the score at which
+        exactly `budget` postings are flagged — so it is a rank statistic taken
+        over a whole day's board. `predict` applies that number to one posting in
+        isolation, which is coherent but is the degenerate case; this is the
+        case it came from.
+
+        **Board context is imputed, exactly as in `predict`.** A batch is not
+        automatically the board. Deriving `board_size_at_t` from the batch would
+        let fifty postings manufacture a board of fifty, and the model was fitted
+        on boards of several hundred — unlike a missing value, which the training
+        fold's imputer handles, that one is confidently wrong. `docs/design.md`
+        §12 revisits this only if the ablation says the four features matter.
+
+        **Scoring is one `predict_proba` call over one frame**, built from the
+        same `build_row` and run through the same fitted pipeline object as
+        `predict`. Not a loop over `predict`: measured at 1,000 postings, the
+        loop costs 18.4 s against 4.8 s batched, because the per-call pipeline
+        overhead dominates a single row. The two agree to about 6e-17 — batching
+        changes the order of floating-point reductions and nothing else — and
+        `test_a_posting_scores_the_same_through_rank_as_through_predict` pins
+        that at a tolerance far tighter than any real divergence would be.
+        """
+        if not payloads:
+            raise ValueError("no postings to rank")
+        if len(payloads) > MAX_BATCH:
+            raise ValueError(
+                f"{len(payloads)} postings exceeds the {MAX_BATCH}-posting limit; "
+                "send them in pages"
+            )
+
+        moment = pd.Timestamp(t) if t is not None else pd.Timestamp(datetime.now(UTC))
+        if moment.tzinfo is None:
+            moment = moment.tz_localize("UTC")
+
+        frame = pd.concat([build_row(payload, moment) for payload in payloads], ignore_index=True)
+        probabilities = self.artifact.pipeline.predict_proba(frame)[:, 1]
+
+        # The budget decides how many are flagged; the *threshold* is then
+        # whichever operating point that implies, and the response says which.
+        if budget is None:
+            applied, source = float(self.metadata.threshold), FROZEN
+            effective = int((probabilities >= applied).sum())
+        else:
+            effective = int(min(max(budget, 0), len(payloads)))
+            applied = (
+                float(np.sort(probabilities)[::-1][effective - 1])
+                if effective > 0
+                else float("inf")
+            )
+            source = BATCH_BUDGET
+
+        order = np.argsort(-probabilities, kind="stable")
+        ranked: list[Ranked | None] = [None] * len(payloads)
+        for position, index in enumerate(order, start=1):
+            ranked[index] = Ranked(
+                rank=position,
+                probability=float(probabilities[index]),
+                watch=position <= effective,
+                board_context_supplied=board_context_supplied(payloads[index]),
+            )
+
+        return RankedBatch(
+            postings=[item for item in ranked if item is not None],
+            threshold_applied=applied,
+            threshold_source=source,
+            budget=effective,
+            horizon_days=self.metadata.horizon_days,
             model=self.metadata.run_name,
             dataset=self.metadata.dataset,
             t=moment.isoformat(),

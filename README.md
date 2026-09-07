@@ -531,6 +531,50 @@ runs 1.13%, 1.59%, 0.86%, 1.49%, 1.77%, 0.82% — flat and non-monotone. It stay
 in the ladder because a plausible belief that the data refuses is a result, and
 a reader who holds it is better served seeing it priced than not finding it.
 
+### `POST /rank` — the shape the operating point was designed for
+
+The frozen threshold is the score at which exactly `budget` postings are
+flagged: a **rank statistic** taken over a day's board. `POST /predict` applies
+that number to one posting in isolation, which is coherent but is the degenerate
+case. `POST /rank` takes a list and returns each posting with its probability,
+its rank, and a `watch` flag for the top `budget` — the "inspect the top 20"
+workflow the alert budget already describes, without the caller reimplementing
+it.
+
+```
+                    frozen pipeline
+                          │
+              ┌───────────┴───────────┐
+          /predict                  /rank
+        one posting              many postings
+              │                       │
+        probability            probability + rank
+              │                       │
+        watch decision          top-N watch list
+```
+
+Three properties worth stating, because each is a decision:
+
+- **One scoring path.** Both endpoints share the same fitted pipeline object and
+  the same `build_row`; `/rank` differs only in scoring a whole frame in one
+  `predict_proba` call, which at 1,000 postings costs 4.8 s against 18.4 s for a
+  loop. The two agree to about 6e-17 — the order of floating-point reductions,
+  nothing else — and a test pins that.
+- **`threshold_source` is always reported.** `frozen` is the model's calibrated
+  operating point; `batch_budget` is this batch's budget-th score, a property of
+  what was submitted rather than of the model. They differ, and neither is
+  silently substituted for the other.
+- **Board context is imputed, not derived from the batch.** A submitted batch is
+  not the board: letting fifty postings manufacture `board_size_at_t = 50` would
+  hand the model a value from a distribution it never saw, and unlike a missing
+  value — which the training fold's imputer handles — that one is confidently
+  wrong.
+
+The batch cap is **250 postings**, from measurement rather than taste: 1.42 s on
+a full core, ~23 s at the free instance's 0.1 vCPU, ~55 s worst case if the
+request also wakes a sleeping container, against the 90 s stop rule. A day's
+board is ~1,150 postings, so a full day is deliberately several pages.
+
 **When the headline number arrives it will carry an interval.** PR-AUC,
 precision, recall, Brier and ECE each get a 95% interval from resampling
 **postings, not rows** — the panel is one row per (posting, crawl) at about six

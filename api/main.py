@@ -43,7 +43,14 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
-from api.schemas import HealthResponse, PostingRequest, PredictionResponse
+from api.schemas import (
+    HealthResponse,
+    PostingRequest,
+    PredictionResponse,
+    RankedPosting,
+    RankRequest,
+    RankResponse,
+)
 from src.inference.artifact import DEFAULT_ARTIFACT, ArtifactError
 from src.inference.contract import InvalidPayload, describe
 from src.inference.predict import Predictor
@@ -188,6 +195,40 @@ def create_app(artifact: Path | str | None = None) -> FastAPI:
         """
         prediction = _predictor(app).predict(posting.payload(), t=posting.as_of)
         return PredictionResponse(**prediction.as_dict())
+
+    @app.post("/rank", response_model=RankResponse)
+    def rank(request: RankRequest) -> RankResponse:
+        """Score many postings and order them, applying the alert budget.
+
+        The shape the operating point was designed for. The frozen threshold is
+        the score at which exactly `budget` postings are flagged — a rank
+        statistic over a day's board — so `/predict` applies it to one posting in
+        isolation while this applies it to a list, which is where it came from.
+
+        Postings come back in the order they were sent; `rank` carries the
+        ordering. `threshold_source` says whether `watch` was decided by the
+        model's frozen operating point or by this batch's budget-th score, and
+        the two are never silently interchanged.
+
+        Board-context features are imputed exactly as in `/predict`. A submitted
+        batch is not the board, and letting fifty postings manufacture a board of
+        fifty would hand the model a value from a distribution it never saw.
+        """
+        batch = _predictor(app).rank(
+            [posting.payload() for posting in request.postings],
+            t=request.as_of,
+            budget=request.budget,
+        )
+        return RankResponse(
+            postings=[RankedPosting(**item.as_dict()) for item in batch.postings],
+            threshold_applied=batch.threshold_applied,
+            threshold_source=batch.threshold_source,
+            budget=batch.budget,
+            horizon_days=batch.horizon_days,
+            model=batch.model,
+            dataset=batch.dataset,
+            t=batch.t,
+        )
 
     @app.get("/contract")
     def contract() -> list[dict]:
