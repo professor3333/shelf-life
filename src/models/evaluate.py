@@ -41,6 +41,7 @@ import pandas as pd
 
 from src.data.split import SplitResult, SplitTooShallow, best_cuts, crawl_waves, temporal_split
 from src.features.preprocessing import features_and_target, fit_on_frame
+from src.models import ledger, provenance
 from src.models.metrics import (
     DEFAULT_ALERT_BUDGET,
     alert_budget,
@@ -545,6 +546,26 @@ def main() -> None:
         )
         print(summary.to_string(index=False))
         print(f"\nchosen: {verdict['chosen']} — {verdict['reason']}")
+
+        row = summary[summary["model"] == chosen].iloc[0]
+        labelled = frame[frame["label_observable"]]
+        ledger.write_report(
+            ledger.append(
+                ledger.record(
+                    stage=ledger.VALIDATION,
+                    provenance=provenance.collect(args.panel, len(frame)),
+                    labelled_waves=len(crawl_waves(labelled)),
+                    labelled_rows=len(labelled),
+                    positives=int((labelled["y"] == 1).sum()),
+                    folds=len(per_fold[chosen]),
+                    chosen=chosen,
+                    pr_auc=row["val_pr_auc"],
+                    cv_pr_auc_mean=row["cv_pr_auc_mean"],
+                    cv_pr_auc_sd=row["cv_pr_auc_sd"],
+                    block_positives=int(target.sum()),
+                )
+            )
+        )
     except SplitTooShallow as error:
         blocker = (
             "No honest three-way split exists on this snapshot, so there is no validation\n"

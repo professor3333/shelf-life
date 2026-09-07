@@ -49,13 +49,14 @@ import pandas as pd
 from src.data.split import (
     SplitResult,
     SplitTooShallow,
+    crawl_waves,
     depth_report,
     temporal_split,
 )
 from src.features.preprocessing import features_and_target, fit_on_frame
 from src.inference import artifact as artifact_module
-from src.models import provenance
-from src.models.evaluate import calibration_summary
+from src.models import ledger, provenance
+from src.models.evaluate import calibration_summary, wave_forward_folds
 from src.models.experiments import (
     SYNTHETIC_PANEL_SOURCE,
     default_cuts,
@@ -398,6 +399,22 @@ def main() -> None:
         frozen = freeze(split, args.run, args.budget, args.fit)
         metadata = build_metadata(frozen, args.run, panel, panel_path, dataset, args.budget)
         artifact_module.save(frozen.pipeline, metadata, args.artifact)
+        labelled = panel[panel["label_observable"]]
+        ledger.write_report(
+            ledger.append(
+                ledger.record(
+                    stage=ledger.HELD_OUT,
+                    provenance=provenance.collect(panel_path, len(panel), dataset),
+                    labelled_waves=len(crawl_waves(labelled)),
+                    labelled_rows=len(labelled),
+                    positives=int((labelled["y"] == 1).sum()),
+                    folds=len(wave_forward_folds(split.train, split.embargo)),
+                    chosen=args.run,
+                    pr_auc=frozen.test["pr_auc"],
+                    block_positives=int(split.frame.loc[split.frame["split"] == "test", "y"].sum()),
+                )
+            )
+        )
         print(
             f"val pr_auc {frozen.validation['pr_auc']:.4f} -> "
             f"test pr_auc {frozen.test['pr_auc']:.4f}"
