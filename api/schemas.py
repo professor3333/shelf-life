@@ -25,10 +25,12 @@ by the test that pins one.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.inference.contract import FIELDS_BY_NAME
+from src.inference.predict import MAX_BATCH
 
 
 def _why(name: str) -> str:
@@ -128,6 +130,56 @@ class PredictionResponse(BaseModel):
     closing_soon: bool
     horizon_days: int
     board_context_supplied: bool
+    model: str
+    dataset: str
+    t: str
+
+
+class RankRequest(BaseModel):
+    """Many postings, and how many of them the caller will actually read.
+
+    `budget` is optional. Supplied, it means *flag this many* and the operating
+    point becomes the batch's budget-th score. Omitted, the frozen threshold
+    applies and however many clear it are flagged. The response always says
+    which happened, because the two are different decisions wearing the same
+    field name.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    postings: list[PostingRequest] = Field(min_length=1, max_length=MAX_BATCH)
+    budget: int | None = Field(default=None, ge=1)
+    as_of: datetime | None = None
+
+
+class RankedPosting(BaseModel):
+    """One posting's place in the list. `rank` is 1-based."""
+
+    rank: int
+    probability: float = Field(ge=0.0, le=1.0)
+    watch: bool
+    board_context_supplied: bool
+
+
+class RankResponse(BaseModel):
+    """The ranked batch, and the operating point that produced `watch`.
+
+    `threshold_source` is the field that keeps this honest. `frozen` is the
+    model's calibrated operating point, chosen on validation at a stated alert
+    budget; `batch_budget` is the batch's own budget-th score, which is a
+    property of what was submitted and not of the model. They can differ widely,
+    and a response that reported only a number would let a caller read one as
+    the other.
+
+    Postings come back **in the order they were sent**, so a caller can zip the
+    response against their own list; `rank` carries the ordering.
+    """
+
+    postings: list[RankedPosting]
+    threshold_applied: float
+    threshold_source: Literal["frozen", "batch_budget"]
+    budget: int
+    horizon_days: int
     model: str
     dataset: str
     t: str
