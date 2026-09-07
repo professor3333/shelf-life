@@ -122,6 +122,45 @@ def test_row_whose_horizon_has_not_elapsed_is_dropped_not_zeroed():
     assert (out["label_observable"] | out["y"].isna()).all()
 
 
+def test_the_newest_labelled_wave_can_never_carry_a_positive():
+    """The structural fact `src.data.split.minimum_waves` is built on.
+
+    A wave becomes *labelled* as soon as one further run exists — that is all a
+    negative needs. A positive needs more: `t_gone` is only defined where the
+    posting is absent at a run **and** at the run after it, so a wave's
+    positives are not observable until two runs beyond its horizon. The gap is
+    one wave wide and it sits at the newest end of the panel, which is exactly
+    where the test block goes.
+
+    Here runs 0-5 exist. Postings vanish after runs 1, 2, 3 and 4 respectively,
+    so waves 1, 2 and 3 each get a positive — and wave 4, the newest labelled
+    one, gets none even though `g5` did disappear at run 5. Confirmed on the
+    real panel: the 2026-09-06 snapshot's newest labelled wave had 1,160
+    labelled rows and 0 positives, against 14-22 for every wave before it.
+    """
+    out = _panel(
+        {
+            "s": [0, 1, 2, 3, 4, 5],
+            "g2": [0, 1],
+            "g3": [0, 1, 2],
+            "g4": [0, 1, 2, 3],
+            "g5": [0, 1, 2, 3, 4],
+        },
+        runs=_runs(n=6),
+    )
+    labelled = out[out["label_observable"]]
+    newest = labelled["run_index"].max()
+    assert newest == 4  # run 5's rows have no forward run at all
+
+    positives = labelled[labelled["y"] == 1]
+    assert set(positives["run_index"]) == {1, 2, 3}
+    assert (labelled[labelled["run_index"] == newest]["y"] == 0).all()
+
+    # and the posting that did vanish at run 5 is dropped, not called a survivor
+    g5_last = out[(out["source_id"] == "g5") & (out["run_index"] == 4)].iloc[0]
+    assert not g5_last["label_observable"]
+
+
 def test_horizon_basis_changes_the_answer_when_runs_are_jittered():
     """Runs are not evenly spaced: 14 of 27 real gaps exceed 24h. Under instant
     arithmetic a removal confirmed by the very next daily run can fall outside a

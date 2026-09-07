@@ -19,7 +19,7 @@ freezing a model against one would produce a README number that means nothing.
 the 'val' block is empty under cuts Cuts(train_end=Timestamp('2026-09-02 03:45:45.645648+0000', tz='UTC'), val_end=Timestamp('2026-09-03 03:45:42.003096+0000', tz='UTC')) with an embargo of 2 days 10:21:37.132005.
 ```
 
-**How much longer.** 6 labelled crawl wave(s) against a minimum of 7 — 1 more labelled wave(s) needed. The embargo is 2 days 10:21:37.132005 and waves arrive every 0 days 23:59:56.357448, so each of the two block boundaries discards 3 wave(s).
+**How much longer.** 6 labelled crawl wave(s) against a minimum of 8 — 2 more labelled wave(s) needed. The embargo is 2 days 10:21:37.132005 and waves arrive every 0 days 23:59:56.357448, so each of the two block boundaries discards 3 wave(s), and the newest 1 labelled wave(s) cannot carry a positive at all. Legal is not evaluable: the deepest legal cut yields 0 rolling-origin fold(s) today, and 3 fold(s) — the fewest that can show a model losing a fold it was expected to win — need 13 labelled wave(s), 7 more labelled wave(s) needed.
 
 The packaging around it is built and tested — `src/inference/artifact.py`,
 `src/inference/contract.py` and `src/inference/predict.py`, exercised end to end

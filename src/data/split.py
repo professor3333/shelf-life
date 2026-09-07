@@ -63,6 +63,12 @@ SPLIT_NAMES = ("train", "val", "test")
 #: corroboration rule in `problem_definition.md` §4 is ever widened.
 CORROBORATION_RUNS = 1
 
+#: Rolling-origin folds wanted before a model comparison is worth making. Three,
+#: because a standard deviation over two folds is not a standard deviation, and
+#: `evaluate.paired_fold_difference` reports which model won which fold — a
+#: statement that needs at least three folds to be able to come out mixed.
+DEFAULT_TARGET_FOLDS = 3
+
 
 class SplitTooShallow(ValueError):
     """The panel cannot yet support the requested split.
@@ -389,10 +395,31 @@ def _verdict(record: dict[str, object]) -> tuple[bool, str]:
     return True, ""
 
 
+def rolling_origin_folds(n_train_waves: int, burnt_per_boundary: int) -> int:
+    """How many expanding-window folds a training block of `n` waves yields.
+
+    A *projection* of what `src.models.evaluate.wave_forward_folds` returns, and
+    it lives here rather than there because `minimum_waves` has to answer "how
+    much longer" about waves the scraper has not crawled yet — you cannot run
+    the real fold splitter on data that does not exist. The dependency cannot go
+    the other way either: `evaluate` imports this module. So the two are pinned
+    to each other by a test, `test_projected_folds_match_the_real_splitter`,
+    which is the only thing keeping this arithmetic honest if the fold rule
+    changes.
+
+    Each fold trains on everything up to its origin and validates on the first
+    wave clear of the embargo. The earliest usable origin is the block's first
+    wave and the latest is the one `burnt_per_boundary` waves from its end, so
+    the count is the block's depth less what one embargo costs.
+    """
+    return max(0, n_train_waves - burnt_per_boundary)
+
+
 def minimum_waves(
     frame: pd.DataFrame,
     horizon_days: int | None = None,
     corroboration_runs: int = CORROBORATION_RUNS,
+    target_folds: int = DEFAULT_TARGET_FOLDS,
 ) -> dict[str, object]:
     """How many crawl waves a three-block split needs, and how many exist.
 
@@ -401,27 +428,57 @@ def minimum_waves(
     shallow. Both are wanted: a table of ten rejected cuts says nothing about
     whether the wait is one day or three weeks.
 
-    The arithmetic is the embargo's, and it is unforgiving on a daily panel. Each
-    block needs at least one wave, and each of the two boundaries discards every
-    wave inside the embargo — `ceil(embargo / spacing)` of them — so
+    Three separate constraints, and the naive arithmetic only knows the first.
 
-        minimum waves = 1 + 2 * (floor(embargo / spacing) + 1)
+    **1. The embargo's geometry.** Each block needs at least one wave, and each
+    of the two boundaries discards every wave inside the embargo —
+    `floor(embargo / spacing) + 1` of them. The `+ 1` is `assign_split`'s strict
+    inequality and not an off-by-one: a wave landing *exactly* on
+    `train_end + embargo` is discarded, so an embargo of two days on a daily
+    panel costs three waves, not two.
 
-    The `+ 1` is `assign_split`'s strict inequality and not an off-by-one: a
-    wave landing *exactly* on `train_end + embargo` is discarded, so an embargo
-    of two days on a daily panel costs three waves, not two.
+    **2. The newest waves cannot carry a positive.** This is the correction, made
+    2026-09-07, and it is worth stating plainly because the earlier version of
+    this function returned 7 and `_verdict` would have rejected the only cut
+    that number bought. A positive at `t` needs `t_gone <= t + H`, and `t_gone`
+    at run `i` needs the posting absent at `i` **and** at `i + 1` — so a wave
+    only has observable positives once a run exists two beyond its own horizon.
+    A wave becomes *labelled* one run earlier than that, because a negative
+    needs a single forward run to confirm. The gap is exactly
+    `corroboration_runs` waves, and it sits at the newest end of the panel where
+    the test block is. Measured on the 2026-09-06 snapshot: the newest labelled
+    wave had 1,160 labelled rows and **0 positives**, against 14-22 for every
+    wave before it. `_validate` requires positives in `val` and `test`, so the
+    test block has to reach back past that blind tail:
+
+        minimum waves = 1 + 2 * burnt + corroboration_runs
 
     At H=1 the embargo is one day plus a run's reach, which on the observed
-    schedule is 2d10h against a daily spacing: three waves burnt at each
-    boundary, seven waves for the smallest legal split. The widest run gap in
-    the panel sets that reach, so a single late crawl permanently widens the
-    embargo for every row — the 34.4h gap of 2026-09-01 costs a wave at both
-    boundaries for the life of the panel.
+    schedule is 2d10h against daily spacing: three waves burnt at each boundary,
+    one blind wave at the tail, **eight** waves for the smallest legal split.
 
-    **A wave is not labelled the moment it is crawled.** A row at `t` needs a
-    complete run at or after `t + H` to be a negative, and absence at two
-    consecutive later runs to be a positive, so the newest waves are still
-    censored and the count below is of *labelled* waves only.
+    The widest run gap in the panel sets that reach, so a single late crawl
+    widens the embargo for every row — but widening it is not the same as
+    costing a wave, and the difference is the floor. The 34.4h gap of 2026-09-01
+    puts the embargo at 2d10h where a perfectly daily schedule would put it at
+    2d, and `floor(embargo / spacing) + 1` is **3 either way**: the late crawl
+    discards more *time* and the same number of waves. It only starts costing a
+    wave once a gap pushes the embargo past three times the spacing — a missed
+    crawl would, at 48h. Stated because the earlier version of this docstring
+    claimed the 2026-09-01 slip cost a wave at both boundaries, which is not
+    true and made the schedule look worse than it is.
+
+    **3. Legal is not the same as evaluable.** The smallest legal split has a
+    one-wave training block, and `wave_forward_folds` returns nothing from a
+    block that shallow: no rolling-origin folds, no fold variance, no error bar
+    on any comparison. A model chosen on a single validation number, on this
+    sample size, is a model chosen on noise. So the report also carries the
+    depth at which `target_folds` folds become available, which costs a further
+    `burnt + target_folds - 1` waves on top of the legal minimum.
+
+    **A wave is not labelled the moment it is crawled.** Labelled waves lag
+    crawled ones, so the count below is of *labelled* waves only and the panel
+    always looks one wave deeper than it is usable.
     """
     labelled = frame[frame["label_observable"]]
     waves = crawl_waves(labelled)
@@ -431,7 +488,14 @@ def minimum_waves(
 
     spacing = waves.diff().dropna().median() if len(waves) > 1 else pd.Timedelta(days=1)
     burnt = int(np.floor(embargo / spacing)) + 1
-    needed = 1 + 2 * burnt
+    needed = 1 + 2 * burnt + corroboration_runs
+
+    # The deepest legal training block: everything the two evaluation blocks and
+    # the blind tail do not claim. Negative until the panel can be split at all.
+    train_depth = len(waves) - 2 * burnt - corroboration_runs
+    folds = rolling_origin_folds(max(0, train_depth), burnt)
+    needed_for_folds = needed + burnt + max(0, target_folds - 1)
+
     return {
         "present": len(waves),
         "needed": needed,
@@ -439,23 +503,47 @@ def minimum_waves(
         "embargo": embargo,
         "spacing": spacing,
         "burnt_per_boundary": burnt,
+        "blind_tail": corroboration_runs,
+        "folds_available": folds,
+        "target_folds": target_folds,
+        "needed_for_folds": needed_for_folds,
+        "folds_shortfall": max(0, needed_for_folds - len(waves)),
     }
 
 
-def depth_report(frame: pd.DataFrame) -> str:
-    """`minimum_waves` as a sentence, for a report that has to explain a wait."""
-    depth = minimum_waves(frame)
+def depth_report(frame: pd.DataFrame, target_folds: int = DEFAULT_TARGET_FOLDS) -> str:
+    """`minimum_waves` as a sentence, for a report that has to explain a wait.
+
+    Two sentences, because there are two waits and conflating them is how a
+    panel gets declared ready a week early: the first legal split and the first
+    split anything can be *selected* on are not the same day.
+    """
+    depth = minimum_waves(frame, target_folds=target_folds)
     verdict = (
         "enough to cut three blocks"
         if depth["shortfall"] == 0
         else f"{depth['shortfall']} more labelled wave(s) needed"
     )
-    return (
+    legality = (
         f"{depth['present']} labelled crawl wave(s) against a minimum of "
         f"{depth['needed']} — {verdict}. The embargo is {depth['embargo']} and waves "
         f"arrive every {depth['spacing']}, so each of the two block boundaries "
-        f"discards {depth['burnt_per_boundary']} wave(s)."
+        f"discards {depth['burnt_per_boundary']} wave(s), and the newest "
+        f"{depth['blind_tail']} labelled wave(s) cannot carry a positive at all."
     )
+    fold_verdict = (
+        "enough for error bars"
+        if depth["folds_shortfall"] == 0
+        else f"{depth['folds_shortfall']} more labelled wave(s) needed"
+    )
+    evaluability = (
+        f"Legal is not evaluable: the deepest legal cut yields "
+        f"{depth['folds_available']} rolling-origin fold(s) today, and "
+        f"{depth['target_folds']} fold(s) — the fewest that can show a model "
+        f"losing a fold it was expected to win — need "
+        f"{depth['needed_for_folds']} labelled wave(s), {fold_verdict}."
+    )
+    return legality + " " + evaluability
 
 
 def feasibility_report(frame: pd.DataFrame) -> str:

@@ -24,7 +24,7 @@ import pandas as pd
 import pytest
 from panels import DAY, WAVE0, make_panel
 
-from src.data.split import Cuts, temporal_split
+from src.data.split import Cuts, rolling_origin_folds, temporal_split
 from src.models.evaluate import (
     calibration_summary,
     compare_models,
@@ -139,6 +139,26 @@ def _reads_the_test_block(path: Path) -> bool:
         if isinstance(node, ast.Constant) and node.value == "test" and node.value not in docstrings:
             return True
     return False
+
+
+def test_projected_folds_match_the_real_splitter():
+    """The pin between `split.rolling_origin_folds` and this module.
+
+    `minimum_waves` has to say how many folds a panel *will* yield at a depth the
+    scraper has not reached, so it carries a projection of the fold rule rather
+    than the rule itself — it cannot import this module, because this module
+    imports it. That projection is only trustworthy while it agrees with the
+    real splitter, which is what this checks. If `wave_forward_folds` ever
+    changes its window, expanding to sliding or its embargo handling, this fails
+    and `rolling_origin_folds` has to be brought along.
+    """
+    embargo = 2 * DAY
+    burnt = 3  # floor(2 days / 1 day) + 1, the same arithmetic minimum_waves does
+    for n_waves in range(1, 11):
+        block = make_panel(n_waves=n_waves, per_wave=6)
+        assert len(wave_forward_folds(block, embargo)) == rolling_origin_folds(n_waves, burnt), (
+            f"{n_waves} waves"
+        )
 
 
 def test_the_test_block_is_read_only_where_it_should_be():
