@@ -517,6 +517,20 @@ by 0.06 PR-AUC across seven rolling-origin folds and still returns the verdict
 *"inside one standard deviation, so treat them as tied."* That refusal, on a
 label that is pure noise, is the machinery working.
 
+**The ladder starts with rules, not models.** Two of its rungs are a sentence
+each — *a posting up more than a month is not about to close*, *fresh postings
+move* — and a third bounds what any age-only rule could buy, by binning age into
+deciles and predicting each bin's training rate rather than fitting a monotone
+curve through it. `reports/baseline_results.md` compares the best model against
+the best rule at the alert budget and says which won, because "XGBoost beats
+logistic regression" is a statement about scikit-learn and this one is not.
+
+The first rule is already known to be false here: postings older than 30 days
+close at 1.30% against 1.14% for younger ones, and the rate across age buckets
+runs 1.13%, 1.59%, 0.86%, 1.49%, 1.77%, 0.82% — flat and non-monotone. It stays
+in the ladder because a plausible belief that the data refuses is a result, and
+a reader who holds it is better served seeing it priced than not finding it.
+
 **The one real number that exists** is the constant-predictor reference: PR-AUC
 **0.0140** on 6,874 labelled rows, which is the base rate. Every model must beat
 it, and none has been asked to yet.

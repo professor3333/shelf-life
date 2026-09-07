@@ -39,7 +39,13 @@ from src.data.split import (
     temporal_split,
 )
 from src.features.preprocessing import build_pipeline, features_and_target, fit_on_training_fold
-from src.models.baselines import BoardHazardBaseline
+from src.models.baselines import (
+    BoardHazardBaseline,
+    RuleBaseline,
+    SingleFeatureCeiling,
+    older_than_thirty_days,
+    posted_this_week,
+)
 from src.models.metrics import DEFAULT_ALERT_BUDGET, evaluate, evaluate_by, reliability_curve
 
 DEFAULT_PANEL = Path("data/processed/features/job_days_h1_calendar.parquet")
@@ -62,6 +68,37 @@ LADDER: tuple[Rung, ...] = (
         "prior",
         "constant base rate",
         lambda: build_pipeline(DummyClassifier(strategy="prior")),
+    ),
+    # --- rules a person could follow, before any estimator ------------------
+    # Placed here on purpose. The ladder is meant to be climbed in ascending
+    # seriousness, and a hand-written rule is more serious than a constant and
+    # less serious than a fit. Putting them after the models would invite the
+    # reading that they are an afterthought; the whole point is that everything
+    # below has to beat them.
+    Rung(
+        "rule_older_than_30d",
+        "rule: up more than a month, so not about to close",
+        lambda: RuleBaseline(
+            rule=older_than_thirty_days,
+            statement="A posting that has been up more than a month is not about to close.",
+        ),
+    ),
+    Rung(
+        "rule_posted_this_week",
+        "rule: fresh postings move, stale ones have stalled",
+        lambda: RuleBaseline(
+            rule=posted_this_week,
+            statement="A posting still up after a week has stalled; the fresh ones move.",
+        ),
+    ),
+    Rung(
+        "age_ceiling",
+        "the best any age-only rule could do (deciles, non-monotone)",
+        lambda: SingleFeatureCeiling(
+            column="age_days",
+            bins=10,
+            statement="Age used as well as any rule could use it.",
+        ),
     ),
     Rung(
         "age_only",
@@ -106,6 +143,84 @@ LADDER: tuple[Rung, ...] = (
         ),
     ),
 )
+
+
+#: Rungs a person could act on without a computer, plus the ceiling that bounds
+#: what any age-only rule could buy. Everything not named here is a fitted model
+#: and has to earn its place against the best of these.
+HEURISTIC_RUNGS: tuple[str, ...] = (
+    "prior",
+    "rule_older_than_30d",
+    "rule_posted_this_week",
+    "age_ceiling",
+    "board_hazard",
+)
+
+
+def heuristic_verdict(results: pd.DataFrame, budget_per_day: int) -> list[str]:
+    """Does the modelling buy anything over a rule someone could follow?
+
+    The comparison the ladder above cannot make. Climbing from logistic to
+    XGBoost shows that one estimator beats another, which is a statement about
+    scikit-learn; a reader wants to know whether any of it beats *skip anything
+    that has been up a month*.
+
+    **Precision is the comparison, not PR-AUC.** The operating point is an alert
+    budget — a fixed number of postings a person will actually read each day — so
+    what the reader experiences is how many of those alerts were worth opening.
+    PR-AUC is reported beside it because a rule and a model can tie at the budget
+    while ranking very differently underneath, and a model that ranks better has
+    somewhere to go when the budget changes.
+    """
+    if results.empty or "precision" not in results.columns:
+        return []
+    rules = results[results["model"].isin(HEURISTIC_RUNGS)]
+    models = results[~results["model"].isin(HEURISTIC_RUNGS)]
+    if rules.empty or models.empty:
+        return []
+
+    best_rule = rules.loc[rules["precision"].idxmax()]
+    best_model = models.loc[models["precision"].idxmax()]
+    gain = float(best_model["precision"]) - float(best_rule["precision"])
+
+    if gain > 0:
+        reading = (
+            f"The modelling buys **{gain:+.4f}** precision at the budget over the best "
+            f"rule. Whether that is worth the pipeline is a judgement, but it is a "
+            f"judgement about a real number rather than about a model comparison."
+        )
+    elif gain == 0:
+        reading = (
+            "The best model and the best rule are **exactly level** at the budget. "
+            "Everything the pipeline adds is currently invisible to the person "
+            "reading the alerts."
+        )
+    else:
+        reading = (
+            f"**The best rule wins**, by {-gain:.4f} precision at the budget. That is a "
+            "finding about this problem, not a bug to tune away: on this data a "
+            "person following one sentence does better than the fitted models, and "
+            "the honest report of that is worth more than a model that edges past it "
+            "after enough attempts."
+        )
+
+    return [
+        "### Does the modelling beat a rule?",
+        "",
+        f"At {budget_per_day} alerts per prediction day:",
+        "",
+        f"- best rule — `{best_rule['model']}`, precision **{best_rule['precision']:.4f}**, "
+        f"PR-AUC {best_rule['pr_auc']:.4f}",
+        f"- best model — `{best_model['model']}`, precision **{best_model['precision']:.4f}**, "
+        f"PR-AUC {best_model['pr_auc']:.4f}",
+        "",
+        reading,
+        "",
+        "Both numbers are single draws on one validation block. A difference smaller "
+        "than the fold spread in `reports/model_comparison.md` is not a difference, "
+        "and at this panel depth most of them will be.",
+        "",
+    ]
 
 
 def prediction_days(block: pd.DataFrame) -> int:
@@ -194,6 +309,7 @@ def write_report(
     results: pd.DataFrame | None,
     scores: dict[str, pd.Series] | None,
     blocker: str | None,
+    budget_per_day: int = DEFAULT_ALERT_BUDGET,
 ) -> None:
     """Write `reports/baseline_results.md`, whether or not the ladder could run."""
     reference = analytic_reference(frame)
@@ -264,6 +380,13 @@ def write_report(
                 ],
             ),
             "",
+            "The first rungs are rules, not fits: `rule_older_than_30d` and",
+            "`rule_posted_this_week` are one sentence each, and `age_ceiling` bounds what",
+            "any age-only rule could buy by binning age into deciles and predicting each",
+            "bin's training rate — free to be non-monotone, which `age_only`'s logistic",
+            "fit is not. Everything below them has to beat them.",
+            "",
+            *heuristic_verdict(results, budget_per_day),
             "## Per source",
             "",
             _table(
@@ -336,7 +459,7 @@ def main() -> None:
         print()
         print(f"ladder not run: {error}".split("\n")[0])
 
-    write_report(args.out, frame, split, results, scores, blocker)
+    write_report(args.out, frame, split, results, scores, blocker, args.budget)
     print(f"\nwrote -> {args.out}")
 
 

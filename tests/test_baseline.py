@@ -217,3 +217,163 @@ def test_the_suite_reported_for_a_rung_carries_no_accuracy():
 def test_evaluate_on_an_empty_positive_block_is_undefined_not_zero():
     truth = np.zeros(50)
     assert np.isnan(evaluate(truth, np.full(50, 0.1))["pr_auc"])
+
+
+# --- rules a person could follow ---------------------------------------------
+
+
+def _aged(ages: list[float], labels: list[int]) -> tuple[pd.DataFrame, pd.Series]:
+    frame = pd.DataFrame({"age_days": ages, "y": labels})
+    return frame, frame["y"]
+
+
+def test_a_rule_predicts_each_groups_training_rate():
+    """A person holding a rule holds a rate with it. Two groups, two rates,
+    computed on the fold the model was fitted on and nowhere else."""
+    from src.models.baselines import RuleBaseline, older_than_thirty_days
+
+    frame, target = _aged([10, 20, 40, 50, 60, 70], [0, 0, 1, 1, 1, 0])
+    model = RuleBaseline(rule=older_than_thirty_days).fit(frame, target)
+    scores = model.predict_proba(frame)[:, 1]
+
+    assert scores[0] == pytest.approx(0.0)  # age <= 30: 0 of 2 closed
+    assert scores[2] == pytest.approx(0.75)  # age > 30:  3 of 4 closed
+
+
+def test_a_group_unseen_at_fit_time_falls_back_to_the_pooled_rate():
+    """The honest answer to "what do you predict for a bucket you have never
+    seen" — and the case that would otherwise be NaN and poison the metric."""
+    from src.models.baselines import RuleBaseline, older_than_thirty_days
+
+    frame, target = _aged([10, 20, 25], [1, 0, 0])
+    model = RuleBaseline(rule=older_than_thirty_days).fit(frame, target)
+    unseen, _ = _aged([90], [0])
+    assert model.predict_proba(unseen)[0, 1] == pytest.approx(1 / 3)
+
+
+def test_the_ceiling_sees_a_shape_a_logistic_fit_cannot():
+    """The claim that justifies `age_ceiling` being in the ladder at all.
+
+    `age_only` is a logistic fit on `age_days`, so it can express "closure rises
+    with age" or "closure falls with age" and nothing else. The observed
+    relationship on the real panel is neither — 1.13%, 1.59%, 0.86%, 1.49%,
+    1.77%, 0.82% across age buckets — so a monotone fit can report "no signal"
+    for a column whose signal it has no way to represent.
+
+    Here closure is high at both ends of the age range and low in the middle. A
+    logistic fit is at chance on that by construction; the ceiling should not be.
+    """
+    from sklearn.linear_model import LogisticRegression
+
+    from src.models.baselines import SingleFeatureCeiling
+    from src.models.metrics import average_precision
+
+    rng = np.random.default_rng(0)
+    ages = np.concatenate(
+        [rng.uniform(0, 10, 200), rng.uniform(10, 40, 400), rng.uniform(40, 50, 200)]
+    )
+    labels = np.concatenate(
+        [
+            rng.binomial(1, 0.5, 200),  # young: closes often
+            rng.binomial(1, 0.05, 400),  # middle: rarely
+            rng.binomial(1, 0.5, 200),  # old: closes often
+        ]
+    )
+    frame = pd.DataFrame({"age_days": ages})
+
+    ceiling = SingleFeatureCeiling(column="age_days", bins=10).fit(frame, labels)
+    monotone = LogisticRegression(max_iter=1000).fit(frame[["age_days"]], labels)
+
+    ceiling_ap = average_precision(labels, ceiling.predict_proba(frame)[:, 1])
+    monotone_ap = average_precision(labels, monotone.predict_proba(frame[["age_days"]])[:, 1])
+    base = labels.mean()
+
+    # A monotone fit is not at *chance* on a U — it captures whichever arm its
+    # slope points at, and here that is worth about a tenth over the base rate.
+    # The claim is not that it sees nothing; it is that it can only ever see
+    # half the shape, and the margin is what that costs.
+    assert monotone_ap > base, "sanity: the logistic should still capture one arm"
+    assert ceiling_ap > monotone_ap + 0.10, "the ceiling should see the arm the logistic cannot"
+    assert ceiling_ap > base + 0.15
+
+
+def test_the_ceiling_reuses_training_bin_edges_on_unseen_values():
+    """Quantiles recomputed on the evaluation block would be a statistic of the
+    future. A validation value beyond the training range must land in the nearest
+    bin rather than becoming NaN and silently taking the pooled fallback."""
+    from src.models.baselines import SingleFeatureCeiling
+
+    train = pd.DataFrame({"age_days": list(range(10, 110, 10))})
+    model = SingleFeatureCeiling(column="age_days", bins=4).fit(train, [0] * 5 + [1] * 5)
+    edges = list(model.edges_)
+
+    beyond = pd.DataFrame({"age_days": [-500.0, 5000.0]})
+    scores = model.predict_proba(beyond)[:, 1]
+    assert not np.isnan(scores).any()
+    assert edges[0] == -np.inf and edges[-1] == np.inf
+
+    # and the edges do not move when a different frame is scored
+    model.predict_proba(pd.DataFrame({"age_days": [1.0, 2.0, 3.0]}))
+    assert list(model.edges_) == edges
+
+
+def test_every_rule_rung_is_named_as_a_heuristic():
+    """A rung that is a rule but is counted as a model would make the verdict
+    compare the modelling against itself."""
+    from src.models.train_baseline import HEURISTIC_RUNGS
+
+    rule_rungs = {rung.name for rung in LADDER if rung.name.startswith("rule_")}
+    assert rule_rungs <= set(HEURISTIC_RUNGS)
+    assert set(HEURISTIC_RUNGS) <= {rung.name for rung in LADDER}
+
+
+# --- the verdict --------------------------------------------------------------
+
+
+def _ladder_table(rule_precision: float, model_precision: float) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {"model": "prior", "precision": 0.0, "pr_auc": 0.0},
+            {"model": "rule_older_than_30d", "precision": rule_precision, "pr_auc": 0.1},
+            {"model": "logistic", "precision": model_precision, "pr_auc": 0.2},
+        ]
+    )
+
+
+def test_the_verdict_says_when_a_rule_wins():
+    """The finding this whole section exists to be able to report. A model that
+    loses to one sentence is a result, not a bug to tune away."""
+    from src.models.train_baseline import heuristic_verdict
+
+    text = "\n".join(heuristic_verdict(_ladder_table(0.30, 0.10), 20))
+    assert "best rule wins" in text
+    assert "0.2000" in text
+
+
+def test_the_verdict_says_when_the_modelling_earns_its_keep():
+    from src.models.train_baseline import heuristic_verdict
+
+    text = "\n".join(heuristic_verdict(_ladder_table(0.10, 0.30), 20))
+    assert "buys **+0.2000**" in text
+
+
+def test_the_verdict_names_a_tie_as_a_tie():
+    from src.models.train_baseline import heuristic_verdict
+
+    text = "\n".join(heuristic_verdict(_ladder_table(0.20, 0.20), 20))
+    assert "exactly level" in text
+
+
+def test_the_verdict_warns_that_one_block_is_one_draw():
+    from src.models.train_baseline import heuristic_verdict
+
+    text = "\n".join(heuristic_verdict(_ladder_table(0.10, 0.30), 20))
+    assert "fold spread" in text
+
+
+def test_the_verdict_is_silent_without_both_families():
+    from src.models.train_baseline import heuristic_verdict
+
+    only_rules = pd.DataFrame([{"model": "prior", "precision": 0.1, "pr_auc": 0.1}])
+    assert heuristic_verdict(only_rules, 20) == []
+    assert heuristic_verdict(pd.DataFrame(), 20) == []
