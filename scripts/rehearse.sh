@@ -59,6 +59,14 @@ echo "== assembling the job-day panel (H=${HORIZON}, ${BASIS})"
 "${PYTHON}" -m src.features.assemble --horizon "${HORIZON}" --basis "${BASIS}"
 
 echo
+echo "== label validity audit"
+# Runs before the gate on purpose: it needs closures, not a three-way split, so
+# it has an answer on a panel far too shallow to model. Whether "disappeared"
+# means what the label needs it to mean is worth knowing before any model is
+# fitted to it, not after.
+"${PYTHON}" -m src.data.label_audit
+
+echo
 echo "== depth gate"
 # `minimum_waves` is the readiness check and `feasible_cuts` is the acceptance
 # check; DEBUGGING.md 2026-09-07 is what happens when they disagree, so this
