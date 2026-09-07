@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.data.split import crawl_waves, temporal_split
+from src.data.split import temporal_split
 from src.inference import artifact as artifact_module
 from src.models.experiments import default_cuts
 from src.models.freeze import build_metadata, freeze
@@ -54,7 +54,7 @@ def panel():
 
 @pytest.fixture(scope="session")
 def split(panel):
-    return temporal_split(panel, default_cuts(crawl_waves(panel[panel["label_observable"]])))
+    return temporal_split(panel, default_cuts(panel))
 
 
 @pytest.fixture(scope="session")

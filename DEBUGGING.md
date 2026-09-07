@@ -4,6 +4,45 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-07 — Two modules, two cut rules, both broken
+
+- **Problem:** `train`, `evaluate` and `train_baseline` cut the panel with
+  `Cuts(waves[0], waves[len // 2])`; `experiments` used 60/20/20 fractions of
+  the wave count. Neither had ever run on the real panel, so neither had been
+  seen to fail. Simulated forward, the first yields **zero rolling-origin folds
+  at every depth from 9 to 17** — a one-wave training block on a panel of any
+  size — and the second **refuses every depth up to 15**, first returning a
+  usable split at 16 labelled waves, eight after one exists. Two reports both
+  saying "the split" would have described two different splits.
+
+- **Root cause:** both are formulas written against an imagined panel, and the
+  thing neither models is the embargo. `waves[len // 2]` puts the validation cut
+  at the midpoint, so `train_end` never moves off the first wave and the
+  training window cannot grow — the rule has no term for panel depth at all. The
+  fractions do have such a term, but they allocate the *raw* wave count and let
+  the embargo take its three waves per boundary out of the result, which empties
+  the validation block until 20% of the panel exceeds three waves. The deeper
+  fault is shared: a cut is legal only if `feasible_cuts` says so, and neither
+  rule consulted it. Same shape as the entry below — a rule that predicts
+  another rule's verdict without ever being checked against it.
+
+- **Solution:** `src/data/split.py:best_cuts` — a search over `feasible_cuts`,
+  keeping only valid cuts, preferring those with at least
+  `DEFAULT_TARGET_FOLDS` rolling-origin folds, and among those taking the cut
+  closest to a 60/20/20 share of the waves *surviving the embargo*. All four
+  modules now call it. `docs/design.md` §8a records why the objective is
+  proportional rather than greedy on folds or on evaluation rows — both greedy
+  variants were measured and both starve something.
+
+- **Lesson:** **a formula that allocates a resource must be written in terms of
+  what is left after the fixed costs come out, not before.** The embargo is a
+  fixed cost of three waves per boundary; any rule that computes shares of the
+  gross and subtracts afterwards is right only when the fixed cost is small
+  relative to the total, which is exactly the regime a young panel is not in.
+  The general form: when a constraint removes a constant amount, apportion the
+  remainder, never the whole.
+
+
 ## 2026-09-07 — The readiness check disagreed with the acceptance check
 
 - **Problem:** `minimum_waves` reported that an honest three-way split needed

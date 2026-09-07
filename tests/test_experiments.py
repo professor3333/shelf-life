@@ -54,8 +54,7 @@ def panel() -> pd.DataFrame:
 @pytest.fixture(scope="module")
 def split(panel):
     prepared = add_leaky_features(panel)
-    waves = crawl_waves(prepared[prepared["label_observable"]])
-    return temporal_split(prepared, default_cuts(waves))
+    return temporal_split(prepared, default_cuts(prepared))
 
 
 @pytest.fixture(scope="module")
@@ -277,11 +276,16 @@ def test_default_cuts_leave_a_training_window_deep_enough_for_folds(split):
     assert len(wave_forward_folds(split.train, split.embargo)) >= 3
 
 
-def test_default_cuts_refuses_a_panel_too_shallow_to_cut():
+def test_default_cuts_refuses_a_panel_too_shallow_to_cut(panel):
+    """A refusal, not a degenerate cut. The search has nothing to return when no
+    candidate yields three usable blocks, and saying so beats handing back a
+    split whose metrics are undefined."""
     from src.data.split import SplitTooShallow
 
+    waves = crawl_waves(panel[panel["label_observable"]])
+    shallow = panel[panel["t"] <= waves.iloc[2]]
     with pytest.raises(SplitTooShallow):
-        default_cuts(pd.Series([pd.Timestamp("2026-08-31T03:45:00Z")]))
+        default_cuts(shallow)
 
 
 def test_execute_never_touches_the_test_block(split):

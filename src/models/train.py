@@ -35,7 +35,7 @@ from pathlib import Path
 import pandas as pd
 from xgboost import XGBClassifier
 
-from src.data.split import Cuts, SplitResult, SplitTooShallow, crawl_waves, temporal_split
+from src.data.split import SplitResult, SplitTooShallow, best_cuts, temporal_split
 from src.features.derive import DERIVED_COLUMNS
 from src.features.preprocessing import (
     DERIVED,
@@ -316,11 +316,9 @@ def main() -> None:
     args = parser.parse_args()
 
     frame = pd.read_parquet(args.panel)
-    waves = crawl_waves(frame[frame["label_observable"]])
-
     ladder = ablations = sweep = blocker = None
     try:
-        split = temporal_split(frame, Cuts(waves.iloc[0], waves.iloc[len(waves) // 2]))
+        split = temporal_split(frame, best_cuts(frame))
         ladder, _ = run_ladder(split, args.budget)
         boosted = fit_and_score(build_xgboost(split), split, args.budget)
         ladder = pd.concat(

@@ -685,6 +685,66 @@ being measured and a grouped split the honest test.
 
 ---
 
+## 8a. Where the cut falls — **DECIDED 2026-09-07**
+
+§8 settled *what the blocks are*. It did not settle *where the two cuts go*, and
+the answer was left to whichever module was being written that day. There were
+two, and both were wrong.
+
+`train`, `evaluate` and `train_baseline` used `waves[0], waves[len // 2]`. That
+pins `train_end` to the first wave at every depth, so the training block is one
+wave deep on a panel of any size and `wave_forward_folds` cuts nothing from it —
+**zero rolling-origin folds at 9 waves and at 17**, every wave the scraper added
+going to the evaluation blocks. Every model comparison those modules produced
+would have been a single number with no error bar, which is Obstacle 4 lost by
+default.
+
+`experiments` used 60/20/20 of the wave count, taking the fractions first and
+letting the embargo come out of the result. The embargo is not a rounding error:
+it discards three waves at each boundary, so a 20% validation slice is empty
+until 20% of the panel exceeds three waves. Measured on the real panel, that
+rule refuses every depth up to 15 and first returns a usable split at **16**
+labelled waves — eight after one exists.
+
+So two reports both saying "the split" described two different splits, and
+neither described one worth having.
+
+**Decided: `src.data.split.best_cuts`, a search over `feasible_cuts` rather than
+a formula.** It keeps only cuts the acceptance check already marks valid,
+prefers those yielding at least three rolling-origin folds, and among those
+takes the cut closest to sharing the waves *that survive the embargo* 60/20/20.
+All four modules call it, so "the split" now names one thing.
+
+**Why proportional and not greedy**, since both greedy rules are simpler and
+both are worse. Maximising folds deepens the training window without limit and
+leaves validation one wave wide for ever — 201 training positives against 21 in
+each evaluation block at 17 waves, and a test PR-AUC on 21 positives has an
+error bar wider than any difference it could measure. Maximising the evaluation
+blocks once three folds exist does the reverse and starves the fit: on the
+synthetic panel it trains on 18 positives where proportional gets 35. Only
+proportional grows all three together:
+
+| labelled waves | train/val/test waves | folds | train pos | val pos | test pos |
+| -------------- | -------------------- | ----- | --------- | ------- | -------- |
+| 8              | 1/1/2                | 0     | 19        | 22      | 21       |
+| 11             | 4/1/2                | 1     | 75        | 21      | 21       |
+| 13             | 6/1/2                | 3     | 117       | 21      | 21       |
+| 17             | 8/2/3                | 5     | 159       | 42      | 42       |
+| 22             | 11/3/4               | 8     | 222       | 63      | 63       |
+
+The fold target is a threshold rather than a quantity to maximise because on
+this panel positives are the scarce resource — 96 in the whole frame — and past
+three folds another fold buys less than the removals it takes out of the test
+block. Three is `DEFAULT_TARGET_FOLDS` and it is a parameter, not a constant of
+nature.
+
+**Would change my mind:** a panel deep enough that positives stop being scarce,
+where maximising folds costs nothing worth keeping; or a decision to report the
+test metric with a bootstrap interval, which would raise the price of a thin
+test block and argue for a larger test share than 20%.
+
+---
+
 ## 9. Consequences for the feature set — **DECIDED 2026-09-04**
 
 Two corrections that follow from §6.2 of the problem definition, found while

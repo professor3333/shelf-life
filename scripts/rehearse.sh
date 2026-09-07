@@ -45,8 +45,18 @@ if [ ! -x "${PYTHON}" ]; then
   exit 2
 fi
 
-echo "== pinning a dated snapshot"
-"${PYTHON}" -m src.data.snapshot
+# A pinned snapshot is immutable by design, so `snapshot` refuses to re-pin and
+# exits non-zero. For a script meant to be run repeatedly until the panel
+# clears, "today is already pinned" is the ordinary case, not a failure — the
+# second run of a day must continue with the snapshot the first one took, which
+# is also the only behaviour that keeps the day's numbers comparable.
+TODAY="$(date +%F)"
+if [ -f "data/raw/${TODAY}/jobs.db" ]; then
+  echo "== snapshot for ${TODAY} already pinned; using it"
+else
+  echo "== pinning a dated snapshot"
+  "${PYTHON}" -m src.data.snapshot
+fi
 
 echo
 echo "== assembling the job-day panel (H=${HORIZON}, ${BASIS})"

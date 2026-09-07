@@ -67,15 +67,23 @@ FIXED_T = "2026-09-14T03:45:00Z"
 #: What the pipeline in this repository returns for that payload at that instant.
 #: Recomputed only when a deliberate change to the feature logic or the model
 #: makes it wrong — and when that happens, the diff is the record of what moved.
-EXPECTED_PROBABILITY = 0.8584466825899831
+#:
+#: Moved 2026-09-07 when `best_cuts` replaced the two cut formulas. Nothing about
+#: the payload, the feature logic or the estimator changed; the *training fold*
+#: did, and every fitted statistic in the pipeline — imputation medians, scaler
+#: centres and scales, the encoder's category list — is fitted on that fold. That
+#: `EXPECTED_N_FEATURES` is unchanged at 34 is the evidence for that reading: a
+#: change to the feature logic would have moved the width or the column order,
+#: and a change to the fold alone can only move the values.
+EXPECTED_PROBABILITY = 0.7532397535795025
 
 #: The preprocessed row the estimator is handed: its width, its sum, and its
 #: leading values. Pinned separately from the probability because this half is
 #: the *feature logic*, and it is identical on every machine — no fitted tree
 #: stands between the payload and these numbers.
 EXPECTED_N_FEATURES = 34
-EXPECTED_FEATURE_SUM = 51.853680421452765
-EXPECTED_FIRST_FEATURES = [-3.2938571215073607, 4.562661929345213, 3.4443153442563945, 0.0]
+EXPECTED_FEATURE_SUM = 52.906770088812735
+EXPECTED_FIRST_FEATURES = [-3.840847704401781, 5.849346236003824, 3.429555524056913, 0.0]
 
 
 @pytest.fixture(scope="module")

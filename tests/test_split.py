@@ -15,9 +15,11 @@ import pandas as pd
 import pytest
 
 from src.data.split import (
+    SPLIT_NAMES,
     Cuts,
     SplitTooShallow,
     assert_temporal_order,
+    best_cuts,
     crawl_waves,
     depth_report,
     embargo_width,
@@ -387,6 +389,67 @@ def test_depth_report_states_both_waits():
     text = depth_report(_structural(8))
     assert "cannot carry a positive" in text
     assert "rolling-origin fold(s) today" in text
+
+
+def test_best_cuts_leaves_a_training_window_folds_can_be_cut_from():
+    """The defect in `waves[0], waves[len // 2]`, which three modules used.
+
+    It pins `train_end` to the first wave at every depth, so the training block
+    is one wave deep on a panel of any size and `wave_forward_folds` returns
+    nothing from it. Measured on the real panel: zero folds at 9 waves and zero
+    at 17. Every wave the scraper added went to the evaluation blocks.
+    """
+    from src.models.evaluate import wave_forward_folds
+
+    frame = _structural(15)
+    naive = temporal_split(frame, Cuts(*_naive_cuts(frame)))
+    chosen = temporal_split(frame, best_cuts(frame))
+
+    assert len(wave_forward_folds(naive.train, naive.embargo)) == 0
+    assert len(wave_forward_folds(chosen.train, chosen.embargo)) >= 3
+
+
+def _naive_cuts(frame: pd.DataFrame) -> tuple[pd.Timestamp, pd.Timestamp]:
+    waves = crawl_waves(frame[frame["label_observable"]])
+    return waves.iloc[0], waves.iloc[len(waves) // 2]
+
+
+def test_best_cuts_never_recommends_a_cut_the_split_rejects():
+    """The property the two formulas could not offer. `best_cuts` selects from
+    `feasible_cuts`, so anything it returns has already been checked for three
+    non-empty blocks and positives in both evaluation blocks — it cannot hand
+    back a cut `temporal_split` then refuses."""
+    for depth in range(8, 18):
+        frame = _structural(depth)
+        temporal_split(frame, best_cuts(frame))  # raises if the cut is not usable
+
+
+def test_best_cuts_refuses_rather_than_returning_a_degenerate_cut():
+    with pytest.raises(SplitTooShallow):
+        best_cuts(_structural(7))
+
+
+def test_best_cuts_grows_every_block_as_the_panel_deepens():
+    """Neither greedy rule does this, which is why the objective is proportional.
+
+    Maximising folds deepens training without limit and leaves validation one
+    wave wide for ever; maximising the evaluation blocks once the fold target is
+    met starves the fit instead. The shares are of the waves that *survive the
+    embargo*, which is the part the old 60/20/20 got wrong.
+    """
+    widths = []
+    for depth in range(13, 24):
+        frame = _structural(depth)
+        result = temporal_split(frame, best_cuts(frame))
+        block = result.frame
+        widths.append(tuple(block[block["split"] == name]["t"].nunique() for name in SPLIT_NAMES))
+
+    for earlier, later in zip(widths, widths[1:], strict=False):
+        assert all(b >= a for a, b in zip(earlier, later, strict=True)), (
+            f"a block shrank as the panel deepened: {earlier} -> {later}"
+        )
+    assert widths[-1][1] > widths[0][1], "validation never grew"
+    assert widths[-1][2] > widths[0][2], "test never grew"
 
 
 def test_rolling_origin_folds_is_the_block_less_one_embargo():

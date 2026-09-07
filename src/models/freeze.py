@@ -49,7 +49,6 @@ import pandas as pd
 from src.data.split import (
     SplitResult,
     SplitTooShallow,
-    crawl_waves,
     depth_report,
     temporal_split,
 )
@@ -395,8 +394,7 @@ def main() -> None:
 
     frozen = metadata = blocker = None
     try:
-        waves = crawl_waves(panel[panel["label_observable"]])
-        split = temporal_split(panel, default_cuts(waves))
+        split = temporal_split(panel, default_cuts(panel))
         frozen = freeze(split, args.run, args.budget, args.fit)
         metadata = build_metadata(frozen, args.run, panel, panel_path, dataset, args.budget)
         artifact_module.save(frozen.pipeline, metadata, args.artifact)
