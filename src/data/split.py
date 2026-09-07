@@ -455,10 +455,18 @@ def minimum_waves(
 
     At H=1 the embargo is one day plus a run's reach, which on the observed
     schedule is 2d10h against daily spacing: three waves burnt at each boundary,
-    one blind wave at the tail, **eight** waves for the smallest legal split. The
-    widest run gap in the panel sets that reach, so a single late crawl
-    permanently widens the embargo for every row — the 34.4h gap of 2026-09-01
-    costs a wave at both boundaries for the life of the panel.
+    one blind wave at the tail, **eight** waves for the smallest legal split.
+
+    The widest run gap in the panel sets that reach, so a single late crawl
+    widens the embargo for every row — but widening it is not the same as
+    costing a wave, and the difference is the floor. The 34.4h gap of 2026-09-01
+    puts the embargo at 2d10h where a perfectly daily schedule would put it at
+    2d, and `floor(embargo / spacing) + 1` is **3 either way**: the late crawl
+    discards more *time* and the same number of waves. It only starts costing a
+    wave once a gap pushes the embargo past three times the spacing — a missed
+    crawl would, at 48h. Stated because the earlier version of this docstring
+    claimed the 2026-09-01 slip cost a wave at both boundaries, which is not
+    true and made the schedule look worse than it is.
 
     **3. Legal is not the same as evaluable.** The smallest legal split has a
     one-wave training block, and `wave_forward_folds` returns nothing from a

@@ -402,11 +402,13 @@ def test_minimum_waves_reports_a_shortfall_on_a_panel_too_short():
 
 
 def test_a_single_late_crawl_widens_the_embargo_for_the_whole_panel():
-    """The widest run gap sets the reach, so one late crawl costs waves forever.
+    """A gap wide enough moves the wave count, not merely the embargo.
 
-    Not a hypothetical: the 2026-09-01 crawl fired at 14:07 instead of 03:45,
-    making the widest gap 34.4h, and every boundary in the panel has paid for it
-    since.
+    The threshold matters and is easy to state wrongly. A *missed* crawl doubles
+    a source's gap to 48h, pushing the embargo past three times the spacing and
+    costing a wave at each boundary — that is the fixture below. The real
+    2026-09-01 slip, 03:45 to 14:07, is not that: it widened the embargo from 2d
+    to 2d10h and `burnt` stayed at 3, so it cost time and no waves at all.
     """
     even = minimum_waves(_panel(_wide(9)))
     ids = {"a", "b", "c"}
