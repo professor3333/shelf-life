@@ -197,6 +197,30 @@ built from it would be wrong at an unknown rate, in an unknown direction, and
 would look exactly like labels that were right. A dataset's worst failure mode
 is a label that is confidently wrong, and this is one.
 
+**Reaffirmed 2026-09-07, after the pagination was fixed.** The scraper now walks
+arbeitnow to the end of its feed — `links.next` goes null at page 21, about
+2,010 postings — so from 2026-09-08 a run can be recorded complete and the
+reorder argument above no longer applies. **The exclusion stands anyway**, and
+the reason has changed rather than weakened.
+
+Completeness is not the binding constraint; **window residence** is. The feed
+retains roughly seven days of arrivals at about 400 a day, so a posting leaves
+the observable universe once it is old enough, whether or not anything happened
+to it. For a posting near that edge, absence is *ageing out* and *removal* at
+once, and no crawl however complete can separate them. That is the same class of
+error the paragraph above refuses — a label wrong at an unknown rate, in an
+unknown direction — arriving by a different route.
+
+There is a rule that would work: label only arbeitnow postings young enough to
+sit inside the feed through `t + H` and its corroborating run. It is a real
+option and it is not taken today, because the label definition lives in one
+place and changing it is a change to the target every number in this repository
+is about. If it is taken later it is a **`rules_version` change with its own
+tests and provenance**, made on evidence from the complete crawls, not a
+consequence of the pagination fix. Nothing about the 2026-09-08 crawl licenses
+it: that crawl's job is to show what the *existing* rules produce on a complete
+board.
+
 ### The label
 
 Let `t` be a prediction point, `H = 7` days, and let a *complete run* mean

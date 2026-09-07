@@ -880,7 +880,7 @@ panel will show properly, and K should be chosen against that distribution
 rather than against two cases.
 ---
 
-## 12. Board context at serve time — **OPEN, defaulting to imputation**
+## 12. Board context at serve time — **OPEN, deciding on fold evidence**
 
 Four features describe the board rather than the posting: `board_size_at_t`,
 `board_growth`, `n_same_title_on_board`, `n_same_req_on_board`. Each was
@@ -942,6 +942,34 @@ subtract table rows:
   per-feature table alone would have licensed dropping columns that jointly
   carry signal;
 - group ≈ the best single → the value sits in one column, not in the set.
+
+**How it will be decided, fixed 2026-09-07 before the evidence exists.** Written
+down now on purpose: a rule chosen after seeing the number is not a rule.
+
+The comparison is the full model against the full model minus the board-context
+group, refitted across the rolling-origin folds **inside the training window**
+and paired fold by fold. Paired because both models see the same validation wave
+in each fold and so share whatever made it easy or hard; differencing within the
+fold removes that, where scoring each separately and subtracting the means
+leaves it in. `board_context_folds` in `src/models/train.py` is that comparison,
+and `test_the_board_comparison_never_reads_the_test_block` is what keeps it
+honest — it poisons the test block and requires the output to be unchanged.
+
+The reading, decided in advance:
+
+- **inside one standard deviation → drop the four.** A tie is not a reason to
+  keep them. If the columns cannot be shown to help, the simpler model is the
+  one whose validated and served forms are the same object for every caller, and
+  the imputation branch stops existing.
+- **a lead clearing one standard deviation → keep them**, with the cost this
+  section already names: a caller supplying nothing gets a model whose board
+  columns are constant, and the response says so.
+- **fewer than three folds → not evidence.** A standard deviation over two
+  numbers is not a standard deviation, and the decision waits.
+
+**The test block does not answer this.** Choosing a feature set is model
+selection, and a test set consulted during selection is a validation set. It is
+opened once, afterwards, for the performance claim.
 
 **What this still does not decide.** Option B — requiring the caller to supply
 board context — is not available under §5's decided user, a job seeker weighing
