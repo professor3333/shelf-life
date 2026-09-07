@@ -45,6 +45,7 @@ from src.features.preprocessing import (
     features_and_target,
     fit_on_training_fold,
 )
+from src.inference.contract import BOARD_CONTEXT
 from src.models.metrics import DEFAULT_ALERT_BUDGET, evaluate
 from src.models.train_baseline import (
     DEFAULT_PANEL,
@@ -125,44 +126,104 @@ def fit_and_score(
 
 @dataclass(frozen=True)
 class Ablation:
-    feature: str
+    """One refit, with `features` withheld. `name` is what the report calls it.
+
+    `features` is a tuple rather than a string because the question that matters
+    most here cannot be asked one column at a time — see `BOARD_CONTEXT_ABLATION`.
+    A single-feature ablation is the one-element case, so there is one code path.
+    """
+
+    name: str
+    features: tuple[str, ...]
     hypothesis: str
 
 
-ABLATIONS: tuple[Ablation, ...] = tuple(
-    Ablation(name, hypothesis)
-    for name, hypothesis in (
-        ("title_seniority", "how senior a role is relates to how long it takes to fill"),
-        ("title_is_manager", "management roles have longer hiring processes"),
-        ("title_words", "terse titles are boilerplate on high-volume reqs and churn faster"),
-        ("title_chars", "as title_words, by another measure"),
-        ("location_is_remote", "remote roles draw a larger pool and close faster"),
-        ("n_locations", "a posting open in several places is a wider net"),
-        ("salary_band", "pay level relates to fill speed, non-linearly"),
-    )
+#: The four columns describing the board rather than the posting, taken from the
+#: request contract rather than re-listed here. `contract.BOARD_CONTEXT` is
+#: derived from `Field.origin == "board"`, which is the same predicate that
+#: decides whether `POST /predict` treats a field as optional — so a field that
+#: changes origin changes what gets ablated, and cannot change one without the
+#: other. `test_the_board_ablation_tracks_the_request_contract` pins that.
+BOARD_CONTEXT_ABLATION = Ablation(
+    name="board context (all four)",
+    features=BOARD_CONTEXT,
+    hypothesis=(
+        "board context is worth having at all — the question `docs/design.md` §12 "
+        "is open on, and the only one that matches what a caller actually loses"
+    ),
+)
+
+ABLATIONS: tuple[Ablation, ...] = (
+    *(
+        Ablation(name, (name,), hypothesis)
+        for name, hypothesis in (
+            ("title_seniority", "how senior a role is relates to how long it takes to fill"),
+            ("title_is_manager", "management roles have longer hiring processes"),
+            ("title_words", "terse titles are boilerplate on high-volume reqs and churn faster"),
+            ("title_chars", "as title_words, by another measure"),
+            ("location_is_remote", "remote roles draw a larger pool and close faster"),
+            ("n_locations", "a posting open in several places is a wider net"),
+            ("salary_band", "pay level relates to fill speed, non-linearly"),
+            # The four board columns, individually. Kept alongside the group
+            # because the pair distinguishes two findings a single test conflates:
+            # four small deltas with a large group delta means "redundant with
+            # each other", four small deltas with a small group delta means
+            # "worthless". Only the second licenses dropping them.
+            ("board_size_at_t", "a posting on a large board competes with more of them"),
+            ("board_growth", "a board that is growing is hiring, and hiring boards close reqs"),
+            (
+                "n_same_title_on_board",
+                "a title duplicated across the board is a high-volume req and churns",
+            ),
+            (
+                "n_same_req_on_board",
+                "one requisition posted in several places closes when any of them does",
+            ),
+        )
+    ),
+    BOARD_CONTEXT_ABLATION,
 )
 
 
 def ablate(split: SplitResult, budget_per_day: int = DEFAULT_ALERT_BUDGET) -> pd.DataFrame:
-    """Refit without each engineered feature in turn.
+    """Refit without each ablation's features in turn.
 
     Leave-one-out rather than add-one-in, because the question a hypothesis
     poses is "does the model need this?", and a feature can be redundant with
     another without being useless on its own. `delta` is the validation PR-AUC
-    the feature is worth: positive means removing it hurt, so it earned its
-    place.
+    the withheld columns are worth: positive means removing them hurt, so they
+    earned their place.
+
+    **One ablation withholds four columns at once, and it is the important
+    one.** `docs/design.md` §12 is open on whether the board-context features
+    should be in the served model at all: they are honestly as-of-`t` and are
+    not a leak, but a job seeker holding one posting cannot supply any of them,
+    so at serve time they arrive as nulls and the training fold's imputers fill
+    them with constants. Leave-one-out cannot price that. `board_size_at_t` and
+    `board_growth` correlate at 0.42 on the observed panel, so dropping either
+    leaves its partner carrying the signal and both deltas read near zero while
+    the pair is worth something. And the serving question is not "what does
+    dropping one cost" — it is *what does a caller who supplies none of them
+    lose*, which is one refit with all four withheld.
+
+    Every ablation shares the baseline's split, seed and preprocessing, so a
+    delta is attributable to the withheld columns and nothing else. That is the
+    same discipline runs 05/06/07 use in `src/models/experiments.py`, and it is
+    what makes a difference evidence rather than an observation.
     """
     everything = [column.name for column in feature_columns()]
     baseline = fit_and_score(build_xgboost(split), split, budget_per_day)
 
-    rows = [{"removed": "nothing", "hypothesis": "—", **baseline, "delta": 0.0}]
+    rows = [{"removed": "nothing", "n_removed": 0, "hypothesis": "—", **baseline, "delta": 0.0}]
     for ablation in ABLATIONS:
-        kept = tuple(name for name in everything if name != ablation.feature)
+        withheld = set(ablation.features)
+        kept = tuple(name for name in everything if name not in withheld)
         model = build_pipeline(XGBClassifier(**_xgb_parameters(split)), only=kept)
         scored = fit_and_score(model, split, budget_per_day)
         rows.append(
             {
-                "removed": ablation.feature,
+                "removed": ablation.name,
+                "n_removed": len(ablation.features),
                 "hypothesis": ablation.hypothesis,
                 **scored,
                 "delta": baseline["val_pr_auc"] - scored["val_pr_auc"],
@@ -233,6 +294,66 @@ def overfit_sweep(split: SplitResult, budget_per_day: int = DEFAULT_ALERT_BUDGET
     return pd.DataFrame(rows)
 
 
+def _board_context_verdict(ablations: pd.DataFrame) -> list[str]:
+    """Read the two board rows against each other and say what they settle.
+
+    `docs/design.md` §12 is open on whether the four board-context columns
+    belong in the served model. A job seeker holding one posting cannot supply
+    any of them, so at serve time they arrive as nulls and the training fold's
+    imputers fill them with constants — the served model is then not quite the
+    model that was validated. §12 names the deciding evidence as an ablation,
+    and this is the paragraph that reports it rather than leaving a reader to
+    subtract two rows in a table.
+
+    The group and the singles answer different halves and neither alone is
+    actionable. Small singles with a large group means the four are redundant
+    *with each other*, and dropping all four would cost something even though
+    dropping any one costs nothing. Small singles with a small group means they
+    are worthless — and only that licenses dropping them.
+    """
+    group = ablations[ablations["removed"] == BOARD_CONTEXT_ABLATION.name]
+    if group.empty:
+        return []
+    together = float(group["delta"].iloc[0])
+    singles = ablations[ablations["removed"].isin(BOARD_CONTEXT)]
+    largest = float(singles["delta"].abs().max()) if not singles.empty else 0.0
+
+    if together <= 0:
+        reading = (
+            "Withholding all four did not hurt. On this split the board columns are "
+            "worth nothing, and **§12 can drop them**: the validated model and the "
+            "served model become the same object for every caller."
+        )
+    elif largest > 0 and together <= largest * 1.5:
+        reading = (
+            "The group is worth about as much as its best single column, so the four "
+            "are **not** redundant with each other — most of the value sits in one of "
+            "them. Dropping all four costs roughly what dropping that one does."
+        )
+    else:
+        reading = (
+            "The group is worth more than any single column, so the four are "
+            "**redundant with each other**: leave-one-out understates them and a "
+            "per-feature table alone would have licensed dropping columns that "
+            "jointly carry signal."
+        )
+
+    return [
+        "### What this settles about board context (`docs/design.md` §12)",
+        "",
+        f"Withholding all four board columns costs **{together:+.4f}** validation "
+        f"PR-AUC. The largest single board column is worth {largest:.4f}.",
+        "",
+        reading,
+        "",
+        "The number prices one thing only: what a caller who supplies no board "
+        "context loses. It does not price a caller who can supply it — a board owner "
+        "scoring their own requisitions has all four, and for them the imputation "
+        "branch never runs.",
+        "",
+    ]
+
+
 def write_report(
     path: Path,
     frame: pd.DataFrame,
@@ -275,13 +396,25 @@ def write_report(
             "",
             "## Hypothesis ablation",
             "",
-            "Each row refits without one engineered feature. `delta` is the validation",
-            "PR-AUC that feature is worth: positive means removing it hurt.",
+            "Each row refits without the named column(s). `delta` is the validation",
+            "PR-AUC they are worth: positive means removing them hurt. Every row",
+            "shares the baseline's split, seed and preprocessing, so a delta is",
+            "attributable to the withheld columns and nothing else.",
             "",
             _table(
-                ablations, ["removed", "hypothesis", "val_pr_auc", "delta", "train_pr_auc", "gap"]
+                ablations,
+                [
+                    "removed",
+                    "n_removed",
+                    "hypothesis",
+                    "val_pr_auc",
+                    "delta",
+                    "train_pr_auc",
+                    "gap",
+                ],
             ),
             "",
+            *_board_context_verdict(ablations),
             "## The deliberate overfit",
             "",
             "Depth up and regularisation off until train and validation separate, then",

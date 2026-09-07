@@ -914,6 +914,42 @@ which case dropping them buys a cleaner serving story for nearly nothing. Or a
 deployment story that changes the caller — a board owner scoring their own
 requisitions has all four, and for them the imputation branch never runs.
 
+**Update 2026-09-07 — the deciding evidence is now built.** It was not, and the
+gap was quiet: `ABLATIONS` in `src/models/train.py` priced the seven *engineered*
+features and none of the four board ones, so the ablation this section was
+waiting on would not have answered this section's question even after the panel
+was deep enough to run it.
+
+Two things were added, and both are needed. Each board column is now priced
+singly, and all four are priced **together** — `BOARD_CONTEXT_ABLATION`, whose
+withheld set is `contract.BOARD_CONTEXT` rather than a second list, so a field
+that changes origin changes what is priced and neither can drift from the other.
+
+The group ablation is the one that matches the question. Leave-one-out cannot
+price these four: `board_size_at_t` and `board_growth` correlate at **0.42** on
+the observed panel, so dropping either leaves its partner carrying the signal
+and both deltas read near zero while the pair is worth something. And the
+serving question is not what dropping one costs — it is *what a caller who
+supplies none of them loses*, which is one refit with all four withheld.
+
+Reading the two together is what makes the result actionable, which is why
+`reports/model_results.md` now states it in words rather than leaving a reader to
+subtract table rows:
+
+- small singles, small group → the columns are worthless, and **this section can
+  close by dropping them**;
+- small singles, large group → they are redundant with each other, and a
+  per-feature table alone would have licensed dropping columns that jointly
+  carry signal;
+- group ≈ the best single → the value sits in one column, not in the set.
+
+**What this still does not decide.** Option B — requiring the caller to supply
+board context — is not available under §5's decided user, a job seeker weighing
+where to spend application effort, who cannot see a board at an instant. It
+becomes available only if the deployment story in §4 changes to a board owner.
+So the live choice is between dropping the four and keeping the imputation
+fallback, and the number decides it.
+
 ---
 
 ## 13. What the frozen artifact is fitted on — **DECIDED 2026-09-05**
