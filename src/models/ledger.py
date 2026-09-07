@@ -59,6 +59,7 @@ COLUMNS = (
     "folds",
     "chosen",
     "pr_auc",
+    "pr_auc_ci",
     "cv_pr_auc_mean",
     "cv_pr_auc_sd",
     "stage",
@@ -77,6 +78,8 @@ def record(
     cv_pr_auc_mean: float | None = None,
     cv_pr_auc_sd: float | None = None,
     block_positives: int | None = None,
+    pr_auc_low: float | None = None,
+    pr_auc_high: float | None = None,
 ) -> dict:
     """One row. Plain values only — no frames, and in particular no split.
 
@@ -105,6 +108,11 @@ def record(
         "pr_auc": None if pr_auc is None else float(pr_auc),
         "cv_pr_auc_mean": None if cv_pr_auc_mean is None else float(cv_pr_auc_mean),
         "cv_pr_auc_sd": None if cv_pr_auc_sd is None else float(cv_pr_auc_sd),
+        # The posting-clustered interval, so a reader can watch it narrow as the
+        # panel deepens. Kept as two endpoints rather than a rendered string:
+        # a width is arithmetic a reader may want to do, and a string is not.
+        "pr_auc_low": None if pr_auc_low is None else float(pr_auc_low),
+        "pr_auc_high": None if pr_auc_high is None else float(pr_auc_high),
     }
 
 
@@ -130,6 +138,13 @@ def append(entry: dict, path: Path = DEFAULT_LEDGER) -> list[dict]:
     return entries
 
 
+def _pr_auc_ci(entry: dict) -> str:
+    low, high = entry.get("pr_auc_low"), entry.get("pr_auc_high")
+    if low is None or high is None:
+        return "—"
+    return f"[{low:.4f}, {high:.4f}]"
+
+
 def _cell(entry: dict, column: str) -> str:
     """One cell. `None` and `NaN` both render as an em dash, never as "nan".
 
@@ -139,6 +154,8 @@ def _cell(entry: dict, column: str) -> str:
     a table someone reads as a result makes that look like breakage; the dash
     plus the footnote says what it means.
     """
+    if column == "pr_auc_ci":
+        return _pr_auc_ci(entry)
     value = entry.get(column)
     if value is None or (isinstance(value, float) and math.isnan(value)):
         return "—"
@@ -157,9 +174,10 @@ def render(entries: list[dict]) -> str:
         "Generated from `reports/depth_ledger.jsonl`; edit neither by hand.",
         "",
         "One row per run, keyed by the code and the data it ran on. Read the metric",
-        "**against the positives column**, never on its own: this panel accrues about",
-        "19 closures a day, so an early row is a number with an interval wide enough to",
-        "swallow most differences between models, and saying so is the finding.",
+        "**against its interval and the positives column**, never on its own: this",
+        "panel accrues about 19 closures a day, so an early row is a number with an",
+        "interval wide enough to swallow most differences between models, and saying",
+        "so is the finding.",
         "",
     ]
     if not entries:

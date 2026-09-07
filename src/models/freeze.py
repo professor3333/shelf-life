@@ -72,6 +72,7 @@ from src.models.metrics import (
     threshold_for_budget,
 )
 from src.models.train_baseline import DEFAULT_PANEL, _table, prediction_days
+from src.models.uncertainty import bootstrap_block, format_table, fragility_note
 
 DEFAULT_REPORT = Path("reports/test_results.md")
 
@@ -93,6 +94,13 @@ class FrozenModel:
     validation: dict[str, float]
     test: dict[str, float]
     test_at_frozen_threshold: dict[str, float]
+    #: Posting-clustered bootstrap intervals on the test block. The headline is
+    #: PR-AUC on roughly twenty positives, and a point estimate at that count is
+    #: not a result on its own — `src/models/uncertainty.py` says why the
+    #: resampling unit is the posting rather than the row.
+    test_intervals: dict[str, object]
+    #: The fragility note, or None when the block is big enough not to need one.
+    test_fragility: str | None
     by_source: pd.DataFrame
     by_seen_in_train: pd.DataFrame
     calibration: dict[str, float]
@@ -169,6 +177,8 @@ def freeze(
         validation=validation,
         test=test,
         test_at_frozen_threshold=confusion_at(test_block["y"], test_scores, threshold),
+        test_intervals=bootstrap_block(test_block, test_scores, float(threshold)),
+        test_fragility=fragility_note(test_block),
         by_source=evaluate_by(
             test_block,
             test_scores,
@@ -309,6 +319,31 @@ def write_report(
             "(validation minus test). Validation is the block the model was selected on,",
             "so it is optimistic by construction; the gap is a measurement of how much.",
             "",
+            "## How much of this is signal",
+            "",
+            "The headline is a point estimate on a block with tens of positives, so it",
+            "comes with a **95% interval from resampling postings** — not rows. The panel",
+            "is one row per (posting, crawl) at about six rows per posting, so rows are",
+            "not independent draws: the board accumulates postings and observes them",
+            "daily. `src/models/uncertainty.py` records the measurement showing the two",
+            "resampling schemes disagree, and why the design argument settles it rather",
+            "than the direction of the disagreement.",
+            "",
+            "`precision` and `recall` are measured at the **frozen** threshold, held fixed",
+            "across resamples. Recomputing the budget threshold inside each one would mix",
+            "how well the model separates with where the operating point happened to land,",
+            "and the artifact ships one threshold rather than a distribution of them.",
+            "",
+            *format_table(frozen.test_intervals),
+            "",
+            *([frozen.test_fragility, ""] if frozen.test_fragility else []),
+            "**Read the width, not the centre.** If an interval spans the baseline, the",
+            "honest report is that this test set could not tell the model from the",
+            "baseline — which is a result about the sample size and not a failure of the",
+            "model. Fold-to-fold variation is the companion number and lives in",
+            "`reports/model_comparison.md`; the two answer different questions, one about",
+            "this block and one about which block you happened to get.",
+            "",
             "## The operating point, applied as frozen",
             "",
             f"Threshold **{frozen.threshold:.6f}**, chosen on validation at "
@@ -411,6 +446,8 @@ def main() -> None:
                     folds=len(wave_forward_folds(split.train, split.embargo)),
                     chosen=args.run,
                     pr_auc=frozen.test["pr_auc"],
+                    pr_auc_low=frozen.test_intervals["pr_auc"].low,
+                    pr_auc_high=frozen.test_intervals["pr_auc"].high,
                     block_positives=int(split.frame.loc[split.frame["split"] == "test", "y"].sum()),
                 )
             )
