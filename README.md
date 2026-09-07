@@ -473,18 +473,34 @@ budget — a list of 500 alerts nobody reads has perfect recall and zero value.
 
 ## Why there are no real numbers yet
 
-An honest three-way split needs seven labelled crawl waves. The panel has six.
+An honest three-way split needs eight labelled crawl waves. The panel has six.
 
 ```
-minimum waves = 1 + 2 × (floor(embargo ÷ spacing) + 1)
-              = 1 + 2 × (floor(2d10h ÷ 1d) + 1)
-              = 7
+minimum waves = 1 + 2 × (floor(embargo ÷ spacing) + 1) + corroboration runs
+              = 1 + 2 × (floor(2d10h ÷ 1d) + 1)        + 1
+              = 8
 ```
 
 Each of the two block boundaries discards every wave inside the embargo — three
 of them — and the wave landing exactly on a boundary goes too. A wave is also
 not labelled the day it is crawled: negatives need a later run to confirm
 survival, positives need two.
+
+That last clause is the final term, and it is easy to miss. A wave becomes
+labelled one run before its positives become observable, so **the newest
+labelled wave always has zero positives** — measured on this snapshot, 1,160
+labelled rows and not one removal, against 14–22 in every wave before it. The
+test block sits at exactly that end of the panel, and `src/data/split.py`
+refuses a test block with no positives, so the split has to reach back past the
+blind wave.
+
+**A legal split is still not an evaluable one.** At eight waves the only cut
+leaves a one-wave training block, and rolling-origin folds are cut from the
+training window — a single wave yields none, so every model comparison would be
+one number with no error bar, on a sample where the difference between two
+models is smaller than the noise. Folds start at eleven labelled waves and
+reach three at thirteen. `depth_report` states both waits, and they are not the
+same day.
 
 So `src/models/freeze.py` refuses, and `reports/test_results.md` records the
 refusal and the shortfall instead of a number. This is the designed behaviour,
@@ -510,7 +526,15 @@ changed shape with it: `freeze` used to report an empty *validation* block, and
 now reports an empty *test* block. Train and validation are both populated on
 the best candidate cut — 1,104 training rows with 19 positives, 1,159 validation
 rows with 22 — and what is still missing is a test block on the far side of the
-second embargo. One labelled wave short, and waves arrive daily.
+second embargo.
+
+**Corrected 2026-09-07.** This section said *one* labelled wave short until the
+depth arithmetic was rechecked against the acceptance check it is supposed to
+predict. It was counting only the embargo's geometry and not the blind wave at
+the tail, so the seventh wave would have arrived, the split would still have
+been refused — for no positives in the test block — and the plan would have
+been wrong by a day. Two waves short for a legal split, seven for one that can
+carry an error bar. `DEBUGGING.md` has the entry.
 
 ---
 

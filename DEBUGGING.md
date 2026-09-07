@@ -4,6 +4,48 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-07 — The readiness check disagreed with the acceptance check
+
+- **Problem:** `minimum_waves` reported that an honest three-way split needed
+  **7** labelled crawl waves, and every report quoted it — `reports/test_results.md`
+  said "1 more labelled wave(s) needed", the README said one wave short. It is
+  wrong. Simulating the panel forward one wave at a time shows `feasible_cuts`
+  still finding zero usable cuts at 7 waves, rejecting the only structurally
+  available cut with *"test block has no positives"*. The first usable cut
+  appears at **8**. Nothing crashed; the plan was simply a day early.
+
+- **Root cause:** `minimum_waves` modelled only the embargo's geometry — enough
+  waves for three *non-empty* blocks — while `_validate` additionally requires
+  the `val` and `test` blocks to contain positives. Those two conditions are not
+  the same, because a wave becomes *labelled* one run before its positives
+  become *observable*: a negative needs one forward run to confirm survival, a
+  positive needs absence corroborated at two consecutive runs. So the newest
+  labelled wave structurally cannot contain a single positive — measured on the
+  2026-09-06 snapshot, 1,160 labelled rows and 0 removals, against 14–22 in
+  every wave before it — and the test block is cut from exactly that end of the
+  panel. The missing term is `+ corroboration_runs`.
+
+- **Solution:** `src/data/split.py` — `minimum_waves` now returns
+  `1 + 2*burnt + corroboration_runs`, reports the `blind_tail` explicitly, and
+  carries a second wait: `folds_available` and `needed_for_folds`, because the
+  smallest legal split has a one-wave training block and `wave_forward_folds`
+  cuts nothing from it, so a comparison at 8 waves would have no error bar. The
+  new `rolling_origin_folds` projection is pinned to the real splitter by
+  `test_projected_folds_match_the_real_splitter`. The regression guard is
+  `test_the_reported_minimum_is_a_depth_that_actually_splits`: build a panel
+  exactly as deep as the reported minimum, require a cut to exist, then require
+  one wave fewer to have none.
+
+- **Lesson:** **a readiness check must be tested against the acceptance check it
+  predicts, not against its own derivation.** Both functions were individually
+  correct — the arithmetic did compute the embargo's geometry, and `_validate`
+  did enforce the positives rule — and each was tested against what its author
+  was thinking about. The defect lived in the gap between them, where nothing
+  looked. Any function whose whole job is to forecast another function's verdict
+  needs a test that runs both and compares, or it is an opinion. A wrong
+  readiness number is more dangerous than no number, because it is acted on.
+
+
 ## 2026-09-06 — A privacy check that could only ever return one answer
 
 - **Problem:** I concluded that the deployed Streamlit UI was private and acted on

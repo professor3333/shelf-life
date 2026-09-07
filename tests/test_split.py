@@ -25,6 +25,7 @@ from src.data.split import (
     max_run_gap,
     minimum_waves,
     resurrection_risk,
+    rolling_origin_folds,
     split_report,
     temporal_split,
 )
@@ -78,6 +79,23 @@ def _panel(
 def _wide(n_waves: int = 9, ids=("a", "b", "c")) -> dict[str, list[set[str]]]:
     """A panel deep enough that a three-way split is actually feasible."""
     return {"board": [set(ids) for _ in range(n_waves)]}
+
+
+def _structural(n_waves: int, blind_tail: int = 1) -> pd.DataFrame:
+    """A panel whose positives sit where `compute_labels` can actually put them.
+
+    One removal per wave, and **none in the newest `blind_tail` waves**. That is
+    not a stylistic choice: a positive needs the posting absent at two
+    consecutive later runs, so the newest labelled wave cannot have one, and a
+    fixture that gives it one is describing a panel the scraper cannot produce.
+    `test_the_newest_labelled_wave_can_never_carry_a_positive` in
+    `test_assemble.py` is where that claim is checked against the labeller
+    itself rather than assumed here.
+    """
+    ids = tuple(f"p{index}" for index in range(n_waves + 2))
+    presence = {"board": [set(ids) for _ in range(n_waves)]}
+    positives = {("board", ids[wave], wave) for wave in range(max(0, n_waves - blind_tail))}
+    return _panel(presence, positives=positives)
 
 
 def _feasible_frame() -> pd.DataFrame:
@@ -312,20 +330,69 @@ def test_resurrection_risk_is_empty_when_nothing_comes_back():
 
 
 def test_minimum_waves_counts_what_the_embargo_burns():
-    """Seven waves for the smallest legal split on an even daily panel at H=1.
+    """Eight waves for the smallest legal split on an even daily panel at H=1.
 
-    One wave per block, plus everything inside each of the two embargoes. The
-    embargo is the horizon plus one run's reach — two days here — and the wave
-    sitting exactly on the boundary is discarded too, so each boundary costs
-    three waves and the arithmetic is 1 + 2*3 = 7. Written as a test because
-    that number is the answer to "how much longer must the scraper run", and a
-    wrong one is a wrong plan.
+    One wave per block, plus everything inside each of the two embargoes, plus
+    the blind wave at the tail. The embargo is the horizon plus one run's reach —
+    two days here — and the wave sitting exactly on the boundary is discarded
+    too, so each boundary costs three waves: 1 + 2*3 + 1 = 8.
+
+    **This said 7 until 2026-09-07**, counting only the embargo's geometry. The
+    missing term is the last one. Written as a test because that number is the
+    answer to "how much longer must the scraper run", and a wrong one is a wrong
+    plan — a 7 would have had the panel declared ready a day early, on a cut
+    `_validate` then rejects for having no positives in the test block.
     """
-    depth = minimum_waves(_panel(_wide(9)))
+    depth = minimum_waves(_structural(9))
     assert depth["burnt_per_boundary"] == 3
-    assert depth["needed"] == 7
+    assert depth["blind_tail"] == 1
+    assert depth["needed"] == 8
     assert depth["present"] == 9
     assert depth["shortfall"] == 0
+
+
+def test_the_reported_minimum_is_a_depth_that_actually_splits():
+    """The regression guard for the 7-versus-8 bug, and the only honest form of
+    it: take the number this function reports, build a panel exactly that deep,
+    and require `feasible_cuts` to find a cut in it — then require one wave
+    fewer to find none. A readiness check that disagrees with the acceptance
+    check is worse than no readiness check, because it is trusted."""
+    needed = int(minimum_waves(_structural(20))["needed"])
+    assert feasible_cuts(_structural(needed))["valid"].any()
+    assert not feasible_cuts(_structural(needed - 1))["valid"].any()
+
+
+def test_the_cut_one_wave_short_is_rejected_for_the_right_reason():
+    """Not merely rejected — rejected for *no positives in test*, which is the
+    failure the wave count was blind to. An empty block would be a different
+    bug with the same symptom."""
+    table = feasible_cuts(_structural(7))
+    assert "test block has no positives" in set(table["reason"])
+
+
+def test_minimum_waves_separates_legal_from_evaluable():
+    """A legal split is not an evaluable one. At the bare minimum the training
+    block is a single wave, `wave_forward_folds` returns nothing from it, and
+    every model comparison is then a single number with no error bar."""
+    depth = minimum_waves(_structural(8))
+    assert depth["shortfall"] == 0
+    assert depth["folds_available"] == 0
+    # burnt + (target - 1) waves on top of the legal minimum: 8 + 3 + 2
+    assert depth["needed_for_folds"] == 13
+    assert depth["folds_shortfall"] == 5
+    assert minimum_waves(_structural(13))["folds_available"] == 3
+
+
+def test_depth_report_states_both_waits():
+    text = depth_report(_structural(8))
+    assert "cannot carry a positive" in text
+    assert "rolling-origin fold(s) today" in text
+
+
+def test_rolling_origin_folds_is_the_block_less_one_embargo():
+    assert rolling_origin_folds(3, 3) == 0
+    assert rolling_origin_folds(4, 3) == 1
+    assert rolling_origin_folds(8, 3) == 5
 
 
 def test_minimum_waves_reports_a_shortfall_on_a_panel_too_short():
