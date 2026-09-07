@@ -446,7 +446,7 @@ test split is read anywhere but there and in the property that defines it.
 posting scores **98.6%** and has told you nothing.
 
 *Not ROC-AUC.* With rare positives it flatters. The false-positive rate divides
-by the true-negative count — 6,778 of them against 96 positives — so a model can
+by the true-negative count — 7,937 of them against 100 positives — so a model can
 raise a great many false alarms without visibly moving the x-axis. Precision
 divides those same false alarms by the number of rows *flagged*, where they
 cannot hide. At this base rate the ROC curve describes a decision nobody makes.
@@ -655,7 +655,7 @@ commit, the labelled waves, the positives, the folds, and the metric with its
 fold spread. `evaluate` and `freeze` append to it automatically.
 
 It exists because of a fact this project cannot argue its way out of. The panel
-accrues about **19 closures a day** against 96 today, so the first honest result
+accrues about **19 closures a day** against 100 today, so the first honest result
 will carry an interval wide enough to swallow most differences between models.
 That is the finding, not an excuse — and the only way to show it as one is to
 keep the earlier runs and let a reader watch the interval narrow against a
@@ -667,21 +667,62 @@ adding one, so the ledger measures what the pipeline scored and not how often it
 was run. Synthetic runs are tabled separately and labelled, because a history
 that mixed them with real ones would be worse than no history.
 
-Then, once the panel carries folds, the sequence is fixed, and every step
-already has a command that runs today and refuses honestly.
+### The two gates, and they are not the same day
+
+| | labelled waves | what it unlocks |
+|---|---|---|
+| **A legal split** | **8** | the rehearsal runs: real numbers, **no error bars** |
+| **Three rolling-origin folds** | **13** | a comparison that can be believed, and §12 can close |
+
+Eight rather than seven: a closure needs corroboration at two consecutive later
+runs, so the newest labelled wave structurally cannot hold a positive and a
+seven-wave split is refused for having no positives in the test block. That
+arithmetic was wrong in this repository until 2026-09-07 and `DEBUGGING.md`
+records it; `python -m src.data.split` reports the current shortfall.
+
+Then the sequence is fixed, and every step already has a command that runs today
+and refuses honestly.
 
 ```bash
 python -m src.data.snapshot                    # pin a dated, hashed copy
+python -m src.features.assemble                # rebuild the job-day panel from it
 python -m src.data.profile                     # regenerate the data profile
-python -m src.models.experiments               # replay the history on the real panel
 python -m src.data.label_audit                 # does "disappeared" mean what the label needs?
+
+python -m src.models.train_baseline            # the ladder: rules, then fits
+python -m src.models.train                     # ablations, incl. the §12 board-context folds
+python -m src.models.experiments               # replay the history on the real panel
 python -m src.models.evaluate                  # compare, threshold, calibrate — validation only
 python -m src.models.ledger                    # re-render the depth ledger from its jsonl
+
 python -m src.models.freeze --run <spec>       # opens the test block, once
+
 python -m src.inference.fetch --checksums models
 gh release create artifact-<date> models/*     # the model becomes a version
 echo artifact-<date> > MODEL_TAG && git push   # committing the tag is the deploy
+./scripts/await_release.sh <url> artifact-<date>   # wait for that tag to be serving
+./scripts/smoke.sh <url>
+
+./scripts/cold_start.sh <url> 16               # the gate that can fail — see below
 ```
+
+The blank lines are the point. Data, then modelling — which touches
+**validation only** — then `freeze` alone, then release and deploy, then the
+cold-start gate. `freeze` sits by itself because it is the only line in the
+project that reads the test block, and it happens after the threshold is chosen
+and before anything is published.
+
+**`cold_start.sh` runs last, and it is a gate rather than a report.** It has to
+come after the deploy, because it measures a real instance waking from idle with
+the real artifact loaded — there is nothing to time until the tag is serving. So
+it is the one check whose failure arrives *after* the thing it judges is live,
+and the answer to a failure is a rollback (`docs/deploy.md` §5, one commit) and a
+reassessment, not a wider timeout: past 90 seconds the script exits non-zero and
+the rule is *reassess the architecture, do not raise the timeout*.
+
+The baseline is 32.65 s on the no-artifact image, and it is a floor rather than
+an estimate — whatever unpickling the pipeline costs on 0.1 vCPU is exactly the
+part an image with no model could not measure.
 
 The last two lines are the whole of the deployment, because the path around them
 already exists: [`docs/deploy.md`](docs/deploy.md) has the one-time cloud setup,

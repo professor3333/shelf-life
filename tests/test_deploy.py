@@ -34,6 +34,7 @@ WORKFLOW = ROOT / ".github" / "workflows" / "verify-deployment.yml"
 DOCKERFILE = ROOT / "Dockerfile"
 RENDER = ROOT / "render.yaml"
 RUNBOOK = ROOT / "docs" / "deploy.md"
+README = ROOT / "README.md"
 REHEARSE = ROOT / "scripts" / "rehearse.sh"
 REQUIREMENTS = ROOT / "requirements.txt"
 
@@ -432,6 +433,29 @@ def test_the_rehearsal_declines_rather_than_fails_when_shallow() -> None:
 
 
 # --- the one about documentation that has rotted -----------------------------
+
+
+def test_every_module_the_readme_tells_you_to_run_exists() -> None:
+    """The README carries the day-it-clears sequence, and a sequence naming a
+    module nobody can import is worse than no sequence — it fails on the one
+    afternoon somebody is following it. Added after that block was found missing
+    `train_baseline` and `train`, which are where the ladder and the §12
+    board-context decision actually happen.
+    """
+    for module in sorted(set(re.findall(r"python -m (src[\w.]+)", README.read_text()))):
+        assert importlib.util.find_spec(module) is not None, (
+            f"README says to run `python -m {module}`, which does not exist"
+        )
+
+
+def test_every_script_the_readme_tells_you_to_run_is_executable() -> None:
+    """A documented `./scripts/x.sh` that is not executable fails with a
+    permission error, which reads like a broken script rather than a missing
+    chmod."""
+    for name in sorted(set(re.findall(r"\./(scripts/[\w./-]+)", README.read_text()))):
+        path = ROOT / name
+        assert path.exists(), f"README says to run ./{name}, which does not exist"
+        assert path.stat().st_mode & 0o111, f"./{name} is documented but not executable"
 
 
 def test_every_module_the_runbook_tells_you_to_run_exists() -> None:
