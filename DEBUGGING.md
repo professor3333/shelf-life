@@ -4,6 +4,43 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-07 — A snapshot named for the day it was taken, not the data in it
+
+- **Problem:** `data/raw/2026-09-06` and `data/raw/2026-09-07` held **identical
+  row counts** — 103 runs, 5,712 jobs, 22,703 observations, 5,065 changes — and
+  the real 2026-09-07 crawl could not be pinned at all. Nothing raised at the
+  time. The panel simply reported the same 6 labelled waves and 96 positives it
+  had the day before, which looks exactly like a day when nothing happened.
+
+- **Root cause:** `pin()` named the snapshot `dt.date.today()`. The scraper fires
+  at 03:45 UTC; `scripts/rehearse.sh` was run at 02:36 UTC and pinned the
+  database *as it stood before that day's crawl* under that day's date. Because
+  a pinned snapshot is immutable — correctly — the 03:45 wave then had nowhere
+  to go: the name it needed was already occupied by a copy that did not contain
+  it. The defect is a name that asserts something the file does not support, and
+  the immutability rule, which is right, is what turned a wrong name into lost
+  history. `pin()` had no tests, which is how it survived.
+
+- **Solution:** `src/data/snapshot.py` — `newest_run_date()` reads
+  `MAX(started_at)` from the database and `pin()` names the snapshot after it, so
+  a snapshot is named for its contents. An early pin now resolves to yesterday's
+  date, collides with yesterday's snapshot and is refused, which is the right
+  answer because an early pin has nothing new to record. `--skip-existing` makes
+  that refusal a no-op for scheduled callers. `tests/test_snapshot.py` is new and
+  is entirely about the name. The mis-named directory was deleted after checking
+  all four row counts matched 2026-09-06 exactly, and re-pinned: 111 runs.
+
+- **Lesson:** **name a record after what is in it, never after when you made
+  it.** A wall-clock name is a claim about content that nothing verifies, and it
+  fails silently in exactly the window where it matters — between midnight and
+  whenever the data actually arrives. The general form: derive an identifier
+  from the thing identified, so a wrong one cannot be constructed. Corollary
+  learned the same day: any function that writes into `data/` needs a test with
+  its output root redirected, and that redirect belongs in an autouse fixture —
+  the first draft of the new test file forgot it on one test and pinned into the
+  live tree.
+
+
 ## 2026-09-07 — Two modules, two cut rules, both broken
 
 - **Problem:** `train`, `evaluate` and `train_baseline` cut the panel with
