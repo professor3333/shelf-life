@@ -10,8 +10,8 @@ Every engineered feature is computed inside the pipeline by
 for a single posting at serve time, and none of them can leak across the
 split however they are called.
 
-The constant-predictor reference remains PR-AUC **0.0132**
-on 5,693 labelled rows.
+The constant-predictor reference remains PR-AUC **0.0124**
+on 8,037 labelled rows.
 
 ## Nothing below has run
 
@@ -21,6 +21,6 @@ gap to open. The engineered features are built, audited and tested; what
 waits is the evidence for keeping or dropping each one.
 
 ```
-the 'val' block is empty under cuts Cuts(train_end=Timestamp('2026-08-31 03:45:35.705216+0000', tz='UTC'), val_end=Timestamp('2026-09-02 03:45:45.645648+0000', tz='UTC')) with an embargo of 2 days 10:21:37.132005.
+no cut of this panel yields three usable blocks.
 ```
 

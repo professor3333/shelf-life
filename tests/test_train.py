@@ -80,7 +80,7 @@ def test_the_boosted_rung_is_deterministic():
 
 def test_the_ablation_refits_once_per_hypothesis_plus_a_baseline():
     table = ablate(_noise_split())
-    assert list(table["removed"]) == ["nothing", *[a.feature for a in ABLATIONS]]
+    assert list(table["removed"]) == ["nothing", *[a.name for a in ABLATIONS]]
     assert table.loc[0, "delta"] == 0.0
 
 
@@ -169,4 +169,158 @@ def test_the_report_carries_the_ladder_the_ablation_and_the_sweep(tmp_path):
     assert "Hypothesis ablation" in text
     assert "The deliberate overfit" in text
     for ablation in ABLATIONS:
-        assert ablation.feature in text
+        assert ablation.name in text
+
+
+# --- board context, and what the group ablation is for ------------------------
+
+
+def test_the_board_ablation_tracks_the_request_contract():
+    """The withheld columns are the request contract's, not a second list.
+
+    `contract.BOARD_CONTEXT` is derived from `Field.origin == "board"`, the same
+    predicate that makes a field optional on `POST /predict`. Deriving the
+    ablation from it means a field that changes origin changes what gets priced,
+    and nobody can change one without the other. Two lists that must agree are
+    two lists that will not.
+    """
+    from src.inference.contract import BOARD_CONTEXT
+    from src.models.train import BOARD_CONTEXT_ABLATION
+
+    assert BOARD_CONTEXT_ABLATION.features == BOARD_CONTEXT
+    assert len(BOARD_CONTEXT) == 4
+
+
+def test_the_board_features_are_priced_both_together_and_singly():
+    """Both, because either alone gives an answer that cannot be acted on.
+
+    Four small individual deltas with a large group delta means the columns are
+    redundant *with each other* — dropping all four would cost something even
+    though dropping any one costs nothing. Four small deltas with a small group
+    delta means they are worthless, and only that licenses `docs/design.md` §12
+    to drop them. A leave-one-out table alone cannot tell those apart, and it is
+    the one that looks reassuring.
+    """
+    from src.inference.contract import BOARD_CONTEXT
+    from src.models.train import ABLATIONS
+
+    singly = {a.name for a in ABLATIONS if len(a.features) == 1}
+    assert set(BOARD_CONTEXT) <= singly, "each board column must also be priced on its own"
+
+    groups = [a for a in ABLATIONS if len(a.features) > 1]
+    assert len(groups) == 1 and set(groups[0].features) == set(BOARD_CONTEXT)
+
+
+def test_every_ablation_withholds_columns_the_model_actually_has():
+    """An ablation naming a column that is not a feature silently refits the
+    baseline and reports a delta of zero, which reads exactly like 'this feature
+    is worthless'."""
+    from src.features.preprocessing import feature_columns
+    from src.models.train import ABLATIONS
+
+    known = {column.name for column in feature_columns()}
+    for ablation in ABLATIONS:
+        missing = set(ablation.features) - known
+        assert not missing, f"{ablation.name} withholds unknown column(s) {sorted(missing)}"
+
+
+def test_the_group_ablation_withholds_all_four_at_once(split):
+    """Behavioural, not by name: change all four board values and the ablated
+    pipeline must hand the estimator the identical row.
+
+    Checked this way because the `derive` step has no `get_feature_names_out`,
+    and because a name check proves less anyway — a column can be listed and
+    still be dead, or dropped by name and smuggled through a derived feature.
+    The control matters as much as the assertion: the *full* pipeline must move
+    on the same edit, or this test would pass against a pipeline that ignores
+    board context entirely and would prove nothing.
+    """
+    from xgboost import XGBClassifier
+
+    from src.features.preprocessing import (
+        build_pipeline,
+        feature_columns,
+        features_and_target,
+    )
+    from src.inference.contract import BOARD_CONTEXT
+    from src.models.train import BOARD_CONTEXT_ABLATION, _xgb_parameters
+
+    everything = [c.name for c in feature_columns()]
+    kept = tuple(n for n in everything if n not in set(BOARD_CONTEXT_ABLATION.features))
+    assert len(kept) == len(everything) - 4
+
+    features, target = features_and_target(split.train)
+    original = features.iloc[[0]].copy()
+    edited = original.copy()
+    for column in BOARD_CONTEXT:
+        edited[column] = original[column].astype("Float64") + 137
+
+    ablated = build_pipeline(XGBClassifier(**_xgb_parameters(split)), only=kept)
+    ablated.fit(features, target)
+    before, after = ablated[:-1].transform(original), ablated[:-1].transform(edited)
+    assert (before == after).all(), "a board column still reaches the estimator"
+
+    full = build_pipeline(XGBClassifier(**_xgb_parameters(split)))
+    full.fit(features, target)
+    assert not (full[:-1].transform(original) == full[:-1].transform(edited)).all(), (
+        "the full pipeline ignores board context, so the assertion above is vacuous"
+    )
+
+
+def _verdict_table(group_delta: float, singles: list[float]) -> pd.DataFrame:
+    from src.inference.contract import BOARD_CONTEXT
+    from src.models.train import BOARD_CONTEXT_ABLATION
+
+    rows = [{"removed": "nothing", "delta": 0.0}]
+    rows += [{"removed": n, "delta": d} for n, d in zip(BOARD_CONTEXT, singles, strict=True)]
+    rows.append({"removed": BOARD_CONTEXT_ABLATION.name, "delta": group_delta})
+    return pd.DataFrame(rows)
+
+
+def test_a_group_delta_of_nothing_licenses_dropping_the_columns():
+    """The only reading that lets §12 close: all four withheld, nothing lost."""
+    from src.models.train import _board_context_verdict
+
+    text = "\n".join(_verdict_table(-0.001, [0.0, 0.001, -0.002, 0.0]).pipe(_board_context_verdict))
+    assert "worth nothing" in text
+    assert "can drop them" in text
+
+
+def test_a_group_worth_more_than_any_single_column_is_reported_as_redundancy():
+    """The finding leave-one-out alone would have hidden, and the reason the
+    group ablation exists: four deltas near zero, and the four together worth
+    ten times the best of them."""
+    from src.models.train import _board_context_verdict
+
+    text = "\n".join(
+        _verdict_table(0.060, [0.004, 0.006, 0.003, 0.002]).pipe(_board_context_verdict)
+    )
+    assert "redundant with each other" in text
+    assert "leave-one-out understates them" in text
+
+
+def test_a_group_no_bigger_than_its_best_column_is_not_called_redundancy():
+    """The distinction that decides whether dropping all four costs more than
+    dropping one."""
+    from src.models.train import _board_context_verdict
+
+    text = "\n".join(
+        _verdict_table(0.040, [0.005, 0.038, 0.001, 0.002]).pipe(_board_context_verdict)
+    )
+    assert "not** redundant" in text
+    assert "sits in one of them" in text
+
+
+def test_the_verdict_says_who_the_number_does_not_price():
+    """A board owner supplies all four and never touches the imputation branch,
+    so this number is about one caller, not about the features."""
+    from src.models.train import _board_context_verdict
+
+    text = "\n".join(_verdict_table(0.01, [0.0, 0.0, 0.0, 0.0]).pipe(_board_context_verdict))
+    assert "board owner" in text
+
+
+def test_the_verdict_is_silent_when_the_group_ablation_did_not_run():
+    from src.models.train import _board_context_verdict
+
+    assert _board_context_verdict(pd.DataFrame([{"removed": "nothing", "delta": 0.0}])) == []
