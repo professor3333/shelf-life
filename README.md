@@ -562,6 +562,24 @@ first contact with the real panel is where a dtype or an empty group shows up,
 and meeting that on a split whose numbers do not matter yet is much better than
 meeting it on the one afternoon the test block is available.
 
+**Every run is kept, not overwritten.** `reports/depth_ledger.md` — rendered
+from a committed `depth_ledger.jsonl` — holds one row per run: the snapshot, the
+commit, the labelled waves, the positives, the folds, and the metric with its
+fold spread. `evaluate` and `freeze` append to it automatically.
+
+It exists because of a fact this project cannot argue its way out of. The panel
+accrues about **19 closures a day** against 96 today, so the first honest result
+will carry an interval wide enough to swallow most differences between models.
+That is the finding, not an excuse — and the only way to show it as one is to
+keep the earlier runs and let a reader watch the interval narrow against a
+sample size printed beside it. A metric at one depth is a claim; the same metric
+at four depths is evidence about what the claim is worth.
+
+Re-running on the same snapshot with the same commit replaces a row rather than
+adding one, so the ledger measures what the pipeline scored and not how often it
+was run. Synthetic runs are tabled separately and labelled, because a history
+that mixed them with real ones would be worse than no history.
+
 Then, once the panel carries folds, the sequence is fixed, and every step
 already has a command that runs today and refuses honestly.
 
@@ -570,6 +588,7 @@ python -m src.data.snapshot                    # pin a dated, hashed copy
 python -m src.data.profile                     # regenerate the data profile
 python -m src.models.experiments               # replay the history on the real panel
 python -m src.models.evaluate                  # compare, threshold, calibrate — validation only
+python -m src.models.ledger                    # re-render the depth ledger from its jsonl
 python -m src.models.freeze --run <spec>       # opens the test block, once
 python -m src.inference.fetch --checksums models
 gh release create artifact-<date> models/*     # the model becomes a version
