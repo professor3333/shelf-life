@@ -531,6 +531,26 @@ runs 1.13%, 1.59%, 0.86%, 1.49%, 1.77%, 0.82% — flat and non-monotone. It stay
 in the ladder because a plausible belief that the data refuses is a result, and
 a reader who holds it is better served seeing it priced than not finding it.
 
+### Would it work on a board it has never seen?
+
+The per-source breakdown scores each board with a model **fitted on it**, which
+answers *does it work here*. `reports/model_comparison.md` also answers *would it
+work somewhere new*, by holding a whole board out of the fit and scoring its rows
+twice — once with a model that never saw it, once with a model that did. The gap
+is what board-specific learning was worth.
+
+The control matters: base rates run from 0.0090 on figma to 0.0173 on discord,
+so a low transfer score alone could be the board being harder rather than the
+model failing to carry over.
+
+**It cannot run yet, and the refusals are stated rather than hidden.** Positives
+per board are anthropic 52, gitlab 24, figma 10, discord 6, duolingo 5,
+python_org 3, airtable 0 — so testing on duolingo means five positives and
+airtable's fold is undefined, while holding out anthropic removes half the
+training positives and changes the fit and the board together. A board is scored
+only when it keeps enough positives to measure and leaves enough behind to fit
+on; every other board appears in a table of refusals with its reason.
+
 ### `POST /rank` — the shape the operating point was designed for
 
 The frozen threshold is the score at which exactly `budget` postings are
