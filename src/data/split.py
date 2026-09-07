@@ -546,6 +546,107 @@ def depth_report(frame: pd.DataFrame, target_folds: int = DEFAULT_TARGET_FOLDS) 
     return legality + " " + evaluability
 
 
+#: How the waves that survive the embargo are meant to be shared out. Not a
+#: fraction of the *panel* — that was the bug in the rule this replaces, which
+#: allocated 60/20/20 of the raw wave count and then let the embargo take its
+#: three waves per boundary out of whatever was left, emptying the validation
+#: block at every depth below sixteen.
+TRAIN_SHARE, VAL_SHARE, TEST_SHARE = 0.6, 0.2, 0.2
+
+
+def best_cuts(
+    frame: pd.DataFrame,
+    horizon_days: int | None = None,
+    corroboration_runs: int = CORROBORATION_RUNS,
+    target_folds: int = DEFAULT_TARGET_FOLDS,
+) -> Cuts:
+    """The cut to use, chosen by searching every candidate rather than by formula.
+
+    Two formulas preceded this and both were wrong, in opposite directions, which
+    is why the rule is a search over `feasible_cuts` — the same table that
+    decides whether a cut is legal at all. A rule that cannot recommend a cut the
+    acceptance check then rejects is the whole point; `DEBUGGING.md` 2026-09-07
+    is what the alternative costs.
+
+    ``waves[0], waves[len // 2]`` — `train`, `evaluate`, `train_baseline` — pins
+    `train_end` to the **first** wave for ever. The training block is one wave
+    deep at every panel depth, so `wave_forward_folds` returns nothing from it,
+    at 9 waves and at 90, and every wave the scraper adds lands in the
+    evaluation blocks. Measured: 0 folds at every depth from 9 to 17.
+
+    ``60/20/20 of the wave count`` — `experiments` — has the mirror defect. The
+    fractions were taken first and the embargo subtracted from what they
+    produced, which treats a three-wave discard at each boundary as a rounding
+    error. It is not one: that rule refused every depth up to 15 and first
+    returned a usable split at **16** waves, eight after one existed.
+
+    The search, in order:
+
+    1. Keep only cuts `feasible_cuts` marks valid — three non-empty blocks, and
+       positives in `val` and `test`.
+    2. Prefer those yielding at least `target_folds` rolling-origin folds. If
+       none does, take the most folds available; a panel too shallow for error
+       bars should still return its best cut rather than refuse.
+    3. Among those, take the cut closest to sharing the waves that *survive the
+       embargo* in `TRAIN_SHARE / VAL_SHARE / TEST_SHARE`. Ties go to more folds.
+
+    Step 3 is proportional rather than greedy on purpose, and the two obvious
+    greedy rules are both worse:
+
+    *Maximising folds* deepens the training window without limit, so validation
+    and test stay one and two waves wide for ever — on the real panel, 201
+    training positives against 21 in each evaluation block at 17 waves, and a
+    test PR-AUC on 21 positives has an error bar wider than any difference it
+    could measure.
+
+    *Maximising the evaluation blocks* once the fold target is met does the
+    reverse and starves the fit: on the synthetic panel it trains on 18
+    positives where the proportional rule gets 35 and the greedy-fold rule 79.
+
+    Proportional grows all three together — 6/1/2 waves at depth 13, 8/2/3 at
+    17, 11/3/4 at 22 — which is the only one of the three that still describes a
+    sensible experiment after a month of scraping.
+    """
+    labelled = frame[frame["label_observable"]]
+    waves = crawl_waves(labelled)
+    if horizon_days is None:
+        horizon_days = int(pd.unique(frame["horizon_days"])[0])
+    embargo = embargo_width(frame, horizon_days, corroboration_runs)
+    spacing = waves.diff().dropna().median() if len(waves) > 1 else pd.Timedelta(days=1)
+    burnt = int(np.floor(embargo / spacing)) + 1
+
+    table = feasible_cuts(frame, horizon_days, corroboration_runs)
+    usable = table[table["valid"]]
+    if usable.empty:
+        raise SplitTooShallow(
+            "no cut of this panel yields three usable blocks.\n\n" + feasibility_report(labelled)
+        )
+
+    scored = usable.copy()
+    scored["train_waves"] = [int((waves <= end).sum()) for end in scored["train_end"]]
+    scored["val_waves"] = [
+        int(((waves > start + embargo) & (waves <= end)).sum())
+        for start, end in zip(scored["train_end"], scored["val_end"], strict=True)
+    ]
+    scored["test_waves"] = [int((waves > end + embargo).sum()) for end in scored["val_end"]]
+    scored["folds"] = [rolling_origin_folds(n, burnt) for n in scored["train_waves"]]
+
+    enough = scored[scored["folds"] >= target_folds]
+    pool = enough if not enough.empty else scored[scored["folds"] == scored["folds"].max()]
+
+    pool = pool.copy()
+    kept = pool["train_waves"] + pool["val_waves"] + pool["test_waves"]
+    pool["imbalance"] = (
+        (pool["train_waves"] / kept - TRAIN_SHARE).abs()
+        + (pool["val_waves"] / kept - VAL_SHARE).abs()
+        + (pool["test_waves"] / kept - TEST_SHARE).abs()
+    )
+    chosen = pool.sort_values(["imbalance", "folds"], ascending=[True, False], kind="stable").iloc[
+        0
+    ]
+    return Cuts(train_end=chosen["train_end"], val_end=chosen["val_end"])
+
+
 def feasibility_report(frame: pd.DataFrame) -> str:
     """The feasibility table as text, for exception messages."""
     table = feasible_cuts(frame)

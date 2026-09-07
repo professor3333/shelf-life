@@ -55,7 +55,13 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from xgboost import XGBClassifier
 
-from src.data.split import Cuts, SplitResult, SplitTooShallow, crawl_waves, temporal_split
+from src.data.split import (
+    Cuts,
+    SplitResult,
+    SplitTooShallow,
+    best_cuts,
+    temporal_split,
+)
 from src.features.leaky import LEAKY_COLUMNS, add_leaky_features
 from src.features.preprocessing import (
     FEATURES,
@@ -245,31 +251,26 @@ RUNS: tuple[RunSpec, ...] = (
 )
 
 
-#: Where the two cuts fall, as fractions of the available crawl waves. 60/20/20
-#: before the embargo takes its share — the embargo is subtracted from the
-#: evaluation blocks, not from the training window, because the training window
-#: is what the rolling-origin folds are cut from and starving it costs error
-#: bars on every run.
-TRAIN_FRACTION, VAL_FRACTION = 0.6, 0.8
+def default_cuts(frame: pd.DataFrame) -> Cuts:
+    """The cut every module uses, now a search rather than a formula.
 
+    This held 60/20/20 fractions of the wave count until 2026-09-07. The
+    fractions were computed first and the embargo subtracted from whatever they
+    produced, which treats a three-wave discard at each boundary as a rounding
+    error. It is not one: measured on the real panel that rule refused every
+    depth up to 15 and first returned a usable split at **16** labelled waves,
+    eight after one existed.
 
-def default_cuts(waves: pd.Series) -> Cuts:
-    """Two cut instants from a list of crawl waves.
+    `src.data.split.best_cuts` searches `feasible_cuts` instead, so it cannot
+    recommend a cut the acceptance check then rejects, and it is what `train`,
+    `train_baseline` and `evaluate` call too. Before this they used a *third*
+    rule — `waves[0], waves[len // 2]` — so "the split" named two different
+    splits depending on which report you were reading. Now it names one.
 
-    Not the `waves[0], waves[len//2]` pair the earlier components use. That pair
-    was written for a panel with five waves, where it is the only choice that
-    leaves anything on both sides; applied to a deeper panel it leaves a
-    **one-wave training block**, which silently yields zero rolling-origin folds
-    and therefore no error bars on any run. The failure is quiet — an empty fold
-    table reads as "cross-validation ran and found nothing" — so the fractions
-    are named here rather than left implicit at the call site.
+    It takes the frame rather than the wave series because the search reads each
+    candidate block's positives, and those are not in the waves.
     """
-    n = len(waves)
-    if n < 3:
-        raise SplitTooShallow(f"{n} crawl waves cannot be cut three ways")
-    train_index = min(max(int(n * TRAIN_FRACTION) - 1, 0), n - 3)
-    val_index = min(max(int(n * VAL_FRACTION) - 1, train_index + 1), n - 2)
-    return Cuts(waves.iloc[train_index], waves.iloc[val_index])
+    return best_cuts(frame)
 
 
 def spec_by_name(run_name: str) -> RunSpec:
@@ -447,8 +448,7 @@ def replay(
     one thing.
     """
     prepared = add_leaky_features(panel)
-    waves = crawl_waves(prepared[prepared["label_observable"]])
-    split = temporal_split(prepared, cuts or default_cuts(waves))
+    split = temporal_split(prepared, cuts or default_cuts(prepared))
 
     mlflow = start(experiment, tracking_uri)
     prov = provenance.collect(panel_path, len(panel), dataset)
@@ -495,8 +495,7 @@ def reproduce(
     params = _decode_params(logged.data.params)
 
     prepared = add_leaky_features(panel)
-    waves = crawl_waves(prepared[prepared["label_observable"]])
-    split = temporal_split(prepared, cuts or default_cuts(waves))
+    split = temporal_split(prepared, cuts or default_cuts(prepared))
 
     result = execute(spec, split, budget_per_day, cross_validate_folds=False, params=params)
 
@@ -795,9 +794,8 @@ def real_panel_blocker(panel_path: Path) -> str | None:
         return None
     frame = pd.read_parquet(panel_path)
     prepared = add_leaky_features(frame)
-    waves = crawl_waves(prepared[prepared["label_observable"]])
     try:
-        temporal_split(prepared, default_cuts(waves))
+        temporal_split(prepared, default_cuts(prepared))
     except SplitTooShallow as error:
         return BLOCKER.format(refusal=str(error).split("\n\n")[0])
     return None

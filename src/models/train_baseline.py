@@ -31,7 +31,13 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
 
-from src.data.split import Cuts, SplitResult, SplitTooShallow, crawl_waves, temporal_split
+from src.data.split import (
+    Cuts,
+    SplitResult,
+    SplitTooShallow,
+    best_cuts,
+    temporal_split,
+)
 from src.features.preprocessing import build_pipeline, features_and_target, fit_on_training_fold
 from src.models.baselines import BoardHazardBaseline
 from src.models.metrics import DEFAULT_ALERT_BUDGET, evaluate, evaluate_by, reliability_curve
@@ -305,13 +311,17 @@ def main() -> None:
     print(f"constant PR-AUC    : {reference['pr_auc']:.4f}   <- the number to beat")
     print(f"constant Brier     : {reference['brier']:.4f}")
 
-    waves = crawl_waves(frame[frame["label_observable"]])
-    train_end = pd.Timestamp(args.train_end) if args.train_end else waves.iloc[0]
-    val_end = pd.Timestamp(args.val_end) if args.val_end else waves.iloc[len(waves) // 2]
-
     split = results = scores = blocker = None
     try:
-        split = temporal_split(frame, Cuts(train_end, val_end))
+        if args.train_end or args.val_end:
+            chosen = best_cuts(frame)
+            cuts = Cuts(
+                train_end=pd.Timestamp(args.train_end) if args.train_end else chosen.train_end,
+                val_end=pd.Timestamp(args.val_end) if args.val_end else chosen.val_end,
+            )
+        else:
+            cuts = best_cuts(frame)
+        split = temporal_split(frame, cuts)
         results, scores = run_ladder(split, args.budget)
         print()
         print(results.to_string(index=False))

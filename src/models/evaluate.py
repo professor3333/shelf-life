@@ -39,7 +39,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.data.split import Cuts, SplitResult, SplitTooShallow, crawl_waves, temporal_split
+from src.data.split import SplitResult, SplitTooShallow, best_cuts, crawl_waves, temporal_split
 from src.features.preprocessing import features_and_target, fit_on_frame
 from src.models.metrics import (
     DEFAULT_ALERT_BUDGET,
@@ -527,12 +527,10 @@ def main() -> None:
     args = parser.parse_args()
 
     frame = pd.read_parquet(args.panel)
-    waves = crawl_waves(frame[frame["label_observable"]])
-
     summary = per_fold = verdict = thresholds = calibration = None
     by_source = by_carryover = blocker = None
     try:
-        split = temporal_split(frame, Cuts(waves.iloc[0], waves.iloc[len(waves) // 2]))
+        split = temporal_split(frame, best_cuts(frame))
         summary, per_fold, val_scores = compare_models(split, args.budget)
         verdict = select(summary, per_fold)
 
