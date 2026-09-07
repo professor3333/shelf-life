@@ -294,6 +294,131 @@ def overfit_sweep(split: SplitResult, budget_per_day: int = DEFAULT_ALERT_BUDGET
     return pd.DataFrame(rows)
 
 
+def board_context_folds(
+    split: SplitResult, budget_per_day: int = DEFAULT_ALERT_BUDGET
+) -> tuple[pd.DataFrame, dict[str, float]]:
+    """The board-context question, answered fold by fold rather than once.
+
+    `ablate` refits on the training window and scores on validation, which gives
+    one number per ablation. For most of the seven engineered features that is
+    enough — they are cheap hypotheses and a single delta is proportionate. It is
+    **not** enough for the board-context group, because that delta is what
+    `docs/design.md` §12 will close on, and one number on one validation block
+    cannot say whether a difference is real.
+
+    So this refits the full model and the board-ablated model across the
+    rolling-origin folds *inside the training window* and pairs them fold by
+    fold. Paired, because both models see the same validation wave in each fold
+    and therefore share whatever made that wave easy or hard; differencing within
+    a fold removes that shared component, where scoring each model separately and
+    subtracting the means leaves it in.
+
+    **The folds are cut from `split.train` and the test block is never read.**
+    Choosing a feature set is model selection, and selection against test is a
+    choice that cannot be un-made.
+
+    Returns the per-fold table and the paired summary. `wins` in that summary is
+    the number to read first: on a handful of folds, a mean ± sd invites more
+    confidence than the sample size supports, and "won 2 of 3" is a statement a
+    reader can check.
+    """
+    # Imported here rather than at module scope: `src.models.evaluate` imports
+    # `build_xgboost` from this module, so a top-level import either way round is
+    # a cycle. The dependency is real and points that direction — evaluate is
+    # built on top of the estimators defined here — so the deferral is on this
+    # side, where it is one function rather than a module-wide constraint.
+    from src.models.evaluate import (
+        cross_validate,
+        paired_fold_difference,
+        wave_forward_folds,
+    )
+
+    folds = wave_forward_folds(split.train, split.embargo)
+    if not folds:
+        return pd.DataFrame(), {"folds": 0.0}
+
+    everything = [column.name for column in feature_columns()]
+    withheld = set(BOARD_CONTEXT_ABLATION.features)
+    kept = tuple(name for name in everything if name not in withheld)
+    parameters = _xgb_parameters(split)
+
+    full = cross_validate(
+        lambda: build_pipeline(XGBClassifier(**parameters)),
+        split.train,
+        folds,
+        budget_per_day,
+    )
+    ablated = cross_validate(
+        lambda: build_pipeline(XGBClassifier(**parameters), only=kept),
+        split.train,
+        folds,
+        budget_per_day,
+    )
+
+    paired = paired_fold_difference(full, ablated)
+    table = full[["fold", "pr_auc"]].merge(
+        ablated[["fold", "pr_auc"]], on="fold", suffixes=("_full", "_without_board")
+    )
+    table["difference"] = table["pr_auc_full"] - table["pr_auc_without_board"]
+    return table, paired
+
+
+def _fold_evidence(table: pd.DataFrame, paired: dict[str, float]) -> list[str]:
+    """The fold table and what it does or does not license."""
+    if table.empty or not paired.get("folds"):
+        return [
+            "**No fold evidence yet.** The training window is not deep enough to cut",
+            "rolling-origin folds from, so the delta above is a single draw on one",
+            "validation block and cannot settle §12. `python -m src.data.split` reports",
+            "how much longer.",
+            "",
+        ]
+
+    folds = int(paired["folds"])
+    mean, sd, wins = paired["mean_difference"], paired["sd"], int(paired["wins"])
+    spread = "—" if pd.isna(sd) else f"{sd:.4f}"
+
+    if folds < 3:
+        reading = (
+            f"Only {folds} fold(s) scored. Two numbers have no spread worth the name, "
+            "so this is not yet evidence either way."
+        )
+    elif pd.isna(sd) or abs(mean) <= sd:
+        reading = (
+            f"The full model leads by {mean:+.4f} PR-AUC on average, winning {wins} of "
+            f"{folds} folds, which is inside one standard deviation ({spread}). **Treat "
+            "them as tied.** A tie is the result that licenses dropping the four: if the "
+            "board columns cannot be shown to help, the simpler model is the one whose "
+            "validated and served forms are the same object for every caller."
+        )
+    elif mean > 0:
+        reading = (
+            f"The full model leads by {mean:+.4f} PR-AUC, winning {wins} of {folds} folds, "
+            f"which clears one standard deviation ({spread}). **The board columns earn "
+            "their place**, and the imputation fallback stays — with the cost §12 names, "
+            "that a caller supplying nothing gets a model whose board columns are constant."
+        )
+    else:
+        reading = (
+            f"The model *without* board context leads by {-mean:+.4f} PR-AUC, winning "
+            f"{folds - wins} of {folds} folds. Dropping the four is not merely free, it is "
+            "an improvement on this evidence — which would be worth understanding before "
+            "acting on, since it suggests the columns are adding noise rather than signal."
+        )
+
+    return [
+        "**Fold-level evidence.** The delta above is one draw; these are several, paired",
+        "on the fold so that both models see the same validation wave. Folds are cut",
+        "inside the **training** window — the test block is not read here, because",
+        "choosing a feature set is model selection.",
+        "",
+        _table(table, ["fold", "pr_auc_full", "pr_auc_without_board", "difference"]),
+        "",
+        reading,
+        "",
+    ]
+
+
 def _board_context_verdict(ablations: pd.DataFrame) -> list[str]:
     """Read the two board rows against each other and say what they settle.
 
@@ -361,6 +486,7 @@ def write_report(
     ablations: pd.DataFrame | None,
     sweep: pd.DataFrame | None,
     blocker: str | None,
+    fold_evidence: tuple[pd.DataFrame, dict[str, float]] | None = None,
 ) -> None:
     reference = analytic_reference(frame)
     derived = ", ".join(f"`{name}`" for name in DERIVED_COLUMNS)
@@ -415,6 +541,7 @@ def write_report(
             ),
             "",
             *_board_context_verdict(ablations),
+            *_fold_evidence(*(fold_evidence or (pd.DataFrame(), {}))),
             "## The deliberate overfit",
             "",
             "Depth up and regularisation off until train and validation separate, then",
@@ -449,7 +576,7 @@ def main() -> None:
     args = parser.parse_args()
 
     frame = pd.read_parquet(args.panel)
-    ladder = ablations = sweep = blocker = None
+    ladder = ablations = sweep = blocker = fold_evidence = None
     try:
         split = temporal_split(frame, best_cuts(frame))
         ladder, _ = run_ladder(split, args.budget)
@@ -475,6 +602,7 @@ def main() -> None:
         )
         ablations = ablate(split, args.budget)
         sweep = overfit_sweep(split, args.budget)
+        fold_evidence = board_context_folds(split, args.budget)
         print(ladder.to_string(index=False))
     except SplitTooShallow as error:
         blocker = (
@@ -486,7 +614,7 @@ def main() -> None:
         )
         print(f"not run: {str(error).splitlines()[0]}")
 
-    write_report(args.out, frame, ladder, ablations, sweep, blocker)
+    write_report(args.out, frame, ladder, ablations, sweep, blocker, fold_evidence)
     print(f"wrote -> {args.out}")
 
 

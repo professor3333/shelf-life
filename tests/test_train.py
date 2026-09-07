@@ -324,3 +324,125 @@ def test_the_verdict_is_silent_when_the_group_ablation_did_not_run():
     from src.models.train import _board_context_verdict
 
     assert _board_context_verdict(pd.DataFrame([{"removed": "nothing", "delta": 0.0}])) == []
+
+
+# --- fold-level evidence for the board-context decision -----------------------
+
+
+def test_the_board_comparison_is_paired_on_the_fold(split):
+    """One row per fold, both models scored on the same validation wave.
+
+    Pairing is the point. Two models scored on the same wave share whatever made
+    that wave easy or hard, so differencing within the fold removes it; averaging
+    each model separately and subtracting leaves it in, which is how a comparison
+    manufactures a difference that is really a week's weather.
+    """
+    from src.models.train import board_context_folds
+
+    table, paired = board_context_folds(split)
+    assert not table.empty
+    assert list(table.columns) == [
+        "fold",
+        "pr_auc_full",
+        "pr_auc_without_board",
+        "difference",
+    ]
+    assert table["fold"].is_unique
+    scored = table.dropna()
+    assert (scored["difference"] == scored["pr_auc_full"] - scored["pr_auc_without_board"]).all()
+    assert paired["folds"] == len(scored)
+
+
+def test_the_board_comparison_never_reads_the_test_block(split):
+    """Choosing a feature set is model selection, and selection against test is a
+    choice that cannot be un-made. The folds are cut from `split.train`, so the
+    comparison must be identical when the test block is replaced with nonsense."""
+    import dataclasses
+
+    from src.models.train import board_context_folds
+
+    honest, _ = board_context_folds(split)
+
+    frame = split.frame.copy()
+    test_rows = frame["split"] == "test"
+    assert test_rows.any(), "fixture must have a test block for this to mean anything"
+    frame.loc[test_rows, "y"] = 1 - frame.loc[test_rows, "y"]
+    poisoned, _ = board_context_folds(dataclasses.replace(split, frame=frame))
+
+    pd.testing.assert_frame_equal(honest, poisoned)
+
+
+def test_a_training_window_too_shallow_for_folds_returns_nothing(panel):
+    """Not an empty table pretending to be a result: `_fold_evidence` reads the
+    emptiness and says the delta cannot settle §12 yet."""
+    from src.data.split import crawl_waves
+    from src.models.train import _fold_evidence, board_context_folds
+
+    waves = crawl_waves(panel[panel["label_observable"]])
+    shallow = temporal_split(panel, Cuts(waves.iloc[0], waves.iloc[4]))
+    table, paired = board_context_folds(shallow)
+
+    assert table.empty and paired["folds"] == 0
+    assert "No fold evidence yet" in "\n".join(_fold_evidence(table, paired))
+
+
+def _fold_table(differences: list[float]) -> tuple[pd.DataFrame, dict[str, float]]:
+
+    rows = [
+        {"fold": i, "pr_auc_full": 0.2 + d, "pr_auc_without_board": 0.2, "difference": d}
+        for i, d in enumerate(differences)
+    ]
+    table = pd.DataFrame(rows)
+    series = pd.Series(differences)
+    return table, {
+        "folds": float(len(differences)),
+        "mean_difference": float(series.mean()),
+        "sd": float(series.std(ddof=1)) if len(differences) > 1 else float("nan"),
+        "wins": float((series > 0).sum()),
+    }
+
+
+def test_a_difference_inside_one_standard_deviation_is_called_a_tie():
+    """And the tie is stated as licensing the drop, because that is what §12 asks:
+    if the board columns cannot be shown to help, the simpler model is the one
+    whose validated and served forms are the same object."""
+    from src.models.train import _fold_evidence
+
+    text = "\n".join(_fold_evidence(*_fold_table([0.01, -0.008, 0.004])))
+    assert "Treat them as tied" in text
+    assert "licenses dropping the four" in text
+
+
+def test_a_consistent_lead_is_called_as_the_columns_earning_their_place():
+    from src.models.train import _fold_evidence
+
+    text = "\n".join(_fold_evidence(*_fold_table([0.05, 0.052, 0.048, 0.051])))
+    assert "earn their place" in text
+    assert "imputation fallback stays" in text
+
+
+def test_the_ablated_model_winning_is_reported_rather_than_hidden():
+    """The outcome nobody plans for. Dropping the four being an *improvement* is
+    a finding worth understanding, not a sign to re-run until it goes away."""
+    from src.models.train import _fold_evidence
+
+    text = "\n".join(_fold_evidence(*_fold_table([-0.05, -0.052, -0.048, -0.051])))
+    assert "without* board context leads" in text
+    assert "adding noise" in text
+
+
+def test_two_folds_are_not_called_evidence():
+    """A standard deviation over two numbers is not a standard deviation."""
+    from src.models.train import _fold_evidence
+
+    text = "\n".join(_fold_evidence(*_fold_table([0.05, 0.04])))
+    assert "not yet evidence" in text
+
+
+def test_the_fold_section_says_where_the_folds_came_from():
+    """A reader has to be able to check that selection stayed off the test block
+    without opening the source."""
+    from src.models.train import _fold_evidence
+
+    text = "\n".join(_fold_evidence(*_fold_table([0.01, -0.008, 0.004])))
+    assert "training" in text and "test block is not read" in text
