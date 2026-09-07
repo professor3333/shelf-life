@@ -531,6 +531,15 @@ runs 1.13%, 1.59%, 0.86%, 1.49%, 1.77%, 0.82% — flat and non-monotone. It stay
 in the ladder because a plausible belief that the data refuses is a result, and
 a reader who holds it is better served seeing it priced than not finding it.
 
+**When the headline number arrives it will carry an interval.** PR-AUC,
+precision, recall, Brier and ECE each get a 95% interval from resampling
+**postings, not rows** — the panel is one row per (posting, crawl) at about six
+rows per posting, so rows are not independent draws. With roughly twenty
+positives in the test block, the width is the part worth reading: an interval
+spanning the baseline means this test set could not tell the model from the
+baseline, which is a fact about the sample size rather than a failure of the
+model.
+
 **The one real number that exists** is the constant-predictor reference: PR-AUC
 **0.0140** on 6,874 labelled rows, which is the base rate. Every model must beat
 it, and none has been asked to yet.

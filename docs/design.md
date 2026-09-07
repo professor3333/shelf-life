@@ -146,6 +146,33 @@ in hours. A false "stays open" costs a job never applied to, which is
 unrecoverable. The second is worse, so the operating point leans to recall and
 the threshold is chosen against a fixed alert budget rather than at 0.5.
 
+**Every headline number carries an interval — added 2026-09-07.** The test block
+will hold on the order of twenty positives, and a bare PR-AUC at that count is a
+number whose second decimal is decoration. PR-AUC, precision, recall, Brier and
+ECE each get a 95% percentile interval from **resampling postings, not rows**.
+
+That unit is the decision worth defending. The panel is one row per (posting,
+crawl) at about six rows per posting, so 8,037 labelled rows are not 8,037
+independent observations — the board does not sample job-days, it accumulates
+postings and observes them daily. A row-level bootstrap encodes the opposite
+claim. Measured on a synthetic block of 241 rows and 99 postings the two
+disagree, and the cluster interval came out *narrower* — [0.0969, 0.2508]
+against [0.0939, 0.2782] — which is the opposite of the usual "clustering
+inflates variance" intuition, and is not the argument. The cluster bootstrap is
+right because it matches the sampling design; it would still be right if it came
+out wider.
+
+Threshold-dependent metrics are measured at the **frozen** threshold, held fixed
+across resamples. Recomputing the budget threshold inside each resample would
+mix how well the model separates with where the operating point happened to
+land, and the artifact ships one threshold rather than a distribution.
+
+**The interval and the fold spread answer different questions**, and both are
+reported. The interval asks how much this block's number would move on a
+different sample of postings; the fold spread in `reports/model_comparison.md`
+asks how much it would move on a different week. Neither substitutes for the
+other, and a difference smaller than either is not a difference.
+
 ---
 
 ## 6. Dataset snapshot policy — **DECIDED 2026-09-04**
