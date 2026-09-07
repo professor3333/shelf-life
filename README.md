@@ -587,6 +587,7 @@ already has a command that runs today and refuses honestly.
 python -m src.data.snapshot                    # pin a dated, hashed copy
 python -m src.data.profile                     # regenerate the data profile
 python -m src.models.experiments               # replay the history on the real panel
+python -m src.data.label_audit                 # does "disappeared" mean what the label needs?
 python -m src.models.evaluate                  # compare, threshold, calibrate — validation only
 python -m src.models.ledger                    # re-render the depth ledger from its jsonl
 python -m src.models.freeze --run <spec>       # opens the test block, once
