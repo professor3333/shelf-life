@@ -540,8 +540,30 @@ carry an error bar. `DEBUGGING.md` has the entry.
 
 ## What happens on the day it clears
 
-The sequence is fixed, and every step already has a command that runs today and
-refuses honestly.
+**The rehearsal comes first, and it is not the same day.** A legal split arrives
+before one deep enough to cut rolling-origin folds from, so the first real split
+carries no error bars — which is exactly the split not to spend the test block
+on. `scripts/rehearse.sh` runs the ladder on that split, on **validation only**:
+
+```bash
+./scripts/rehearse.sh --check   # report the depth, run nothing
+./scripts/rehearse.sh           # snapshot, assemble, gate, then the ladder
+```
+
+It pins a snapshot, rebuilds the panel, asks `feasible_cuts` whether a cut
+exists, and either declines with exit 3 — *not yet* is not an error — or runs
+`train_baseline`, `train`, `experiments` and `evaluate`. It never invokes
+`freeze`, and a test asserts so by parsing the script rather than trusting the
+comment that says it.
+
+What that buys is a dress rehearsal on real data. Every one of those modules has
+so far only run against `tests/panels.py`, whose columns are synthesised; the
+first contact with the real panel is where a dtype or an empty group shows up,
+and meeting that on a split whose numbers do not matter yet is much better than
+meeting it on the one afternoon the test block is available.
+
+Then, once the panel carries folds, the sequence is fixed, and every step
+already has a command that runs today and refuses honestly.
 
 ```bash
 python -m src.data.snapshot                    # pin a dated, hashed copy

@@ -34,6 +34,7 @@ WORKFLOW = ROOT / ".github" / "workflows" / "verify-deployment.yml"
 DOCKERFILE = ROOT / "Dockerfile"
 RENDER = ROOT / "render.yaml"
 RUNBOOK = ROOT / "docs" / "deploy.md"
+REHEARSE = ROOT / "scripts" / "rehearse.sh"
 REQUIREMENTS = ROOT / "requirements.txt"
 
 #: The pipeline that turns the `MODEL_TAG` file into a bare tag. Comments and
@@ -382,6 +383,52 @@ def test_health_reports_the_release_only_when_the_build_recorded_one(monkeypatch
 
     monkeypatch.setenv(main.ARTIFACT_TAG_ENV, "artifact-override")
     assert main.artifact_tag() == "artifact-override", "the environment must win over the file"
+
+
+# --- the rehearsal, and the one thing it must never do -----------------------
+
+
+def _invoked_modules(text: str) -> set[str]:
+    """Modules the script actually runs, not ones its comments discuss.
+
+    The distinction is the whole point here: `rehearse.sh` explains at length
+    why it stops short of `freeze`, so a plain substring search for the word
+    finds it in the prose and proves nothing either way.
+    """
+    return set(re.findall(r"-m (?:\"\$\{PYTHON\}\" )?([\w.]+)", text)) | set(
+        re.findall(r"\$\{PYTHON\}\" -m ([\w.]+)", text)
+    )
+
+
+def test_the_rehearsal_never_opens_the_test_block() -> None:
+    """The test set opens once, and not from a script that runs on a schedule.
+
+    A legal split arrives days before one deep enough for rolling-origin folds,
+    so the first split this script can run on has no error bars — precisely the
+    split you do not want to have spent the test block on. `freeze` stays a
+    deliberate act naming a model a human chose.
+    """
+    modules = _invoked_modules(REHEARSE.read_text())
+    assert modules, "parsed no module invocations at all — the regex has rotted"
+    assert "src.models.freeze" not in modules, (
+        "rehearse.sh invokes freeze, which opens the test block"
+    )
+
+
+def test_the_rehearsal_runs_only_modules_that_exist() -> None:
+    for module in sorted(_invoked_modules(REHEARSE.read_text())):
+        assert importlib.util.find_spec(module) is not None, (
+            f"scripts/rehearse.sh runs `python -m {module}`, which does not exist"
+        )
+
+
+def test_the_rehearsal_declines_rather_than_fails_when_shallow() -> None:
+    """Exit 3 is "not yet", which is not an error. A script meant to be run
+    repeatedly until it clears must distinguish the two, or every scheduled run
+    before the panel is deep enough looks like a broken pipeline."""
+    text = REHEARSE.read_text()
+    assert "exit 3" in text
+    assert 'GATE}" -eq 3' in text
 
 
 # --- the one about documentation that has rotted -----------------------------
