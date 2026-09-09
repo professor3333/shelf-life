@@ -4,6 +4,43 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-09 — The measurement named to settle a decision answered a different question
+
+- **Problem:** no error, and nothing to see. `docs/design.md` §12 — should the
+  four board-context columns stay in the served model — named a leave-them-out
+  **ablation** as its deciding evidence, and had been waiting on panel depth to
+  run it. The ablation would have run, returned **0.0005** validation PR-AUC,
+  and the decision would have been closed on it. The number that answers §12's
+  actual question is **0.0019**, roughly four times larger.
+
+- **Root cause:** an ablation *refits* without the columns, which measures what
+  the features are **worth** — the remaining features absorb whatever weight the
+  withheld ones held. The deployed object does the opposite: it is fitted **with**
+  them and then handed rows where they are null, so the imputers fill constants
+  and the fitted weights stay pointed at a column that no longer varies. A refit
+  can recover; the shipped model cannot. The two questions differ by exactly that
+  redistribution, and the section had been written as though one word — "what a
+  caller who supplies none of them loses" — described both. It reads naturally
+  as either.
+
+- **Solution:** `src/models/train.py:serve_time_regime` scores one fitted model
+  twice on the same block, with the columns and without, so the only thing that
+  can explain the difference is their arrival. Both numbers now appear side by
+  side in `reports/model_results.md` with the reason they differ, because either
+  alone invites the other's reading. Its test carries a control — constant board
+  context must cost exactly zero — which is what caught a dtype bug in the first
+  draft.
+
+- **Lesson:** **name the measurement after the question, then check it answers
+  that question and not the adjacent one.** "What is this feature worth" and
+  "what happens when this feature is missing at serve time" sound like one
+  question and are two, and the gap between them is a whole refit. The general
+  test: write down what the model *does* in the situation you care about, and ask
+  whether the experiment reproduces that situation or merely resembles it. A
+  measurement that resembles it will still return a number, on time, with no
+  sign that it is the wrong one.
+
+
 ## 2026-09-09 — The base rate at H=7 was inflated by the rows that could only be positive
 
 - **Problem:** no error. The pipeline reported a 7-day positive rate of
