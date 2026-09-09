@@ -979,6 +979,16 @@ curl -s -X POST http://localhost:8000/predict \
 }
 ```
 
+**The probability above will not be the one you get**, and that is not a fault
+in either of us. The response is from a `05-xgboost_engineered` artifact frozen
+on the synthetic fixture, and XGBoost's tree construction is not bit-reproducible
+across platforms — the same data trained on Linux/x86 and macOS/arm64 gives
+different last decimal places, which on a small panel with a noisy label is
+enough to land on a different optimum. That cost this repository a CI failure
+once, and it is why `tests/conftest.py` pins its expected probability against a
+logistic model rather than this one. Read the shape of the response, not the
+digits.
+
 `t` is the prediction instant — the moment `age_days` is measured from. It
 defaults to now, and can be pinned by sending `as_of`, which is what makes a
 prediction reproducible.
