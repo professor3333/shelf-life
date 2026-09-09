@@ -79,6 +79,7 @@ from src.models.metrics import (
     evaluate,
     evaluate_by,
     expected_calibration_error,
+    reliability_curve,
     threshold_for_budget,
 )
 from src.models.train_baseline import DEFAULT_PANEL, _table, prediction_days
@@ -114,6 +115,17 @@ class FrozenModel:
     by_source: pd.DataFrame
     by_seen_in_train: pd.DataFrame
     calibration: dict[str, float]
+    #: The binned reliability curve, not just its summary. `calibration` gives
+    #: Brier and ECE, which say *how far* the probabilities are from the truth
+    #: and not *which way* — a model that is uniformly overconfident and one that
+    #: is confident in the wrong direction can score the same. Validation has
+    #: carried the curve since Component 10; the test block reported only the
+    #: two scalars until 2026-09-09, which meant the block opened once and the
+    #: shape of its calibration was never looked at.
+    reliability: pd.DataFrame
+    #: Prediction days in the test block, so a daily rate can be quoted. Counted
+    #: here because the block is not reachable from the report.
+    test_days: int
     params: dict
     features: tuple[str, ...]
     fitted_on: str
@@ -204,6 +216,8 @@ def freeze(
             budget_per_day=budget_per_day,
         ),
         calibration=calibration_summary(test_block["y"], test_scores),
+        reliability=reliability_curve(test_block["y"], test_scores),
+        test_days=int(prediction_days(test_block)),
         params=resolved,
         features=tuple(spec_features(spec, split)),
         fitted_on=fitted_on,
@@ -251,6 +265,45 @@ def build_metadata(
         dataset=dataset,
         selection_folds=selection_folds,
     )
+
+
+def what_the_user_gets(frozen: FrozenModel, budget_per_day: int) -> dict[str, float]:
+    """The frozen numbers restated as the decision they inform.
+
+    `docs/problem_definition.md` §8 names the user and the decision: someone
+    reading a daily list of postings ranked by "likely gone within a week",
+    deciding *what to apply to tonight*. Precision and recall answer that
+    question only after arithmetic, and doing the arithmetic in a reader's head
+    is where a metric quietly stops meaning anything — 0.21 precision sounds
+    poor until it is set against a base rate of 0.10, and 0.44 recall sounds
+    fine until it is restated as *the majority of closures are missed*.
+
+    So both readings are computed and reported together, along with the honest
+    counterfactual: what the same person would get by reading the same number of
+    postings off the top of the board without a model. That comparison is the
+    one that decides whether any of this was worth building, and it is the one
+    a table of metrics never quite states.
+    """
+    confusion = frozen.test_at_frozen_threshold
+    days = max(1, frozen.test_days)
+    base_rate = float(frozen.test["base_rate"])
+
+    flagged = float(confusion["flagged"])
+    true_positives = float(confusion["tp"])
+    missed = float(confusion["fn"])
+    precision = float(confusion["precision"])
+
+    return {
+        "alerts_per_day": flagged / days,
+        "real_closures_caught_per_day": true_positives / days,
+        "false_alarms_per_day": float(confusion["fp"]) / days,
+        "closures_missed_per_day": missed / days,
+        "share_of_closures_caught": float(confusion["recall"]),
+        # What the same reading effort returns with no model at all: the budget
+        # drawn from a board whose closure rate is the base rate.
+        "unaided_closures_caught_per_day": (flagged * base_rate) / days,
+        "lift_over_unaided": (precision / base_rate) if base_rate else float("nan"),
+    }
 
 
 NOT_RUN = """## Nothing below has run
@@ -306,6 +359,41 @@ class NoFoldEvidence(RuntimeError):
     different remedies, and collapsing them is how "the panel is too shallow"
     stops being read once it is half true.
     """
+
+
+def _what_it_means_section(frozen: FrozenModel, budget_per_day: int) -> list[str]:
+    """The last section on purpose. Every number above is an input to it."""
+    reading = what_the_user_gets(frozen, budget_per_day)
+    base_rate = float(frozen.test["base_rate"])
+    return [
+        "## What this means for the person using it",
+        "",
+        "`docs/problem_definition.md` §8: someone reads a daily list of postings",
+        "ranked by *likely gone within a week* and decides what to apply to tonight.",
+        "Restating the table above as that day:",
+        "",
+        f"- The list runs to **{reading['alerts_per_day']:.0f} postings a day**.",
+        f"- About **{reading['real_closures_caught_per_day']:.1f} of them are genuinely "
+        f"about to close**; the other {reading['false_alarms_per_day']:.1f} are not.",
+        f"- That is **{reading['share_of_closures_caught']:.0%} of the closures** that "
+        f"happen — so **{reading['closures_missed_per_day']:.1f} a day are missed**, and "
+        "missing one is the expensive error: a rushed application costs hours, a job "
+        "never applied to is unrecoverable.",
+        "",
+        "**Against reading the same number of postings with no model at all**, off a "
+        f"board closing at {base_rate:.1%} a day: that person would find "
+        f"**{reading['unaided_closures_caught_per_day']:.1f}** real ones against this "
+        f"model's {reading['real_closures_caught_per_day']:.1f} — a lift of "
+        f"**{reading['lift_over_unaided']:.1f}×**.",
+        "",
+        "**That ratio is the whole case for the model, and it is the number to argue",
+        "about.** Below about 1.5× the honest report is that a person would do nearly",
+        "as well reading the board directly, whatever the PR-AUC says — and the",
+        "interval on precision above is wide enough that the lift carries one too.",
+        "The claim is *removed from the board*, never *filled*: a posting also comes",
+        "down when it expires, is reposted, or the page is reorganised.",
+        "",
+    ]
 
 
 def write_report(
@@ -432,8 +520,23 @@ def write_report(
             "",
             "## Calibration on test",
             "",
+            "Brier and ECE say how far the probabilities sit from the truth. They do",
+            "not say which way, and a model that is uniformly overconfident scores the",
+            "same as one that is confident in the wrong direction — so the curve is",
+            "here too, and it is the one to read.",
+            "",
             _table(pd.DataFrame([frozen.calibration]), list(frozen.calibration)),
             "",
+            _table(
+                frozen.reliability,
+                ["bin_low", "bin_high", "n", "mean_predicted", "observed_rate"],
+            ),
+            "",
+            "A bin whose `observed_rate` sits above its `mean_predicted` is one where",
+            "the model was too cautious; below, too confident. Bins with a handful of",
+            "rows say nothing either way — read `n` first.",
+            "",
+            *_what_it_means_section(frozen, budget_per_day),
         ]
 
     path.parent.mkdir(parents=True, exist_ok=True)

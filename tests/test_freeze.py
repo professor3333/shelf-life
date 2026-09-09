@@ -24,6 +24,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pandas as pd
 import pytest
 from panels import make_closing_panel
 
@@ -88,10 +89,23 @@ def _run_freeze(tmp_path: Path, monkeypatch, n_waves: int, *extra: str) -> dict[
             *extra,
         ],
     )
+    # Capture the FrozenModel `main` builds, so a test can check the report
+    # against the object it was rendered from rather than re-deriving it — a
+    # re-derivation fits a second model and proves nothing about the first.
+    captured = {}
+    real_freeze = freeze_module.freeze
+
+    def recording(*args, **kwargs):
+        captured["frozen"] = real_freeze(*args, **kwargs)
+        return captured["frozen"]
+
+    monkeypatch.setattr(freeze_module, "freeze", recording)
+
     with pytest.raises(SystemExit) as exit_info:
         freeze_module.main()
         raise SystemExit(0)  # main returns rather than exiting when it succeeds
     paths["exit_code"] = exit_info.value.code
+    paths["frozen"] = captured.get("frozen")
     return paths
 
 
@@ -185,3 +199,103 @@ def test_the_fixture_depths_are_what_this_file_claims(n_waves):
     split = temporal_split(panel, best_cuts(panel))  # legal at both depths, or this raises
     folds = len(wave_forward_folds(split.train, split.embargo))
     assert folds == 0 if n_waves == LEGAL_BUT_FOLDLESS else folds >= 3
+
+
+# --- the report the one-time run has to produce ----------------------------
+
+#: Every section the held-out report must carry, because the block opens once
+#: and a section discovered missing afterwards cannot be added — regenerating it
+#: means reading the block a second time, and a test set read twice is a
+#: validation set. This list is the acceptance criterion for the final run,
+#: pinned while it is still cheap to fix.
+REQUIRED_SECTIONS = (
+    "## Validation and test, side by side",  # pr_auc, brier, roc_auc, ece, both blocks
+    "## How much of this is signal",  # bootstrap intervals on every headline
+    "## The operating point, applied as frozen",  # precision/recall at the shipped threshold
+    "## Per source",  # is it one board's model
+    "## Carried over from training, or not",  # memorisation check
+    "## Calibration on test",  # brier, ece, and the binned curve
+    "## What this means for the person using it",  # the decision the numbers inform
+)
+
+
+def test_the_held_out_report_carries_every_section_the_run_gets_one_chance_at(
+    tmp_path, monkeypatch
+):
+    paths = _run_freeze(tmp_path, monkeypatch, DEEP_ENOUGH_TO_CHOOSE)
+    report = paths["report"].read_text()
+
+    missing = [section for section in REQUIRED_SECTIONS if section not in report]
+    assert not missing, "the one-time report would have been written without:\n  " + "\n  ".join(
+        missing
+    )
+
+    # The calibration section must carry the curve, not only its two scalars.
+    calibration = report.split("## Calibration on test")[1]
+    assert "bin_low" in calibration and "observed_rate" in calibration, (
+        "Brier and ECE say how far the probabilities are from the truth, never which way"
+    )
+
+
+def test_the_reading_of_the_numbers_is_arithmetic_not_assertion(tmp_path, monkeypatch):
+    """The interpretation section has to be derived from the confusion matrix
+    that is actually shipped, or it is a claim sitting next to the evidence
+    rather than a reading of it."""
+    from src.models.freeze import what_the_user_gets
+
+    paths = _run_freeze(tmp_path, monkeypatch, DEEP_ENOUGH_TO_CHOOSE)
+    frozen = paths["frozen"]
+    reading = what_the_user_gets(frozen, budget_per_day=20)
+    confusion = frozen.test_at_frozen_threshold
+    days = max(1, frozen.test_days)
+
+    assert reading["alerts_per_day"] == pytest.approx(confusion["flagged"] / days)
+    assert reading["real_closures_caught_per_day"] == pytest.approx(confusion["tp"] / days)
+    assert reading["closures_missed_per_day"] == pytest.approx(confusion["fn"] / days)
+    assert reading["share_of_closures_caught"] == pytest.approx(confusion["recall"])
+
+    # The counterfactual is the same reading effort with no model: the budget
+    # drawn from a board closing at the block's own rate.
+    base_rate = float(frozen.test["base_rate"])
+    assert reading["unaided_closures_caught_per_day"] == pytest.approx(
+        confusion["flagged"] * base_rate / days
+    )
+    assert reading["lift_over_unaided"] == pytest.approx(confusion["precision"] / base_rate)
+
+
+def test_a_model_no_better_than_the_board_reports_a_lift_of_one():
+    """The case the section exists to be able to state. A model whose precision
+    equals the base rate has sorted nothing, whatever its PR-AUC looks like, and
+    the report has to be able to say so in the same words it uses for a success."""
+    from src.models.freeze import FrozenModel, what_the_user_gets
+
+    useless = FrozenModel(
+        pipeline=None,
+        threshold=0.5,
+        validation={},
+        test={"base_rate": 0.10},
+        test_at_frozen_threshold={
+            "flagged": 200.0,
+            "tp": 20.0,
+            "fp": 180.0,
+            "fn": 80.0,
+            "tn": 720.0,
+            "precision": 0.10,
+            "recall": 0.20,
+        },
+        test_intervals={},
+        test_fragility=None,
+        by_source=pd.DataFrame(),
+        by_seen_in_train=pd.DataFrame(),
+        calibration={},
+        reliability=pd.DataFrame(),
+        test_days=10,
+        params={},
+        features=(),
+        fitted_on="train",
+    )
+    reading = what_the_user_gets(useless, budget_per_day=20)
+    assert reading["lift_over_unaided"] == pytest.approx(1.0)
+    assert reading["real_closures_caught_per_day"] == pytest.approx(
+        reading["unaided_closures_caught_per_day"]
+    )
