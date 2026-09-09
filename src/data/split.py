@@ -319,6 +319,24 @@ def _validate(result: SplitResult, labelled: pd.DataFrame, require_positives: bo
                 f"recall and PR-AUC are all undefined on it. This is a panel-depth problem, "
                 f"not a cut that can be moved.\n\n{feasibility_report(labelled)}"
             )
+        # And the mirror of it, which was missing until 2026-09-09. An
+        # all-*positive* block is undefined in the same way and reads far worse,
+        # because nothing about it looks broken: precision is 1.0, recall is 1.0
+        # and PR-AUC is 1.0, all by construction rather than by merit.
+        #
+        # It is not hypothetical at a long horizon. A closure is knowable at once
+        # while survival needs the whole window, so labelling on outcome alone
+        # makes every cohort inside the horizon of the panel's edge purely
+        # positive — 151 such rows at H=7 on the 2026-09-08 snapshot. The label
+        # rule now drops those cohorts entirely, so this check should never fire;
+        # it is here because the failure it catches is one that congratulates you.
+        if positives == len(block):
+            raise SplitTooShallow(
+                f"the {name!r} block has {len(block)} rows and *every one* is a positive, so "
+                f"precision, recall and PR-AUC are all 1.0 by construction. A block with one "
+                f"class is an undefined metric wearing a perfect score."
+                f"\n\n{feasibility_report(labelled)}"
+            )
 
 
 def assert_temporal_order(result: SplitResult) -> None:
@@ -486,7 +504,19 @@ def minimum_waves(
         horizon_days = int(pd.unique(frame["horizon_days"])[0])
     embargo = embargo_width(frame, horizon_days, corroboration_runs)
 
-    spacing = waves.diff().dropna().median() if len(waves) > 1 else pd.Timedelta(days=1)
+    # **Spacing comes from every wave, not from the labelled ones.** How often
+    # the scraper fires is a fact about the schedule; which waves are labelled is
+    # a fact about the horizon, and at a long horizon only the oldest few waves
+    # are. Measuring cadence on that subset means measuring it on the smallest
+    # sample available, and the error runs the wrong way: at H=7 on 2026-09-09
+    # the two labelled waves happened to straddle the late 14:07 crawl, giving a
+    # median of 1d10h against a true cadence of 1d. That inflated spacing divides
+    # into the embargo fewer times, so `burnt_per_boundary` read 6 instead of 9
+    # and the panel appeared to need 14 waves when it needs 20 — an underestimate
+    # of the wait, produced exactly when the panel is shallowest.
+    all_waves = crawl_waves(frame)
+    gaps = all_waves.diff().dropna()
+    spacing = gaps.median() if len(gaps) else pd.Timedelta(days=1)
     burnt = int(np.floor(embargo / spacing)) + 1
     needed = 1 + 2 * burnt + corroboration_runs
 

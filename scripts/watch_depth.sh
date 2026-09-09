@@ -26,7 +26,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PYTHON="${PYTHON:-.venv/bin/python}"
-HORIZON="${HORIZON:-1}"
+# H=7 is the task (`docs/design.md` §2, decided 2026-09-04); H=1 is a pipeline
+# smoke test and that document says so in as many words. Defaulting to 1 here
+# meant every number this script produced described the smoke test, under
+# headings that named the build. `HORIZON=1 ./scripts/...` still asks for it.
+HORIZON="${HORIZON:-7}"
 BASIS="${BASIS:-calendar}"
 PANEL="data/processed/features/job_days_h${HORIZON}_${BASIS}.parquet"
 

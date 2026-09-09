@@ -175,7 +175,30 @@ def compute_labels(
         key = (row.source, row.source_id)
         deadline = row.t + horizon
         gone = t_gone.get(key)
-        if gone is not None and within(gone, deadline):
+
+        # **The cohort has to have settled, whatever the outcome looks like.**
+        # A closure is knowable the moment it happens — a posting gone on day two
+        # needs no further waiting — while survival is only knowable once the
+        # whole window has elapsed. Labelling on outcome alone therefore admits,
+        # at the newest end of the panel, a set of rows in which *every* row is a
+        # closure: not because closures cluster there, but because the survivors
+        # beside them are still censored. Measured at H=7 on the 2026-09-08
+        # snapshot, that tail was 151 rows and 100% positive, and pooling it
+        # carried the reported base rate from 7.76% to 13.58% — past the 11.3%
+        # planning estimate the number was meant to replace, which is how a bias
+        # gets mistaken for a confirmation.
+        #
+        # So settledness is asked first and about the *panel*, not the posting:
+        # does a complete run exist at or after the deadline at all? That is what
+        # `docs/problem_definition.md` §10 means by "rows whose window has not
+        # fully elapsed are dropped", and it makes every surviving cohort one in
+        # which both classes could have been seen.
+        settled = any(at_or_after(instant, deadline) for instant in run_times[row.source])
+
+        if not settled:
+            labels.append(pd.NA)
+            keep.append(False)
+        elif gone is not None and within(gone, deadline):
             labels.append(1)
             keep.append(True)
         elif any(
@@ -315,9 +338,27 @@ def assemble(
     return panel.sort_values(["t", "source", "source_id"], kind="stable").reset_index(drop=True)
 
 
+#: The horizon the build is about. `docs/design.md` §2 decided H=7 on 2026-09-04
+#: and names H=1 a pipeline smoke test in the same sentence, so a default of 1
+#: anywhere is a module quietly reporting the smoke test under the build's name.
+#: Every module derives its default panel from here rather than spelling the
+#: filename out, because six copies of `job_days_h1_calendar.parquet` is six
+#: places for the horizon to disagree — and it did: `scripts/rehearse.sh` was
+#: assembling one panel and the ladder beneath it was reading another.
+DEFAULT_HORIZON = 7
+DEFAULT_BASIS = "calendar"
+
+
+def panel_path(
+    horizon_days: int = DEFAULT_HORIZON, basis: str = DEFAULT_BASIS, root: Path | None = None
+) -> Path:
+    """Where `assemble` writes a panel, and where every reader looks for it."""
+    return (root or OUTPUT_ROOT) / f"job_days_h{horizon_days}_{basis}.parquet"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--horizon", type=int, default=7)
+    parser.add_argument("--horizon", type=int, default=DEFAULT_HORIZON)
     parser.add_argument("--basis", choices=["instant", "calendar"], default="calendar")
     parser.add_argument("--out", type=Path, default=OUTPUT_ROOT)
     args = parser.parse_args()
@@ -326,7 +367,7 @@ def main() -> None:
     labelled = frame[frame["label_observable"]]
 
     args.out.mkdir(parents=True, exist_ok=True)
-    path = args.out / f"job_days_h{args.horizon}_{args.basis}.parquet"
+    path = panel_path(args.horizon, args.basis, args.out)
     frame.to_parquet(path, index=False)
 
     print(f"horizon            : {args.horizon} days ({args.basis} basis)")

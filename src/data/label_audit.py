@@ -37,9 +37,10 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.features.assemble import panel_path
 from src.models.train_baseline import _table
 
-DEFAULT_PANEL = Path("data/processed/features/job_days_h1_calendar.parquet")
+DEFAULT_PANEL = panel_path()
 DEFAULT_REPORT = Path("reports/label_validity.md")
 
 #: How long after a disappearance a reappearance still counts as a relisting.
