@@ -32,10 +32,12 @@ import argparse
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from xgboost import XGBClassifier
 
 from src.data.split import SplitResult, SplitTooShallow, best_cuts, temporal_split
+from src.features.assemble import horizon_banner
 from src.features.derive import DERIVED_COLUMNS
 from src.features.preprocessing import (
     DERIVED,
@@ -183,6 +185,61 @@ ABLATIONS: tuple[Ablation, ...] = (
     ),
     BOARD_CONTEXT_ABLATION,
 )
+
+
+def serve_time_regime(
+    split: SplitResult, budget_per_day: int = DEFAULT_ALERT_BUDGET
+) -> pd.DataFrame:
+    """What a caller who supplies no board context actually gets.
+
+    **This is not the group ablation, and the difference is the point.** The
+    ablation *refits* without the four columns, which produces a different model
+    — one whose remaining features have absorbed whatever weight the board
+    columns held. The deployed object is the opposite: fitted *with* them, then
+    handed rows where they are null, so the training fold's imputers fill them
+    with constants and the fitted weights stay pointed at a column that no longer
+    varies. A refit measures what the features are worth; this measures what the
+    shipped model does when they are missing, and only the second is what
+    `POST /predict` returns to a stranger.
+
+    Same model, same split, same threshold — the only difference is whether the
+    four columns arrive. Anything else would confound the regime with a refit.
+
+    `docs/design.md` §12 was written as though the ablation answered this. It
+    does not, and until 2026-09-09 nothing did: `board_context_supplied` told a
+    caller which regime they were in without anyone having measured what the
+    other regime costs.
+    """
+    model = build_xgboost(split)
+    fit_on_training_fold(model, split)
+
+    withheld = split.val.copy()
+    for column in BOARD_CONTEXT:
+        # `float64` NaN rather than the column's own dtype: these arrive as
+        # `Int64` from the panel but a plain `int64` from any frame that never
+        # had a null, and a non-nullable integer column cannot hold the absence
+        # this is trying to represent. Every board column is numeric, so
+        # `select_columns` routes it to the same branch either way and the
+        # imputer sees exactly what a caller who omitted the field would send.
+        withheld[column] = pd.Series(np.nan, index=withheld.index, dtype="float64")
+
+    rows = []
+    for name, block in (("board context supplied", split.val), ("absent, imputed", withheld)):
+        scored = _score(model, block, budget_per_day)
+        rows.append(
+            {
+                "regime": name,
+                "n": float(len(block)),
+                "pr_auc": scored["pr_auc"],
+                "brier": scored["brier"],
+                "precision": scored["precision"],
+                "recall": scored["recall"],
+            }
+        )
+    supplied, absent = rows
+    absent["delta_pr_auc"] = supplied["pr_auc"] - absent["pr_auc"]
+    supplied["delta_pr_auc"] = 0.0
+    return pd.DataFrame(rows)
 
 
 def ablate(split: SplitResult, budget_per_day: int = DEFAULT_ALERT_BUDGET) -> pd.DataFrame:
@@ -419,7 +476,9 @@ def _fold_evidence(table: pd.DataFrame, paired: dict[str, float]) -> list[str]:
     ]
 
 
-def _board_context_verdict(ablations: pd.DataFrame) -> list[str]:
+def _board_context_verdict(
+    ablations: pd.DataFrame, serve_time: pd.DataFrame | None = None
+) -> list[str]:
     """Read the two board rows against each other and say what they settle.
 
     `docs/design.md` §12 is open on whether the four board-context columns
@@ -471,10 +530,32 @@ def _board_context_verdict(ablations: pd.DataFrame) -> list[str]:
         "",
         reading,
         "",
-        "The number prices one thing only: what a caller who supplies no board "
-        "context loses. It does not price a caller who can supply it — a board owner "
-        "scoring their own requisitions has all four, and for them the imputation "
-        "branch never runs.",
+        "**But it is a refit, and the deployed model is not.** The number above "
+        "says what the four columns are *worth*: a model trained without them "
+        "redistributes their weight to whatever else it has. The shipped object "
+        "does the opposite — it was fitted with them, and a caller who supplies "
+        "none sends nulls that the training fold's imputers fill with constants, "
+        "leaving fitted weights pointed at a column that no longer varies. The "
+        "table below is that regime, and it is what `POST /predict` returns to a "
+        "stranger.",
+        "",
+        *_serve_time_section(serve_time),
+        "It does not price a caller who *can* supply them — a board owner scoring "
+        "their own requisitions has all four, and for them the imputation branch "
+        "never runs. Both rows are reported because the service serves both.",
+        "",
+    ]
+
+
+def _serve_time_section(regime: pd.DataFrame | None) -> list[str]:
+    if regime is None:
+        return [
+            "The serve-time regime could not be measured on this panel — it needs a "
+            "split, like everything else here.",
+            "",
+        ]
+    return [
+        _table(regime, ["regime", "n", "pr_auc", "brier", "precision", "recall", "delta_pr_auc"]),
         "",
     ]
 
@@ -487,13 +568,15 @@ def write_report(
     sweep: pd.DataFrame | None,
     blocker: str | None,
     fold_evidence: tuple[pd.DataFrame, dict[str, float]] | None = None,
+    serve_time: pd.DataFrame | None = None,
 ) -> None:
     reference = analytic_reference(frame)
     derived = ", ".join(f"`{name}`" for name in DERIVED_COLUMNS)
     lines = [
         "# Model results — engineered features and XGBoost",
         "",
-        "Generated by `python -m src.models.train`. Regenerate rather than edit.",
+        f"Generated by `python -m src.models.train` on {horizon_banner(frame)}. "
+        "Regenerate rather than edit.",
         "",
         "## Features",
         "",
@@ -540,7 +623,7 @@ def write_report(
                 ],
             ),
             "",
-            *_board_context_verdict(ablations),
+            *_board_context_verdict(ablations, serve_time),
             *_fold_evidence(*(fold_evidence or (pd.DataFrame(), {}))),
             "## The deliberate overfit",
             "",
@@ -576,7 +659,7 @@ def main() -> None:
     args = parser.parse_args()
 
     frame = pd.read_parquet(args.panel)
-    ladder = ablations = sweep = blocker = fold_evidence = None
+    ladder = ablations = sweep = blocker = fold_evidence = serve_time = None
     try:
         split = temporal_split(frame, best_cuts(frame))
         ladder, _ = run_ladder(split, args.budget)
@@ -603,6 +686,7 @@ def main() -> None:
         ablations = ablate(split, args.budget)
         sweep = overfit_sweep(split, args.budget)
         fold_evidence = board_context_folds(split, args.budget)
+        serve_time = serve_time_regime(split, args.budget)
         print(ladder.to_string(index=False))
     except SplitTooShallow as error:
         blocker = (
@@ -614,7 +698,7 @@ def main() -> None:
         )
         print(f"not run: {str(error).splitlines()[0]}")
 
-    write_report(args.out, frame, ladder, ablations, sweep, blocker, fold_evidence)
+    write_report(args.out, frame, ladder, ablations, sweep, blocker, fold_evidence, serve_time)
     print(f"wrote -> {args.out}")
 
 

@@ -149,15 +149,31 @@ def compute_labels(
     }
 
     t_gone: dict[tuple[str, str], pd.Timestamp] = {}
+    # **The label is final the moment corroboration is satisfied** — two
+    # consecutive absences and the posting is gone, whatever it does afterwards.
+    # `docs/design.md` §11, decided 2026-09-09.
+    #
+    # This used to also require `index > last_present`: never re-appeared, at
+    # any later point in the panel. That clause reads the *whole remaining
+    # panel*, so a training label was never final — it could flip as depth
+    # accrued — and no embargo of any width could seal one from the evaluation
+    # period, because the reach was unbounded by construction. The embargo has
+    # always been computed as horizon plus one run; dropping the clause is what
+    # makes that arithmetic true rather than merely assumed.
+    #
+    # Priced on the 2026-09-08 snapshot: 1,530 postings, 145 of which vanished
+    # and came back. 144 of those returned after a *single* absent run, which
+    # the two-run corroboration rule already absorbs and which never reached
+    # this branch. Exactly one returned after two, and none after three or more.
+    # So the cost of a final label is one posting in 1,530 — 0.065%, measured —
+    # against an unbounded reach, and it costs no panel depth at all.
     for (source, source_id), present in seen.items():
         times = run_times[source]
-        last_present = max(present)
         for index in range(len(times) - 1):
             if index in present or index + 1 in present:
                 continue
-            if index > last_present:  # never re-appeared after this gap
-                t_gone[(source, source_id)] = times[index]
-                break
+            t_gone[(source, source_id)] = times[index]
+            break
 
     def within(moment, deadline):
         """Did `moment` fall at or before the horizon? Date-wise or instant-wise."""
@@ -347,6 +363,30 @@ def assemble(
 #: assembling one panel and the ladder beneath it was reading another.
 DEFAULT_HORIZON = 7
 DEFAULT_BASIS = "calendar"
+
+
+def horizon_banner(frame: pd.DataFrame) -> str:
+    """Which panel a report's numbers came from, as a sentence for its header.
+
+    Every generated report needs this and only two of six carried it. A table of
+    PR-AUC with no horizon beside it is a number under a heading that does not
+    say what it is — and this project runs two horizons on purpose, one of which
+    `docs/design.md` §2 calls a smoke test. The same omission at a larger scale
+    is what `DEBUGGING.md` records for 2026-09-09.
+    """
+    # A header is metadata, and metadata must not be the thing that kills the
+    # artifact it describes. A frame without the columns says so rather than
+    # raising — and says so out loud, because "horizon unrecorded" on a report
+    # of PR-AUC is itself worth seeing.
+    if not {"horizon_days", "horizon_basis"} <= set(frame.columns):
+        return "a panel that does not record its horizon"
+
+    horizon = int(pd.unique(frame["horizon_days"])[0])
+    basis = str(pd.unique(frame["horizon_basis"])[0])
+    aside = (
+        "" if horizon == DEFAULT_HORIZON else " — a pipeline smoke test, not the build's horizon"
+    )
+    return f"H={horizon} ({basis} basis){aside}"
 
 
 def panel_path(

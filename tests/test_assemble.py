@@ -281,6 +281,45 @@ def test_no_feature_column_is_derived_from_the_future():
     assert forbidden.isdisjoint(out.columns)
 
 
+# --- the resurrection window (design.md §11) --------------------------------
+
+
+def test_a_label_is_final_once_corroborated_even_if_the_posting_returns():
+    """`docs/design.md` §11, decided 2026-09-09.
+
+    The rule used to be *absent at two consecutive runs **and never seen
+    again***, which reads the whole remaining panel: a training label was never
+    final, it could flip as depth accrued, and no embargo of any width could
+    seal one from the evaluation period because the reach was unbounded. The
+    embargo has always been computed as horizon plus one run, so that arithmetic
+    was false rather than merely tight.
+
+    Measured on the 2026-09-08 snapshot: 145 postings vanished and returned,
+    144 of them after a single absent run — which corroboration already absorbs
+    — exactly one after two, and none after three or more. So the cost of a
+    final label is one posting in 1,530.
+
+    Here `back` is absent at runs 2 and 3 and returns at run 4. It is gone.
+    """
+    out = _panel({"stays": [0, 1, 2, 3, 4, 5], "back": [0, 1, 4, 5]}, runs=_runs(n=6), horizon=1)
+
+    row = out[(out["source_id"] == "back") & (out["run_index"] == 1)].iloc[0]
+    assert row["label_observable"]
+    assert row["y"] == 1, "two consecutive absences is a removal, and the return is too late"
+
+
+def test_a_single_absence_still_is_not_a_removal():
+    """The companion, and the reason the change costs so little: the common case
+    by two orders of magnitude is a one-run gap, and corroboration never let that
+    count as a removal in the first place."""
+    out = _panel(
+        {"stays": [0, 1, 2, 3, 4, 5], "blips": [0, 1, 3, 4, 5]}, runs=_runs(n=6), horizon=1
+    )
+
+    row = out[(out["source_id"] == "blips") & (out["run_index"] == 1)].iloc[0]
+    assert row["y"] == 0, "one absent run is a scrape artefact, not a closure"
+
+
 # --- one horizon, named once ------------------------------------------------
 
 

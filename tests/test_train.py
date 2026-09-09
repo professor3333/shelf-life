@@ -446,3 +446,49 @@ def test_the_fold_section_says_where_the_folds_came_from():
 
     text = "\n".join(_fold_evidence(*_fold_table([0.01, -0.008, 0.004])))
     assert "training" in text and "test block is not read" in text
+
+
+# --- the serve-time regime (design.md §12) ----------------------------------
+
+
+def test_the_serve_time_regime_is_not_the_ablation():
+    """`docs/design.md` §12 named an ablation as its deciding evidence. It is the
+    wrong measurement, and this pins the difference.
+
+    A refit without the four board columns answers *what are they worth* — a
+    model trained without them redistributes their weight. The deployed object
+    is fitted **with** them and handed nulls, so the imputers fill constants and
+    the fitted weights stay pointed at a column that no longer varies. The two
+    numbers differ by about 4x on the observed panel, and only the second is
+    what `POST /predict` returns to a stranger.
+    """
+    from src.inference.contract import BOARD_CONTEXT
+    from src.models.train import serve_time_regime
+
+    split = _split(per_wave=120, positives_per_wave=12)
+    regime = serve_time_regime(split)
+
+    assert list(regime["regime"]) == ["board context supplied", "absent, imputed"]
+    assert (regime["n"] == len(split.val)).all(), "both rows must score the same block"
+    assert regime.loc[0, "delta_pr_auc"] == 0.0
+    assert not pd.isna(regime.loc[1, "delta_pr_auc"])
+
+    # It is the *same fitted model* in both rows, so the only thing that can
+    # explain a difference is the columns arriving or not.
+    assert set(BOARD_CONTEXT), "the regime is defined by the request contract"
+
+
+def test_the_serve_time_regime_is_flat_when_the_columns_carry_nothing():
+    """The control. If board context is constant in the data, withholding it at
+    serve time must cost nothing — otherwise the measurement is picking up the
+    refit's noise rather than the imputation."""
+    from src.inference.contract import BOARD_CONTEXT
+    from src.models.train import serve_time_regime
+
+    frame = make_panel(per_wave=120, positives_per_wave=12)
+    for column in BOARD_CONTEXT:
+        frame[column] = 1
+    split = temporal_split(frame, Cuts(WAVE0 + 2 * DAY, WAVE0 + 5 * DAY))
+
+    regime = serve_time_regime(split)
+    assert regime.loc[1, "delta_pr_auc"] == pytest.approx(0.0, abs=1e-9)

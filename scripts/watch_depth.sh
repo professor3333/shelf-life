@@ -136,7 +136,12 @@ if [ "${CHANGED}" -eq 1 ]; then
   echo
   echo "  labelled waves : ${WAVES}"
   echo "  folds available: ${FOLDS} (want 3)"
-  echo "  positives      : ${VAL_POS} in validation"
+  if [ "${VAL_POS}" -lt 0 ]; then
+    # -1 is the "no split exists" sentinel, and printing it reads as a count.
+    echo "  positives      : n/a — no cut to count them in yet"
+  else
+    echo "  positives      : ${VAL_POS} in validation"
+  fi
 fi
 
 if [ "${USABLE}" -eq 0 ]; then
