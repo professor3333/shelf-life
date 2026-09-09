@@ -4,6 +4,107 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-09 — The base rate at H=7 was inflated by the rows that could only be positive
+
+- **Problem:** no error. The pipeline reported a 7-day positive rate of
+  **13.58%**, against a planning estimate of 11.3% that `docs/design.md` §2 was
+  waiting to replace with a measurement. The truth is **7.76%**. The wrong number
+  was *closer to the estimate than the right one*, so it would have read as a
+  confirmation and been written into the design doc as one.
+
+- **Root cause:** a closure is knowable the moment it happens; survival is only
+  knowable once the whole window has elapsed. `compute_labels` labelled on
+  outcome alone, so for every wave within H days of the panel's newest run the
+  only observable rows were the ones that had already closed — 151 rows, **100%
+  positive by construction**, pooled into the headline. Invisible at H=1, where
+  that tail is one wave and the blind-tail rule already excludes it, and
+  structural at H=7, where it is seven waves. `docs/problem_definition.md` §10
+  specified the right rule the whole time — *"rows whose 7-day window has not
+  fully elapsed are dropped"* — and the code implemented a weaker one that only
+  refused to label them 0.
+
+- **Solution:** `src/features/assemble.py` asks settledness first, and asks it of
+  the *panel* rather than the posting: does a complete run exist at or after the
+  deadline at all? If not the row is dropped whatever its outcome looks like.
+  H=1 output is byte-identical, which is what confirms the fix is aimed at the
+  right thing. `src/data/split.py::_validate` grew the mirror of its
+  no-positives check, because an all-positive evaluation block reports precision,
+  recall and PR-AUC of 1.0 and nothing about it looks broken. Two tests in
+  `tests/test_assemble.py`, verified to fail against the old rule.
+
+- **Lesson:** **when one outcome is observable sooner than the other, the recent
+  end of a panel is not a sample of anything.** Ask of every filter that decides
+  what is measurable: *does it admit one class earlier than the other?* If so the
+  frontier is not censored data, it is selected data, and pooling it biases the
+  headline in the direction of whichever answer resolves fastest. The tell is a
+  cohort that is 100% one class — and the general defence is a check for a
+  single-class block, because the all-positive version of that failure reports a
+  perfect score instead of an error.
+
+
+## 2026-09-09 — Every module read a panel the scripts were not building
+
+- **Problem:** `scripts/rehearse.sh` took `HORIZON` from the environment,
+  assembled `job_days_h${HORIZON}_calendar.parquet`, ran the depth gate against
+  it — and then ran `train_baseline`, `train`, `experiments` and `evaluate` with
+  no `--panel` at all. Those modules default to `DEFAULT_PANEL`, which was
+  hardcoded to H=1 in two files and imported by four more. So a run at any
+  horizon but 1 produced a gate report about one panel above a ladder scored on
+  another, under one heading.
+
+- **Root cause:** two things, and the second is why the first went unnoticed.
+  `docs/design.md` §2 decided **H=7** on 2026-09-04 and named H=1 a pipeline
+  smoke test in the same sentence, but every default in the code stayed at 1 —
+  so the mismatch was invisible while everything read the smoke test together.
+  And the panel filename was spelt out as a literal in six places, which is six
+  places for the horizon to disagree; a decision recorded in a document and
+  nowhere in the code is a decision the code cannot keep.
+
+- **Solution:** `assemble.DEFAULT_HORIZON = 7` and `assemble.panel_path()` are
+  the single source; every `DEFAULT_PANEL` derives from them, and `rehearse.sh`
+  passes `--panel` to every step it runs so `HORIZON=1` reaches the ladder
+  instead of stopping at the gate. `tests/test_assemble.py` bans a literal
+  `job_days_h<digit>` anywhere in `src/` outside docstrings, and asserts every
+  default names `DEFAULT_HORIZON`.
+
+- **Lesson:** **a decision that lives only in a document is not in force.** When
+  a design note fixes a parameter, the code needs one named constant holding it
+  and a test asserting the constant is what the note says — otherwise the
+  defaults keep whatever value they had while you were still deciding, and the
+  reports carry the old answer under the new heading. Corollary: a path built by
+  string interpolation belongs in one function, because every copy is a place for
+  the parameter inside it to drift.
+
+
+## 2026-09-09 — The wait was underestimated exactly when the panel was shallowest
+
+- **Problem:** at H=7 `minimum_waves` reported the panel needed **14** labelled
+  waves for a legal split. It needs **20**. The error was optimistic, and it
+  appeared at the moment the panel was thinnest.
+
+- **Root cause:** `spacing` — how often crawls arrive — was measured as the
+  median gap between *labelled* waves. How often the scraper fires is a fact
+  about the schedule; which waves are labelled is a fact about the horizon, and
+  at a long horizon only the oldest few are. So the cadence was being estimated
+  from the smallest sample available, and on 2026-09-09 the two labelled waves
+  happened to straddle the late 14:07 crawl of 2026-09-01: median 1d10h against
+  a true cadence of 1d. An inflated spacing divides into the embargo fewer
+  times, so `burnt_per_boundary` came out 6 instead of 9 and the requirement
+  shrank by six waves.
+
+- **Solution:** `src/data/split.py::minimum_waves` takes the wave *count* from
+  the labelled subset, as before, and the *spacing* from every wave in the
+  frame. `tests/test_split.py` builds a panel whose labelled subset is skewed by
+  a late crawl and asserts the schedule wins.
+
+- **Lesson:** **estimate a parameter from the population that generates it, not
+  from the subset you happen to be looking at.** The filtered subset is smaller
+  and it is filtered *for a reason correlated with time*, so it is the worst
+  available sample for anything about timing. Sharper form: whenever a statistic
+  is computed on `frame[mask]`, ask whether the quantity is a property of the
+  mask or of the thing being measured.
+
+
 ## 2026-09-09 — Freeze would have spent the test set on a model nothing chose
 
 - **Problem:** no crash. On the morning the panel first became splittable,

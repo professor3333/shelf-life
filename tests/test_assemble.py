@@ -122,6 +122,68 @@ def test_row_whose_horizon_has_not_elapsed_is_dropped_not_zeroed():
     assert (out["label_observable"] | out["y"].isna()).all()
 
 
+def test_a_closure_inside_an_unelapsed_window_is_dropped_too():
+    """The asymmetry that makes a base rate lie.
+
+    A closure is knowable the moment it happens; survival is only knowable once
+    the whole window has elapsed. Label on outcome alone and the newest cohorts
+    contain nothing but closures — not because closures cluster there, but
+    because the survivors beside them are still censored.
+
+    Eight runs, a three-run window. `gone` is seen through run 5 and absent at
+    runs 6 and 7, so its removal is corroborated and `t_gone` is run 6. At run 5
+    its outcome is therefore already known — but run 5's window ends at run 8,
+    which does not exist, so no survivor at run 5 can be labelled. Keep the
+    closure and run 5's labelled rows are 100% positive.
+    """
+    runs = _runs(n=8)
+    out = _panel({"stays": list(range(8)), "gone": [0, 1, 2, 3, 4, 5]}, runs=runs, horizon=3)
+
+    wave5 = out[out["run_index"] == 5]
+    assert set(wave5["source_id"]) == {"stays", "gone"}, "the fixture must put both at run 5"
+    assert not wave5["label_observable"].any(), (
+        "run 5's window has not elapsed, so it must contribute nothing — "
+        "including the closure whose outcome is already known"
+    )
+
+    # Every cohort that does survive could have shown either answer.
+    labelled = out[out["label_observable"]]
+    assert not labelled.empty
+    for wave, block in labelled.groupby("run_index"):
+        assert not (block["y"] == 1).all(), f"wave {wave} is all closures"
+
+
+def test_the_base_rate_does_not_climb_as_partial_waves_arrive():
+    """The property the fix exists for, stated as what a reader cares about.
+
+    A crawl landing *inside* the horizon of the newest rows settles nothing. It
+    must not add labelled rows at all — because the only rows it could add are
+    the closures, and each one lifts the reported rate. Measured at H=7 on the
+    real 2026-09-08 panel: 7.76% against 13.58%, the inflated figure sitting
+    past the 11.3% planning estimate it was meant to replace, which is how a
+    bias gets mistaken for a confirmation.
+    """
+    presence = {
+        "stays": list(range(7)),
+        "gone": [0, 1, 2, 3, 4],  # absent at 5 and 6, so t_gone is run 5
+    }
+    out = _panel(presence, runs=_runs(n=7), horizon=3)
+
+    labelled = out[out["label_observable"]]
+    # Runs 0-3 have a run at their deadline (3, 4, 5, 6); run 4's is run 7, absent.
+    assert set(labelled["run_index"]) == {0, 1, 2, 3}, (
+        "only cohorts whose deadline run exists may be labelled"
+    )
+    assert int((labelled["y"] == 1).sum()) > 0, "the fixture must contain a real closure"
+    assert int((labelled["y"] == 0).sum()) > 0, "and a real survivor"
+
+    # Run 4 holds `gone`'s last row and its outcome is known, which is exactly
+    # the row the outcome-only rule would have kept.
+    wave4 = out[out["run_index"] == 4]
+    assert "gone" in set(wave4["source_id"])
+    assert not wave4["label_observable"].any()
+
+
 def test_the_newest_labelled_wave_can_never_carry_a_positive():
     """The structural fact `src.data.split.minimum_waves` is built on.
 
@@ -217,3 +279,74 @@ def test_no_feature_column_is_derived_from_the_future():
     out = _board_context(_panel({"a": [0, 1, 2]}).assign(requisition_id=None))
     forbidden = {"last_seen", "content_hash", "parser_version", "hash_version", "rows_parsed"}
     assert forbidden.isdisjoint(out.columns)
+
+
+# --- one horizon, named once ------------------------------------------------
+
+
+def test_no_module_spells_out_a_panel_filename():
+    """Six copies of `job_days_h1_calendar.parquet` is six places for the
+    horizon to disagree, and on 2026-09-09 it did: `scripts/rehearse.sh`
+    assembled one panel while every module beneath it read another, so a gate
+    report about H=7 sat above a ladder scored on H=1.
+
+    `docs/design.md` §2 decided H=7 and calls H=1 a smoke test in the same
+    sentence, so a hardcoded `h1` path is a module reporting the smoke test
+    under the build's name.
+
+    What is banned is a *literal* horizon in a path — `job_days_h1_...`. The
+    template inside `panel_path` itself is the one place the shape is allowed to
+    be written down, and prose may name a file without constructing one, so
+    docstrings are read as documentation rather than as code.
+    """
+    import ast
+    import re
+    from pathlib import Path
+
+    literal = re.compile(r"job_days_h\d")
+    offenders = []
+    for path in sorted(Path("src").rglob("*.py")):
+        tree = ast.parse(path.read_text())
+        docstrings = {
+            ast.get_docstring(node, clean=False)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
+        }
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+                continue
+            if node.value in docstrings or not literal.search(node.value):
+                continue
+            offenders.append(f"{path}:{node.lineno}: {node.value!r}")
+    assert not offenders, "derive the path from `assemble.panel_path` instead:\n" + "\n".join(
+        offenders
+    )
+
+
+def test_every_default_panel_names_the_decided_horizon():
+    from src.data.label_audit import DEFAULT_PANEL as audit_panel
+    from src.features.assemble import DEFAULT_HORIZON, panel_path
+    from src.models.freeze import DEFAULT_PANEL as freeze_panel
+    from src.models.train_baseline import DEFAULT_PANEL as ladder_panel
+
+    assert DEFAULT_HORIZON == 7, "docs/design.md §2 decided H=7 on 2026-09-04"
+    assert {audit_panel, freeze_panel, ladder_panel} == {panel_path()}
+
+
+def test_the_scripts_pass_the_panel_to_every_step_they_run():
+    """`HORIZON=1 ./scripts/rehearse.sh` has to reach the ladder, not just the
+    gate. Without `--panel` each module falls back to its own default, which
+    happens to agree at H=7 and silently disagrees everywhere else — the failure
+    mode being a report whose header and body describe different data."""
+    from pathlib import Path
+
+    script = Path("scripts/rehearse.sh").read_text()
+    for module in (
+        "src.data.label_audit",
+        "src.models.train_baseline",
+        "src.models.train",
+        "src.models.experiments",
+        "src.models.evaluate",
+    ):
+        line = next(one for one in script.splitlines() if f"-m {module}" in one)
+        assert '--panel "${PANEL}"' in line, f"{module} is run without --panel"

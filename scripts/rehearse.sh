@@ -28,7 +28,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PYTHON="${PYTHON:-.venv/bin/python}"
-HORIZON="${HORIZON:-1}"
+# H=7 is the task (`docs/design.md` §2, decided 2026-09-04); H=1 is a pipeline
+# smoke test and that document says so in as many words. Defaulting to 1 here
+# meant every number this script produced described the smoke test, under
+# headings that named the build. `HORIZON=1 ./scripts/...` still asks for it.
+HORIZON="${HORIZON:-7}"
 BASIS="${BASIS:-calendar}"
 PANEL="data/processed/features/job_days_h${HORIZON}_${BASIS}.parquet"
 CHECK_ONLY=0
@@ -64,7 +68,7 @@ echo "== label validity audit"
 # it has an answer on a panel far too shallow to model. Whether "disappeared"
 # means what the label needs it to mean is worth knowing before any model is
 # fitted to it, not after.
-"${PYTHON}" -m src.data.label_audit
+"${PYTHON}" -m src.data.label_audit --panel "${PANEL}"
 
 echo
 echo "== depth gate"
@@ -109,10 +113,14 @@ fi
 
 echo
 echo "== the ladder, on validation only"
-"${PYTHON}" -m src.models.train_baseline
-"${PYTHON}" -m src.models.train
-"${PYTHON}" -m src.models.experiments
-"${PYTHON}" -m src.models.evaluate
+# `--panel` on every one of them, not just the gate. The modules default to the
+# H=7 panel, so leaving it off worked by coincidence at H=7 and silently read a
+# different horizon's parquet at any other — the gate above would report one
+# panel and the ladder below would score another.
+"${PYTHON}" -m src.models.train_baseline --panel "${PANEL}"
+"${PYTHON}" -m src.models.train --panel "${PANEL}"
+"${PYTHON}" -m src.models.experiments --panel "${PANEL}"
+"${PYTHON}" -m src.models.evaluate --panel "${PANEL}"
 
 echo
 echo "ran on validation only. The test block is untouched: freeze is a separate,"

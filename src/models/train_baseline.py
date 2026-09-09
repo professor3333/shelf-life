@@ -38,6 +38,7 @@ from src.data.split import (
     best_cuts,
     temporal_split,
 )
+from src.features.assemble import panel_path
 from src.features.preprocessing import build_pipeline, features_and_target, fit_on_training_fold
 from src.models.baselines import (
     BoardHazardBaseline,
@@ -48,7 +49,7 @@ from src.models.baselines import (
 )
 from src.models.metrics import DEFAULT_ALERT_BUDGET, evaluate, evaluate_by, reliability_curve
 
-DEFAULT_PANEL = Path("data/processed/features/job_days_h1_calendar.parquet")
+DEFAULT_PANEL = panel_path()
 DEFAULT_REPORT = Path("reports/baseline_results.md")
 
 #: Fixed everywhere a model can be seeded. Two runs of this file on one snapshot

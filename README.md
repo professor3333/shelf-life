@@ -14,14 +14,19 @@ the UI.
 
 > **Status, stated plainly.** The full system is built: ingestion, labelling,
 > the leakage audit, the temporal split, the model ladder, experiment tracking,
-> the frozen-artifact packaging, the API, the container and the UI. As of
-> **2026-09-09** the panel is deep enough for an honest three-way split, and the
-> ladder has run on it — on validation only, where nothing yet separates from the
-> base rate. **No model has been frozen**, because a legal split is not one a
-> model can be *chosen* on: the training window yields no rolling-origin fold, so
-> no comparison carries an error bar. `reports/test_results.md` records that
-> refusal rather than a number, and `scripts/watch_depth.sh` reports the
-> shortfall daily. [Why, and when it clears](#why-there-is-no-test-number-yet).
+> the frozen-artifact packaging, the API, the container and the UI.
+>
+> **The measured 7-day base rate is 7.76%** (2026-09-09, 174 closures in 2,242
+> settled job-days) — replacing the 11.3% that a constant-hazard extrapolation
+> had planned for. **No model has been fitted at H = 7 yet**: the horizon needs
+> 20 labelled crawl waves for an honest three-way split and there are 2, so
+> `reports/test_results.md` records the refusal rather than a number.
+> `scripts/watch_depth.sh` reports the shortfall daily.
+> [Why, and when it clears](#why-there-is-no-test-number-yet).
+>
+> The ladder *has* run end to end on the real panel at H = 1, the pipeline smoke
+> test, where nothing separates from the base rate. Those numbers describe the
+> smoke test and are labelled as such wherever they appear.
 
 ---
 
@@ -477,9 +482,16 @@ budget — a list of 500 alerts nobody reads has perfect recall and zero value.
 
 ## Why there is no test number yet
 
-An honest three-way split needs eight labelled crawl waves. **The panel reached
-eight on 2026-09-09**, so there are now real validation numbers — see below —
-and still no test number, because the two gates are not the same day.
+**At H = 7, the horizon this build is about**, an honest three-way split needs
+**20** labelled crawl waves and the panel has **2**. The first cohort settled on
+2026-09-09 and gave the base rate above; depth for a split arrives 2026-09-19,
+and depth to *choose* a model on 2026-09-30.
+
+At H = 1 — the pipeline smoke test, and `docs/design.md` §2 calls it that — the
+same arithmetic needs eight waves, the panel reached eight on 2026-09-09, and
+the ladder ran. Everything in this section below describes that run. It is worth
+reading because it is the machinery working on real data for the first time, and
+worth not mistaking for a result about job postings at the horizon that matters.
 
 ```
 minimum waves = 1 + 2 × (floor(embargo ÷ spacing) + 1) + corroboration runs
@@ -708,10 +720,16 @@ that mixed them with real ones would be worse than no history.
 
 ### The two gates, and they are not the same day
 
-| | labelled waves | what it unlocks |
-|---|---|---|
-| **A legal split** | **8** | the rehearsal runs: real numbers, **no error bars** |
-| **Three rolling-origin folds** | **13** | a comparison that can be believed, and §12 can close |
+At **H = 7**, the horizon this build is about:
+
+| | labelled waves | date | what it unlocks |
+|---|---|---|---|
+| **A legal split** | **20** | 2026-09-19 | the rehearsal runs: real numbers, **no error bars** |
+| **Three rolling-origin folds** | **31** | 2026-09-30 | a comparison that can be believed, and §12 can close |
+
+Nine waves burn at each boundary rather than three, because the embargo is the
+horizon plus the widest observed run gap — 8d10h against daily crawls. The H=1
+figures are 8 and 13 on the same arithmetic, and H=1 is a smoke test.
 
 Eight rather than seven: a closure needs corroboration at two consecutive later
 runs, so the newest labelled wave structurally cannot hold a positive and a

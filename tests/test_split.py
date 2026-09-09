@@ -250,14 +250,40 @@ def test_require_positives_can_be_switched_off_for_plumbing_tests():
 
 
 def test_unlabelled_rows_are_dropped_and_counted_not_treated_as_negative():
+    # A fourth posting, so that dropping the two unlabelled rows still leaves a
+    # negative in the held-out block. With only a, b and c the block reduces to
+    # a single positive row, which `_validate` now refuses — correctly, since
+    # PR-AUC on one class is 1.0 by construction. The fixture, not the rule, was
+    # what needed changing: this test is about counting dropped rows.
     frame = _panel(
-        _wide(),
+        _wide(ids=("a", "b", "c", "d")),
         positives={("board", "a", 5), ("board", "a", 8)},
         unlabelled={("board", "c", 8), ("board", "b", 8)},
     )
     result = temporal_split(frame, Cuts(WAVE0 + 2 * DAY, WAVE0 + 5 * DAY))
     assert result.n_unlabelled == 2
     assert result.frame["y"].notna().all()
+
+
+def test_an_all_positive_evaluation_block_is_refused():
+    """The mirror of the no-positives check, and the one that congratulates you.
+
+    A block with no positives announces itself: precision, recall and PR-AUC are
+    undefined and something downstream complains. A block where *every* row is a
+    positive is undefined in exactly the same way and reports 1.0 for all three —
+    nothing looks broken, and the number is the best one you will ever see.
+
+    Reachable at a long horizon, because a closure is knowable at once while
+    survival needs the whole window to elapse. At H=7 on the 2026-09-08 snapshot
+    that was 151 rows, every one of them a closure. `compute_labels` now drops
+    those cohorts, so this should never fire — which is the point of checking it.
+    """
+    frame = _panel(
+        _wide(),
+        positives={("board", "a", 5), ("board", "a", 8), ("board", "b", 8), ("board", "c", 8)},
+    )
+    with pytest.raises(SplitTooShallow, match="every one"):
+        temporal_split(frame, Cuts(WAVE0 + 2 * DAY, WAVE0 + 5 * DAY))
 
 
 # --- the seen/unseen breakdown (design.md §8) -----------------------------
@@ -384,6 +410,40 @@ def test_minimum_waves_separates_legal_from_evaluable():
     assert depth["needed_for_folds"] == 13
     assert depth["folds_shortfall"] == 5
     assert minimum_waves(_structural(13))["folds_available"] == 3
+
+
+def test_wave_spacing_is_measured_on_every_wave_not_the_labelled_ones():
+    """Cadence is a fact about the scraper; labelling is a fact about the horizon.
+
+    At a long horizon only the oldest few waves are labelled, so measuring
+    spacing on that subset measures it on the smallest sample there is — and the
+    error runs the wrong way. Measured at H=7 on 2026-09-09: the two labelled
+    waves straddled a late 14:07 crawl and gave a median of 1d10h against a true
+    cadence of 1d, so the embargo divided into six waves per boundary instead of
+    nine and the panel appeared to need 14 waves when it needs 20. An
+    underestimate of the wait, produced exactly when the panel is shallowest.
+
+    Here: ten daily waves, of which only the oldest three are labelled, and one
+    of those three runs ten hours late — the shape of the real 2026-09-01 crawl.
+    The labelled subset therefore reports a day and a half; the schedule is a
+    day, and the schedule is the answer.
+    """
+    ids = ("a", "b")
+    presence = {"board": [set(ids) for _ in range(10)]}
+    frame = _panel(presence, positives={("board", "a", 1)}).copy()
+
+    waves = sorted(pd.unique(frame["t"]))
+    late = waves[2]
+    frame.loc[frame["t"] == late, "t"] = late + pd.Timedelta(hours=10)
+    frame["label_observable"] = frame["t"] <= late + pd.Timedelta(hours=10)
+
+    labelled_gaps = crawl_waves(frame[frame["label_observable"]]).diff().dropna().median()
+    assert labelled_gaps > pd.Timedelta(days=1), "the fixture must skew the labelled subset"
+
+    depth = minimum_waves(frame)
+    assert depth["spacing"] == pytest.approx(DAY, abs=pd.Timedelta(hours=1)), (
+        f"spacing {depth['spacing']} was taken from the labelled subset, not the schedule"
+    )
 
 
 def test_projected_clear_dates_the_two_gates_separately():

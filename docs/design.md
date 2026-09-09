@@ -61,8 +61,63 @@ that duration dependence carries most of the signal — so the two cannot both b
 exactly right. 11.3% is a planning estimate, to be replaced with the measured
 7-day rate once the first cohort settles on or about 2026-09-08.
 
+### MEASURED 2026-09-09 — the 7-day rate is **7.76%**, not 11.3%
+
+First settled cohorts, on the 2026-09-08 snapshot: **174 positives in 2,242
+labelable job-days**. The planning estimate overshot by about 45% relative, and
+in the direction that makes the problem harder — rarer positives, less to learn
+from per wave.
+
+The extrapolation failed where it was warned it might. `1 - (1 - p)^7` treats
+each day as an independent draw at the *transition* hazard, but the 7-day label
+requires the posting to be gone **and never to return**, which is a strictly
+smaller event than seven chances to disappear once. Reading back: the measured
+7-day rate implies a daily equivalent of `1 - (1 - 0.0776)^(1/7)` = **1.15%**
+against the 1.69% day-over-day transition rate.
+
+**A number this project nearly got wrong in a way that would have looked right.**
+Labelling on outcome alone reports **13.58%** on the same snapshot — much closer
+to 11.3%, and wrong. A closure is knowable the moment it happens while survival
+needs the whole window to elapse, so every cohort inside the horizon of the
+panel's edge contains only closures: 151 rows, 100% positive, pooled into the
+headline. The bias sat between the estimate and the truth and would have read as
+a confirmation of the estimate. `compute_labels` now requires a settled cohort;
+`docs/problem_definition.md` §10 always specified this and the implementation did
+not.
+
+### The hazard curve, measured on settled cohorts
+
+| age at prediction | rows | closures | 7-day rate |
+|---|---|---|---|
+| 0–7 days | 225 | 19 | 8.4% |
+| 7–14 | 276 | 14 | 5.1% |
+| 14–30 | 368 | 25 | 6.8% |
+| 30–60 | 442 | 41 | 9.3% |
+| 60–120 | 387 | 42 | 10.9% |
+| 120+ | 513 | 29 | 5.7% |
+
+**Flat and non-monotone**, over a 2× range with 14–42 events per bucket. This is
+the second of the two mind-changers below, and it fires: §7 of the problem
+definition claims duration dependence carries most of the signal, and on this
+data it carries very little. It is consistent with what the H=1 ladder already
+found — `age_ceiling`, the best any age-only rule could do, scored 0.0229
+against a 0.0190 base rate.
+
 **Would change my mind:** a measured 7-day rate far from 11%, or a hazard curve
 steep enough in the first week that a 7-day window averages away the signal.
+
+**Verdict on H, 2026-09-09: unchanged at 7 days.** The rate moved and the hazard
+curve is flat, so the first trigger fired and the second did not — the worry
+there was a *steep* early curve being averaged away, and a flat one is not
+averaged away by a wider window. What the flat curve costs is a feature, not a
+horizon: it says `age_days` is weak, which is a finding to report rather than a
+reason to re-cut the target. 7.76% is still a workable base rate, and it remains
+the horizon that matches the decision the prediction feeds.
+
+**What it costs is time**, and that is now the binding constraint. At H=7 the
+embargo is 8d10h against daily waves, so each boundary discards **9** waves:
+**20 labelled waves for a legal split, 31 for three folds.** On 2026-09-09 there
+are 2. Projected: a legal split on **2026-09-19**, folds on **2026-09-30**.
 
 ---
 
