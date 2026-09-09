@@ -22,6 +22,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import os
+import plistlib
 import re
 from fnmatch import fnmatch
 from pathlib import Path
@@ -54,6 +55,32 @@ def render() -> dict:
 
 
 # --- the ones about money ----------------------------------------------------
+
+
+def test_the_depth_watch_agent_runs_a_script_that_exists() -> None:
+    """The scheduled watch is the only thing measuring how much longer the panel
+    has to accrue, and a launchd agent whose program is missing fails silently —
+    it writes to a log nobody opens and the wait simply stops being measured,
+    which looks identical to a wait that is not over yet.
+
+    So the plist is pinned to the script by name here, and to `--quiet`, which is
+    what keeps a daily job from printing a paragraph on the days nothing changed.
+    """
+    plist = Path("scripts/com.shelflife.depthwatch.plist")
+    text = plist.read_text()
+    parsed = plistlib.loads(text.replace("__REPO__", "/repo").encode())
+
+    program = parsed["ProgramArguments"]
+    script = Path(program[1].replace("/repo/", ""))
+    assert script.exists(), f"the agent runs {script}, which is not in the repository"
+    assert os.access(script, os.X_OK), f"{script} is not executable"
+    assert "--quiet" in program
+
+    # A watch that runs before the day's crawl measures yesterday and reports no
+    # progress, which reads as a stopped scraper. The scraper's agent fires at
+    # 09:30 local; this must come after it.
+    assert parsed["StartCalendarInterval"]["Hour"] >= 10
+    assert parsed["RunAtLoad"] is False
 
 
 def test_the_service_plan_is_free(render: dict) -> None:

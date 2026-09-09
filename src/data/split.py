@@ -511,6 +511,42 @@ def minimum_waves(
     }
 
 
+def projected_clear(
+    frame: pd.DataFrame, target_folds: int = DEFAULT_TARGET_FOLDS
+) -> dict[str, object]:
+    """The dates the two gates clear, if crawls keep arriving as they have.
+
+    `minimum_waves` answers *how many more waves*; a person waiting wants *which
+    day*, and converting one to the other by hand every morning is how the wait
+    stops being measured. Both gates get a date because they are different days:
+    the first legal split and the first split a model can be *selected* on.
+
+    **A projection, not a promise.** It assumes the observed median spacing holds
+    and that every future wave is labelled, so a missed crawl or a widened
+    embargo moves it later — never earlier. It is therefore the optimistic
+    bound, which is the right direction for a date you are planning a freeze
+    around: the answer to "is it ready?" stays `minimum_waves` on the day, and
+    this only says when to next ask.
+
+    `None` means the gate is already open.
+    """
+    depth = minimum_waves(frame, target_folds=target_folds)
+    newest = crawl_waves(frame[frame["label_observable"]]).max()
+    spacing = depth["spacing"]
+
+    def date_for(shortfall: int) -> pd.Timestamp | None:
+        return None if shortfall == 0 else newest + shortfall * spacing
+
+    return {
+        "newest_labelled_wave": newest,
+        "spacing": spacing,
+        "split_clears": date_for(int(depth["shortfall"])),
+        "folds_clear": date_for(int(depth["folds_shortfall"])),
+        "folds_available": depth["folds_available"],
+        "target_folds": depth["target_folds"],
+    }
+
+
 def depth_report(frame: pd.DataFrame, target_folds: int = DEFAULT_TARGET_FOLDS) -> str:
     """`minimum_waves` as a sentence, for a report that has to explain a wait.
 

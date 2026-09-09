@@ -26,6 +26,7 @@ from src.data.split import (
     feasible_cuts,
     max_run_gap,
     minimum_waves,
+    projected_clear,
     resurrection_risk,
     rolling_origin_folds,
     split_report,
@@ -383,6 +384,43 @@ def test_minimum_waves_separates_legal_from_evaluable():
     assert depth["needed_for_folds"] == 13
     assert depth["folds_shortfall"] == 5
     assert minimum_waves(_structural(13))["folds_available"] == 3
+
+
+def test_projected_clear_dates_the_two_gates_separately():
+    """`minimum_waves` says how many waves; a person waiting wants which day.
+
+    Both gates get a date because they fall on different days, and an open gate
+    gets `None` rather than today's date — "already open" and "opens now" read
+    the same in a log and mean different things.
+    """
+    eight = projected_clear(_structural(8))
+    assert eight["split_clears"] is None, "the legal split is already possible at 8"
+    assert eight["folds_clear"] is not None
+
+    spacing = eight["spacing"]
+    newest = eight["newest_labelled_wave"]
+    # 13 needed, 8 present: five more waves at the observed spacing.
+    assert eight["folds_clear"] == newest + 5 * spacing
+
+    both_open = projected_clear(_structural(13))
+    assert both_open["split_clears"] is None
+    assert both_open["folds_clear"] is None
+    assert both_open["folds_available"] == 3
+
+
+def test_projected_clear_never_dates_a_gate_earlier_than_the_shortfall_allows():
+    """It is the optimistic bound — every future wave labelled, spacing held —
+    so it may be late but must never be early, which is the safe direction for a
+    date a freeze is planned around."""
+    for waves in range(2, 14):
+        panel = _structural(waves)
+        depth = minimum_waves(panel)
+        ahead = projected_clear(panel)
+        if depth["folds_shortfall"] == 0:
+            assert ahead["folds_clear"] is None
+        else:
+            gap = ahead["folds_clear"] - ahead["newest_labelled_wave"]
+            assert gap >= depth["folds_shortfall"] * ahead["spacing"]
 
 
 def test_depth_report_states_both_waits():

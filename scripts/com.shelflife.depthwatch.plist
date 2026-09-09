@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Runs scripts/watch_depth.sh once a day, after the scraper.
+
+  Install (replace __REPO__ with this repository's absolute path):
+
+      sed "s|__REPO__|$PWD|g" scripts/com.shelflife.depthwatch.plist \
+        > ~/Library/LaunchAgents/com.shelflife.depthwatch.plist
+      launchctl load ~/Library/LaunchAgents/com.shelflife.depthwatch.plist
+
+  Check, run now, remove:
+
+      launchctl list | grep shelflife
+      launchctl start com.shelflife.depthwatch
+      launchctl unload ~/Library/LaunchAgents/com.shelflife.depthwatch.plist
+
+  The hour matters. The scraper's own agent fires at 09:30 local and its waves
+  land at 03:45 UTC; this runs at 10:15 local, comfortably after, because a
+  watch that runs before the day's crawl measures yesterday and reports no
+  progress — which looks exactly like a scraper that has stopped. That confusion
+  already cost a day of history once (DEBUGGING.md, 2026-09-07).
+
+  RunAtLoad is false on purpose: installing the agent should not spend fifteen
+  minutes assembling a panel while you are still reading this comment.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.shelflife.depthwatch</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__REPO__/scripts/watch_depth.sh</string>
+        <string>--quiet</string>
+    </array>
+    <key>WorkingDirectory</key><string>__REPO__</string>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key><integer>10</integer>
+        <key>Minute</key><integer>15</integer>
+    </dict>
+    <key>StandardOutPath</key><string>__REPO__/data/depth_watch.out.log</string>
+    <key>StandardErrorPath</key><string>__REPO__/data/depth_watch.err.log</string>
+    <key>RunAtLoad</key><false/>
+    <key>ProcessType</key><string>Background</string>
+</dict>
+</plist>

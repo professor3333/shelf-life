@@ -174,6 +174,29 @@ def test_the_test_block_is_read_only_where_it_should_be():
     assert readers == sorted(TEST_BLOCK_READERS), f"the test block is read in {readers}"
 
 
+def test_the_shell_scripts_do_not_read_the_test_block_either():
+    """The AST guard above walks `src/` only, so a script that reaches into the
+    held-out block satisfies it by living somewhere else.
+
+    That is not hypothetical: `scripts/watch_depth.sh` is a scheduled job whose
+    whole purpose is deciding *when the test set is worth spending*, and the
+    first draft counted its positives to answer that. A daily peek is still a
+    peek, and one the guard could not see is worse than one it could.
+
+    Text rather than AST because the Python here lives inside heredocs, which no
+    parser will reach. Crude, and it only has to catch the obvious reach — the
+    subtle ones are not what a scheduled job drifts into.
+    """
+    offenders = []
+    for path in sorted(Path("scripts").glob("*.sh")):
+        text = path.read_text()
+        for line in text.splitlines():
+            code = line.split("#", 1)[0]
+            if ".test" in code or '"test"' in code or "'test'" in code:
+                offenders.append(f"{path}: {line.strip()}")
+    assert not offenders, "a script reads the held-out block:\n" + "\n".join(offenders)
+
+
 def test_the_discipline_check_would_notice_a_violation(tmp_path):
     """A guard that cannot fail is not a guard."""
     offender = tmp_path / "sneaky.py"
