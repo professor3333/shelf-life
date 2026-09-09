@@ -27,6 +27,14 @@ __pycache__/
 /build/
 /dist/
 
+# --- Lockfiles for tools this project does not use ---
+# The dependency contract is `pyproject.toml` (extras) plus the pinned
+# `requirements.txt` the image installs from, and CI validates both by using
+# them. A `uv.lock` is validated by nothing here, so it would drift from the
+# thing that is actually installed and quietly claim `uv sync` is a supported
+# way to set this up. Left on disk, kept out of the contract.
+uv.lock
+
 # --- Environments ---
 .venv/
 venv/
