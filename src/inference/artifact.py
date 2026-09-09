@@ -69,6 +69,14 @@ class Metadata:
     metrics: dict[str, float]
     provenance: dict[str, str]
     dataset: str
+    #: Rolling-origin folds available in the training window when this model was
+    #: frozen. Zero means no comparison had an error bar, so nothing selected
+    #: this model over any other — `freeze --accept-no-folds` was used. Carried
+    #: on the artifact rather than only in a report because the report stays in
+    #: the repository and the artifact is what gets served: a probability whose
+    #: model was picked by nothing should be able to say so at the endpoint.
+    #: `-1` marks an artifact frozen before this was recorded.
+    selection_folds: int = -1
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
     versions: dict[str, str] = field(
         default_factory=lambda: {

@@ -13,6 +13,8 @@ point at it and nothing else in either file changes.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from src.data.split import temporal_split
@@ -75,3 +77,56 @@ def synthetic_artifact(tmp_path_factory, frozen, panel):
     )
     path = tmp_path_factory.mktemp("artifact") / "shelf_life.joblib"
     return artifact_module.save(frozen.pipeline, metadata, path)
+
+
+#: Repository directories a test must never write into. `reports/` and
+#: `models/` are the committed record of real experiments; `data/processed/`
+#: holds the pinned panels every number is computed from.
+GUARDED_TREES = ("reports", "models", "data/processed")
+
+
+def _tree_state() -> dict[str, tuple[int, int]]:
+    state = {}
+    for tree in GUARDED_TREES:
+        root = Path(tree)
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if path.is_file():
+                stat = path.stat()
+                state[str(path)] = (stat.st_size, stat.st_mtime_ns)
+    return state
+
+
+@pytest.fixture(autouse=True)
+def _the_repository_is_not_a_scratch_directory():
+    """Fail any test that writes into the committed record.
+
+    This is detection rather than redirection on purpose. Redirection has to be
+    remembered per writer, and the writers here cannot all be redirected the
+    obvious way: `ledger.append(entry, path=DEFAULT_LEDGER)` binds its default at
+    import, so monkeypatching `ledger.DEFAULT_LEDGER` changes nothing and *looks
+    like* it worked. A test written that way passes, and quietly appends its
+    fixture runs to the real ledger — labelled as the real panel, because the
+    dataset tag comes from a different argument.
+
+    That is not hypothetical: `tests/test_freeze.py` did exactly this on
+    2026-09-09 and put two synthetic rows into `reports/depth_ledger.md` under
+    the heading "Real panel". `DEBUGGING.md` (2026-09-07) had already drawn the
+    rule for `data/`; this extends it to everything committed and, unlike a
+    convention, cannot be forgotten by the next writer.
+    """
+    before = _tree_state()
+    yield
+    after = _tree_state()
+
+    changed = sorted(
+        {path for path in before.keys() | after.keys() if before.get(path) != after.get(path)}
+    )
+    assert not changed, (
+        "a test wrote into the repository's committed record:\n  "
+        + "\n  ".join(changed)
+        + "\n\nWrite to tmp_path instead. Note that monkeypatching a module "
+        "constant used as a function's default argument does not redirect it — "
+        "patch the function, or pass the path explicitly."
+    )
