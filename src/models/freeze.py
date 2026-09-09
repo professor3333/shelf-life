@@ -36,6 +36,16 @@ Usage::
 
     python -m src.models.freeze --run 05-xgboost_engineered
     python -m src.models.freeze --run 05-xgboost_engineered --synthetic
+
+Exit codes: ``0`` the artifact was written · ``3`` declined, and
+``reports/test_results.md`` says which of the two waits it declined on.
+
+**Two refusals, not one.** ``SplitTooShallow`` asks whether a three-way cut is
+legal; ``NoFoldEvidence`` asks whether anything could have *chosen* the model
+being tested. The second arrives later than the first — five days later on the
+real panel — and for most of that gap this step was the only one in the pipeline
+that would run, which put the single unrepeatable action behind the weakest
+check. Both are decisions, so both exit 3 rather than raising.
 """
 
 from __future__ import annotations
@@ -218,6 +228,7 @@ def build_metadata(
     panel_path: Path,
     dataset: str,
     budget_per_day: int,
+    selection_folds: int = -1,
 ) -> artifact_module.Metadata:
     spec = spec_by_name(run_name)
     horizons = pd.unique(panel["horizon_days"])
@@ -238,6 +249,7 @@ def build_metadata(
         },
         provenance=provenance.collect(panel_path, len(panel), dataset).as_tags(),
         dataset=dataset,
+        selection_folds=selection_folds,
     )
 
 
@@ -258,6 +270,42 @@ The packaging around it is built and tested — `src/inference/artifact.py`,
 `src/inference/contract.py` and `src/inference/predict.py`, exercised end to end
 on the synthetic panel — so what waits here is panel depth, not code.
 """
+
+
+NO_FOLDS = """## Nothing below has run
+
+A legal three-way split exists on this snapshot, but not an *evaluable* one, and
+freeze refuses on the difference.
+
+```
+{refusal}
+```
+
+**How much longer.** {depth}
+
+**Why legality is not enough.** The test block is opened once and spent. What it
+buys is a check on a model that validation already chose — so if nothing chose
+one, there is nothing for it to check. Rolling-origin folds are cut from the
+training window, and at this depth that window is a single wave: every model
+comparison is one number with no spread, and picking the leader from a column of
+numbers that have no error bars is picking noise. Spending the test set to
+measure that pick would produce a README figure with a decimal point and no
+meaning behind it.
+
+`scripts/watch_depth.sh` reports the shortfall daily and runs the rehearsal on
+the day it clears. Pass `--accept-no-folds` to override this, which spends the
+held-out block on a model nothing selected; the report and the artifact both
+record that it was used.
+"""
+
+
+class NoFoldEvidence(RuntimeError):
+    """The split is legal, but no fold could be cut to choose a model on.
+
+    Separate from `SplitTooShallow` because the two are different waits with
+    different remedies, and collapsing them is how "the panel is too shallow"
+    stops being read once it is half true.
+    """
 
 
 def write_report(
@@ -406,6 +454,12 @@ def main() -> None:
     parser.add_argument("--budget", type=int, default=DEFAULT_ALERT_BUDGET)
     parser.add_argument("--fit", choices=sorted(FIT_BLOCKS), default="train")
     parser.add_argument(
+        "--accept-no-folds",
+        action="store_true",
+        help="freeze even though no rolling-origin fold exists to have chosen the "
+        "model on. Spends the held-out block, once, on a pick nothing selected",
+    )
+    parser.add_argument(
         "--synthetic",
         action="store_true",
         help="freeze against tests/panels.py instead of the real panel, for when "
@@ -431,8 +485,24 @@ def main() -> None:
     frozen = metadata = blocker = None
     try:
         split = temporal_split(panel, default_cuts(panel))
+
+        # Before `freeze`, which opens the test block. `SplitTooShallow` covers
+        # legality only, and legality arrives days before evaluability — on the
+        # real panel, five. Between those two dates every gate upstream of here
+        # declines and this one used to wave the run through, which put the
+        # single irreversible step behind the weakest check in the pipeline.
+        n_folds = len(wave_forward_folds(split.train, split.embargo))
+        if n_folds == 0 and not args.accept_no_folds:
+            raise NoFoldEvidence(
+                f"the training window yields {n_folds} rolling-origin fold(s), so no "
+                "model comparison on this snapshot has an error bar and nothing has "
+                "selected a model to test."
+            )
+
         frozen = freeze(split, args.run, args.budget, args.fit)
-        metadata = build_metadata(frozen, args.run, panel, panel_path, dataset, args.budget)
+        metadata = build_metadata(
+            frozen, args.run, panel, panel_path, dataset, args.budget, n_folds
+        )
         artifact_module.save(frozen.pipeline, metadata, args.artifact)
         labelled = panel[panel["label_observable"]]
         ledger.write_report(
@@ -461,9 +531,20 @@ def main() -> None:
     except SplitTooShallow as error:
         blocker = NOT_RUN.format(refusal=str(error).split("\n\n")[0], depth=depth_report(panel))
         print(f"not run: {str(error).splitlines()[0]}")
+    except NoFoldEvidence as error:
+        blocker = NO_FOLDS.format(refusal=str(error), depth=depth_report(panel))
+        print(f"not run: {error}")
+        print("`--accept-no-folds` overrides this and spends the held-out block.")
 
     write_report(args.out, frozen, metadata, args.budget, blocker)
     print(f"wrote -> {args.out}")
+
+    # A refusal that exits 0 reads as success to every caller that checks `$?`,
+    # and this is the step whose success means an artifact exists. 3 is what
+    # `scripts/rehearse.sh` already uses for "declined, nothing was run", so a
+    # caller can tell a decision apart from a crash.
+    if blocker is not None:
+        raise SystemExit(3)
 
 
 if __name__ == "__main__":  # pragma: no cover

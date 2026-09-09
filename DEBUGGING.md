@@ -4,6 +4,77 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-09 — Freeze would have spent the test set on a model nothing chose
+
+- **Problem:** no crash. On the morning the panel first became splittable,
+  `python -m src.models.freeze --run 05-xgboost_engineered` — the exact command
+  the README told the reader to run — would have opened the held-out block
+  against **3 positives**, to measure a model that no comparison had selected,
+  and written a README figure with a decimal point and nothing behind it. The
+  test block can only be spent once, so the failure would have been permanent
+  and would have looked like success.
+
+- **Root cause:** the only refusal in `freeze` was `SplitTooShallow`, which asks
+  whether a three-way cut is *legal*. Legality and evaluability are different
+  waits — five days apart on this panel — and for that whole gap the single
+  irreversible step in the pipeline had the weakest check in it. Every gate
+  upstream declined correctly: `rehearse.sh` stops at validation by design,
+  `watch_depth.sh` reports the shortfall, `evaluate` writes no verdict when no
+  fold could be scored. The guards were all in the repeatable places. The
+  reasoning error was assuming the earliest gate is the strictest, when the
+  gates were built in the order the panel unlocked them and the last one to be
+  written was the first one crossed.
+
+- **Solution:** `src/models/freeze.py` — `NoFoldEvidence` refuses when the
+  training window yields no rolling-origin fold, checked *before* anything reads
+  the block. `--accept-no-folds` overrides it and records the fold count on the
+  artifact as `Metadata.selection_folds`, so a served probability whose model was
+  chosen by nothing says so at the endpoint. Both refusals now exit 3 rather than
+  0, because a refusal that exits 0 reads as success to any caller checking
+  `$?`. `tests/test_freeze.py` is new and covers both refusals, the override, and
+  the day the gate opens on its own.
+
+- **Lesson:** **put the strictest gate in front of the step you cannot repeat,
+  not the earliest one.** The instinct is to guard the entrance; the thing worth
+  guarding is the door that does not reopen. A useful check: for each
+  irreversible action, list every precondition it depends on, then ask which of
+  them is verified *at that step* rather than somewhere upstream — an upstream
+  guard protects the path people take, never the one they take when they are in
+  a hurry.
+
+
+## 2026-09-09 — A test wrote fixture runs into the real experiment ledger
+
+- **Problem:** the new `tests/test_freeze.py` monkeypatched
+  `ledger.DEFAULT_LEDGER` and `ledger.DEFAULT_REPORT` to `tmp_path`, passed
+  green, and appended two synthetic rows to `reports/depth_ledger.md` under the
+  heading **"Real panel"** — snapshot 2026-09-08, 9 and 12 waves, PR-AUC 0.13 and
+  0.19. Caught by `git status`, not by the suite.
+
+- **Root cause:** `ledger.append(entry, path=DEFAULT_LEDGER)` binds its default
+  at function-definition time, so rebinding the module constant afterwards
+  changes nothing. The patch had no effect and no way to say so — the failure
+  mode of a redirect that silently does not redirect is a test that passes while
+  writing to production. The dataset label came from a different argument
+  entirely, which is why fixture runs were tabled as real ones.
+
+- **Solution:** patch the *functions* rather than the constants in
+  `tests/test_freeze.py`. More usefully, `tests/conftest.py` gains an autouse
+  guard that snapshots `reports/`, `models/` and `data/processed/` around every
+  test and fails naming any file that changed. It was verified to fail on a
+  deliberate write before being kept; the rest of the suite passes under it
+  unchanged, so nothing else was doing this.
+
+- **Lesson:** **a default argument is captured at import, so patching the
+  constant behind it is a no-op that looks like a fix.** Redirect by patching
+  the callable or by passing the path. And prefer a guard that *detects* writes
+  over a convention that everyone must remember: the convention has to be
+  re-applied by every new test, and the one that forgets is the one that writes
+  to the file you care about. `DEBUGGING.md` drew this rule for `data/` on
+  2026-09-07 and it had to be learned twice, which is what makes it a fixture
+  rather than a note.
+
+
 ## 2026-09-09 — The imputer deleted the feature it was supposed to fill
 
 - **Problem:** the first run of the ladder against the real panel printed

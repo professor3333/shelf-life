@@ -14,10 +14,14 @@ the UI.
 
 > **Status, stated plainly.** The full system is built: ingestion, labelling,
 > the leakage audit, the temporal split, the model ladder, experiment tracking,
-> the frozen-artifact packaging, the API, the container and the UI. **No model
-> has been fitted on the real panel yet**, because the panel is not deep enough
-> to cut an honest three-way split, and every report in `reports/` records that
-> refusal rather than a number. [Why, and when it clears](#why-there-are-no-real-numbers-yet).
+> the frozen-artifact packaging, the API, the container and the UI. As of
+> **2026-09-09** the panel is deep enough for an honest three-way split, and the
+> ladder has run on it — on validation only, where nothing yet separates from the
+> base rate. **No model has been frozen**, because a legal split is not one a
+> model can be *chosen* on: the training window yields no rolling-origin fold, so
+> no comparison carries an error bar. `reports/test_results.md` records that
+> refusal rather than a number, and `scripts/watch_depth.sh` reports the
+> shortfall daily. [Why, and when it clears](#why-there-is-no-test-number-yet).
 
 ---
 
@@ -471,9 +475,11 @@ budget — a list of 500 alerts nobody reads has perfect recall and zero value.
 
 ---
 
-## Why there are no real numbers yet
+## Why there is no test number yet
 
-An honest three-way split needs eight labelled crawl waves. The panel has six.
+An honest three-way split needs eight labelled crawl waves. **The panel reached
+eight on 2026-09-09**, so there are now real validation numbers — see below —
+and still no test number, because the two gates are not the same day.
 
 ```
 minimum waves = 1 + 2 × (floor(embargo ÷ spacing) + 1) + corroboration runs
@@ -502,12 +508,45 @@ models is smaller than the noise. Folds start at eleven labelled waves and
 reach three at thirteen. `depth_report` states both waits, and they are not the
 same day.
 
-So `src/models/freeze.py` refuses, and `reports/test_results.md` records the
-refusal and the shortfall instead of a number. This is the designed behaviour,
-not a bug: a test block with no positives is not a hard test set, it is an
-undefined metric, and a model frozen against one would produce a README number
-that means nothing. `python -m src.models.freeze --run 05-xgboost_engineered`
-prints the shortfall today and writes the artifact on the day it clears.
+So `src/models/freeze.py` refuses — on **two** separate checks, because
+legality arrived five days before evaluability and for that whole gap only the
+first of them would have fired. `SplitTooShallow` asks whether a three-way cut
+is legal. `NoFoldEvidence` asks whether anything could have *chosen* the model
+being tested. Both exit 3 and write the reason into `reports/test_results.md`
+instead of a number.
+
+The second check is the one that matters right now, and it was added on
+2026-09-09 after the first opened. Between those two dates
+`python -m src.models.freeze --run 05-xgboost_engineered` would have run: it
+would have opened the held-out block against three positives, to measure a model
+that no comparison had selected, and written a README figure with a decimal point
+and nothing behind it. Every gate upstream declined in that window — the
+rehearsal stops at validation, the watch reports a shortfall — and this one, the
+only irreversible step, waved it through.
+
+`--accept-no-folds` overrides it. The fold count then travels on the artifact as
+`selection_folds`, so a served probability whose model was chosen by nothing can
+say so at the endpoint.
+
+**What the first real run found.** The ladder ran on the real panel for the first
+time on 2026-09-09, on validation only, 22 positives, no error bars:
+
+| | validation PR-AUC |
+|---|---|
+| base rate, and `prior` | 0.0190 |
+| `age_ceiling` — the ceiling on any age-only rule | 0.0229 |
+| `xgboost`, every allowed feature | 0.0226 |
+
+Nothing separates from the base rate, and the best rule an age column could
+support matches gradient boosting with the whole feature set. Whether that
+survives fold variance is exactly what the missing folds would say, which is why
+`reports/model_comparison.md` records **no verdict**: with nothing to select on,
+naming a winner would be selection on the validation block.
+
+**The leak reproduces on real data**, not only on the fixture. Run 06 admits the
+panel-wide aggregates and scores 0.0290; run 07 removes them and returns to
+0.0226 — the same number as run 05, which differs in nothing else. The leak was
+worth +0.0064 PR-AUC, about a quarter of the honest score.
 
 **What is verified in the meantime.** Every component is exercised end to end on
 a synthetic panel whose label is drawn *independently of every feature*, so the
@@ -866,8 +905,26 @@ python -m src.models.experiments --synthetic   # replay the run history into MLf
 mlflow ui --backend-store-uri sqlite:///mlflow.db
 ```
 
-While the panel is too shallow, the first three print the refusal and write it
-into their reports. That is the expected output today, not a failure.
+The first three now run on the real panel and write real validation numbers.
+They stop short of a verdict while the training window yields no fold, which is
+the expected output today, not a failure.
+
+### Watching the depth
+
+```bash
+./scripts/watch_depth.sh          # pin, assemble, measure, log
+./scripts/watch_depth.sh --quiet  # print only when the wave count moves
+```
+
+Pins the snapshot, rebuilds the panel and reports depth against both gates,
+appending one line a day to `data/depth_watch.log`. Exit `0` the fold gate is
+open · `3` still accruing · `4` no legal cut yet. On the day the gate clears it
+runs the rehearsal and stops, because choosing the model is a decision and
+`freeze` spends the held-out block.
+
+`scripts/com.shelflife.depthwatch.plist` schedules it daily, after the scraper's
+own agent — a watch that runs before the day's crawl measures yesterday and
+reports no progress, which is indistinguishable from a scraper that has stopped.
 
 ### Freezing a model
 
@@ -884,6 +941,14 @@ frozen at all.
 
 Add `--synthetic` to freeze against the test fixture instead — which is how the
 API and UI can be exercised before the real panel is deep enough.
+
+**It refuses on two checks, and exits 3 rather than 0 when it does.** A legal
+three-way cut is not one a model can be chosen on: `NoFoldEvidence` fires when
+the training window yields no rolling-origin fold, because the held-out block
+buys a check on a model validation already selected, and with no spread on any
+comparison nothing selected one. `--accept-no-folds` overrides it and spends the
+block anyway; the fold count is then written onto the artifact as
+`selection_folds`, where `0` means no comparison stood behind the choice.
 
 ### The service
 
