@@ -30,10 +30,17 @@ That last case deserves its name said out loud: a median-filled `board_size_at_t
 is a constant, so for a caller who cannot supply it the feature is *inert*, and
 the model at serve time is not quite the model that was validated. The
 prediction says so — `board_context_supplied` rides on every response — and
-`docs/design.md` §11 records the decision. The alternative, dropping the four
-features from the fitted model, is a live option that costs whatever they are
-worth; the ablation in `reports/model_results.md` is what will price it, and it
-has not run yet.
+`docs/design.md` **§12** records the decision, which is to keep them on that
+basis. (This pointed at §11, which is the resurrection window and a different
+question entirely.)
+
+The alternative, dropping the four from the fitted model, was priced and
+rejected on 2026-09-09. The cost of the inert regime is **0.0019** validation
+PR-AUC, measured by `src/models/train.py:serve_time_regime` — the same model
+scored twice, once with the columns and once without. Note that the *ablation*
+puts it at 0.0005: a refit without the columns redistributes their weight,
+while the deployed model keeps fitted weights pointed at a column that has gone
+constant. Only the second is what this contract's caller experiences.
 
 Nothing here is fitted. It is a data-shaping step, and every statistic it might
 have learned instead lives in the `ColumnTransformer` inside the artifact.

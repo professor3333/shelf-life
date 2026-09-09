@@ -23,7 +23,12 @@ them reconstructs board identity for free — which is the thing `design.md` §4
 has not yet decided to allow. Each column's fill and the reason for it are
 carried on the `Column` record.
 
-**Board identity is a switch, not a default.** `design.md` §4 is open, and the
+**Board identity is a switch, and it is off.** `design.md` §4 decided against it
+on 2026-09-09: every board's closure rate sits inside a 95% interval containing
+the pooled rate, so identity buys nothing this data can show, and a model that
+needs the board cannot score a posting from a board it has never seen — which is
+the product. The switch remains because the decision names what would reverse
+it, and
 audit widened it: `source` and `company` are the same information (all 31
 companies map to exactly one source), so they are gated together by
 `include_board_identity` and default to off. Turning one on without the other

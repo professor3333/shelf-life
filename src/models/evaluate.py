@@ -418,8 +418,10 @@ def _generalisation_section(generalisation) -> list[str]:
     lines = [
         "## Would it work on a board it has never seen?",
         "",
-        "`docs/design.md` §4 leaves *is `source` a feature?* open and the model card",
-        "calls this a Greenhouse model. Both are the same worry, and this is the",
+        "`docs/design.md` §4 excluded board identity on 2026-09-09, on per-board rates",
+        "whose intervals all contain the pooled rate. That settles what goes *into* the",
+        "model; it does not settle whether a model trained on these boards carries to a",
+        "new one, and the model card's caveat is about the second. This is the",
         "measurement: hold a whole board out of the fit, then score its rows twice —",
         "once with a model that never saw it, once with a model that did. The **gap**",
         "is what board-specific learning was worth. A bare transfer score would not do,",
