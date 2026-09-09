@@ -138,10 +138,60 @@ collection started; a model given it learns the scraper's start date.
 
 ---
 
-## 4. Is `source` a feature? — **OPEN, and now measurable**
+## 4. Is board identity a feature? — **DECIDED 2026-09-09: no**
 
-Not decided. It cannot be decided until the deployment story is, and the
-deployment story is genuinely ambiguous here.
+**The deployment story, settled first because §4 cannot be answered without it:
+score any posting, including one from a board never scraped.**
+
+That is not an aspiration, it is a description of what already shipped.
+`POST /predict` takes a posting, not a board id. `/contract` publishes what a
+caller may send. Board-level fields are optional and imputed when absent (§12).
+An interface shaped that way and a model that needs to know the board are not
+the same product, and the interface is the one people can already use.
+
+**The measurement, on the 2026-09-08 snapshot at H=7, settled cohorts.** Per-board
+closure rates with 95% Wilson intervals, against a pooled rate of **7.76%**:
+
+| board | rows | closures | rate | 95% interval |
+|---|---|---|---|---|
+| greenhouse:anthropic | 1,141 | 91 | 7.98% | 6.5–9.7% |
+| greenhouse:gitlab | 444 | 44 | 9.91% | 7.5–13.0% |
+| greenhouse:figma | 323 | 16 | 4.95% | 3.1–7.9% |
+| greenhouse:duolingo | 169 | 7 | 4.14% | 2.0–8.3% |
+| greenhouse:discord | 102 | 12 | 11.76% | 6.9–19.5% |
+| greenhouse:airtable | 32 | 0 | 0.00% | 0.0–10.7% |
+| python_org | 31 | 4 | 12.90% | 5.1–28.9% |
+
+**All seven intervals contain the pooled rate.** No board is distinguishable
+from the board average on this sample. Corroborated independently by the H=1
+ladder, where the `board_hazard` rung — a predictor that *is* nothing but the
+per-board historical rate — scored 0.018931 against a 0.018982 base rate, i.e.
+below a constant.
+
+**So board identity is excluded**, and the four columns that carry it move
+together (`source`, `company`, `url`'s domain, and any missingness indicator over
+the archive-derived columns). `include_board_identity=False` was already the
+default in `src/features/preprocessing.py`; this makes it a decision rather than
+an unexamined default.
+
+**Stated honestly: this is not a demonstration that boards do not differ.** With
+174 closures the intervals are wide — figma 3.1–7.9% against discord 6.9–19.5%
+— and the sample cannot separate them. What it establishes is that including
+board identity asks the model to learn a difference *this data does not show*,
+at a real cost: a model that needs the board cannot score a posting from a board
+it has never seen, which is the product. Absent a demonstrated benefit, the
+cheaper error is to leave it out.
+
+**Would change my mind:** a per-board rate whose interval clears the pooled rate
+once depth accrues, or a leave-one-board-out transfer gap that is large — the
+measurement `src/models/generalisation.py` runs, and which needs more positives
+per board than this panel has. Either would say the boards genuinely differ, and
+the deployment story would then have to buy that difference explicitly rather
+than inherit it.
+
+---
+
+### The original argument, kept because the decision rests on it
 
 **The case against.** `source` is the strongest signal in the data and much of
 its strength is instrumental rather than about jobs: missingness fingerprints
@@ -961,7 +1011,7 @@ becomes a misrepresentation rather than a caveat.
 
 ---
 
-## 11. The resurrection window — **OPEN**
+## 11. The resurrection window — **DECIDED 2026-09-09: bounded at K = 2**
 
 `t_gone` requires that a posting *never re-appeared*. That clause reads the whole
 remaining panel rather than a bounded window, with two consequences:
@@ -982,19 +1032,108 @@ reach finite, the embargo computable, and a label final at a known time; the
 cost is that a posting returning at K+1 is mislabelled as removed. Or leave it
 unbounded and report the residual as a known defect.
 
-**Leaning toward bounding it**, on the deployment argument rather than the
-statistical one: an unbounded clause means a training label is never final, and
-a label that cannot be computed at a known time cannot be recomputed for
-retraining. Not decided, because K is a real choice and 0.16% is small enough
-that it is not yet urgent.
+### DECIDED 2026-09-09 — bounded at K = 2: the label is final at corroboration
 
-**Would change my mind:** a resurrection rate that grows with panel depth. Two
-postings over four days may simply be the visible edge of something a longer
-panel will show properly, and K should be chosen against that distribution
-rather than against two cases.
+**The measurement that decides it.** Every absence-and-return in the 2026-09-08
+snapshot, 1,530 postings across 122 complete runs:
+
+| absent runs before returning | postings |
+|---|---|
+| 1 | 144 |
+| 2 | **1** |
+| 3 or more | **0** |
+
+145 postings vanished and came back. **144 of them returned after a single
+absent run** — which never reaches this clause at all, because the two-run
+corroboration rule already refuses to call a single absence a removal. Exactly
+one returned after two. None has ever returned after three.
+
+So the distribution the earlier note asked for turns out to have almost no mass
+past the corroboration threshold, and the choice of K is not delicate. **K = 2:
+once a posting is absent at two consecutive complete runs it is gone, whatever
+it does afterwards.** The `index > last_present` clause is removed from
+`compute_labels`.
+
+**What it costs, measured rather than bounded:** one posting in 1,530 —
+**0.065%** — is now labelled removed when it did come back. On the panel the
+change moves 174 positives to 175 and the H=7 base rate from 7.76% to 7.81%.
+Nothing else moves.
+
+**What it buys is the embargo's correctness, not convenience.** The embargo has
+always been computed as the horizon plus one run's reach. Under an unbounded
+clause that arithmetic was false — the reach was the whole remaining panel, so
+no embargo of any width sealed a training label from the evaluation period, and
+the split was resting on a number that could not be right. K = 2 makes the reach
+exactly what the embargo already assumes. It also makes a label final at a known
+time, which is what lets one be recomputed for retraining.
+
+**K = 3 was the alternative and is worse.** It would catch that single case, at
+the cost of making the label read three runs beyond the horizon instead of one —
+a wider embargo, more waves burnt at each block boundary, and a later date for
+every gate. Paying panel depth, which is the binding constraint on this whole
+build, to fix 0.065% of labels is the wrong trade.
+
+**Would change my mind:** a return after three or more absent runs appearing at
+any depth, or the two-run rate climbing above roughly 1%. Both are visible in
+`src/data/split.py:resurrection_risk`, and the second would mean the corroboration
+rule rather than K is what needs revisiting.
 ---
 
-## 12. Board context at serve time — **OPEN, deciding on fold evidence**
+## 12. Board context at serve time — **DECIDED 2026-09-09: keep, accept-and-impute**
+
+**The four board columns stay in the fitted model.** A caller who supplies them
+gets them used; a caller who does not gets them imputed, and every response says
+which happened via `board_context_supplied`. That is the handling shipped on
+2026-09-05, and it is now the decision rather than a provisional arrangement.
+
+**Why not drop them, given §4 just excluded board *identity*.** The two look
+like the same question and are not. Board identity says *which* board this is —
+a label the model can memorise a rate for, and the thing that stops a posting
+from an unseen board being scorable. Board context says *what the board looked
+like at `t`* — size, growth, how many like it were up — which is a property of
+the situation, not of an identity, and which a caller from a board never scraped
+can still supply if they have it. Excluding identity is what makes the product
+work; excluding context would only throw away two of the more plausible
+mechanisms in the feature set for nothing gained.
+
+**The evidence §12 was waiting for, and the thing it got wrong.** This section
+named an ablation as the deciding measurement. The ablation *refits* without the
+four columns, which answers *what are they worth* — and that is not the serving
+question. The deployed object is fitted **with** them; a caller who supplies none
+sends nulls, the training fold's imputers fill them with constants, and the
+fitted weights stay pointed at a column that no longer varies. A refit
+redistributes that weight; the shipped model cannot.
+
+`src/models/train.py:serve_time_regime` measures the actual regime — same model,
+same split, same threshold, the only difference being whether the columns arrive.
+On the H=1 panel:
+
+| regime | PR-AUC | Brier | lost |
+|---|---|---|---|
+| board context supplied | 0.0226 | 0.0214 | — |
+| absent, imputed | 0.0208 | 0.0227 | **0.0019** |
+
+**The refit said 0.0005; the deployed model loses 0.0019 — roughly four times as
+much.** So the evidence this section was waiting on would have understated the
+thing it was meant to settle, by the mechanism above. Both numbers are now
+reported side by side in `reports/model_results.md`, because reading either
+alone is how a serving cost gets mistaken for a feature-importance one.
+
+**What this does not settle.** 0.0019 is a single draw on a fold-less H=1 split,
+which is a smoke test — the magnitude is not to be trusted, only the direction
+and the fact that the two measurements disagree. The decision does not rest on
+the number: it rests on the argument that a property of the situation is a
+legitimate input and the interface already handles its absence honestly.
+
+**Would change my mind:** a serve-time gap large enough that the imputed regime
+falls to the baseline, at which point the honest move is not to drop the columns
+but to serve two models and say so — one for callers who have board context and
+one for callers who do not. That is a real option and it is deliberately not
+being taken now, on a 0.0019 delta with no error bar.
+
+---
+
+### The original argument, kept because the decision rests on it
 
 Four features describe the board rather than the posting: `board_size_at_t`,
 `board_growth`, `n_same_title_on_board`, `n_same_req_on_board`. Each was
