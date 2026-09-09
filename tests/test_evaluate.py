@@ -26,6 +26,7 @@ from panels import DAY, WAVE0, make_panel
 
 from src.data.split import Cuts, rolling_origin_folds, temporal_split
 from src.models.evaluate import (
+    FOLD_COLUMNS,
     calibration_summary,
     compare_models,
     cross_validate,
@@ -265,6 +266,37 @@ def test_a_fold_with_no_positives_is_nan_not_zero():
     assert summary["cv_pr_auc_mean"] == pytest.approx(0.5)
 
 
+def test_a_panel_too_shallow_to_cut_folds_scores_nothing_rather_than_raising():
+    """Zero folds is the ordinary state of a panel still accruing depth, so it
+    has to be a reportable answer rather than an exception. Before this, an
+    empty result carried no columns at all and `summarise_folds` raised
+    `KeyError: 'pr_auc'` — a message about pandas indexing, two modules from the
+    cause, on the first run against the real panel."""
+    from sklearn.dummy import DummyClassifier
+
+    from src.features.preprocessing import build_pipeline
+
+    split = _deep_split()
+    scored = cross_validate(
+        lambda: build_pipeline(DummyClassifier(strategy="prior"), min_category_frequency=1),
+        split.train,
+        folds=[],
+    )
+    assert scored.empty
+    assert list(scored.columns) == list(FOLD_COLUMNS)
+
+    summary = summarise_folds(scored)
+    assert summary["folds"] == 0.0
+    assert summary["folds_scored"] == 0.0
+    assert np.isnan(summary["cv_pr_auc_mean"])
+    assert np.isnan(summary["cv_pr_auc_sd"])
+
+    # And the comparison built on top of it says "no folds", not "a tie".
+    difference = paired_fold_difference(scored, scored)
+    assert difference["folds"] == 0.0
+    assert np.isnan(difference["mean_difference"])
+
+
 def test_a_single_fold_reports_no_standard_deviation():
     """One fold has no spread. Reporting 0.0 would read as 'no variance' rather
     than 'no information'."""
@@ -355,6 +387,50 @@ def test_compare_models_reports_cv_and_validation_for_every_candidate():
     assert {"cv_pr_auc_mean", "cv_pr_auc_sd", "val_pr_auc", "val_ece"} <= set(summary.columns)
     for scores in val_scores.values():
         assert len(scores) == len(split.val)
+
+
+def test_a_comparison_that_chose_nothing_reports_the_table_and_stops(tmp_path):
+    """Zero folds is not a blocker — the models were still scored on validation,
+    and that table is worth writing. It is also not a selection, so everything
+    that describes a single chosen model has to stop rather than run on a default
+    nobody picked. Before this, `main` stringified the absent choice and died on
+    `KeyError: 'None'` the first time the real panel produced no folds."""
+    path = tmp_path / "model_comparison.md"
+    summary = pd.DataFrame(
+        {
+            "model": ["prior", "xgboost"],
+            "folds_scored": [0.0, 0.0],
+            "cv_pr_auc_mean": [float("nan")] * 2,
+            "cv_pr_auc_sd": [float("nan")] * 2,
+            "val_pr_auc": [0.019, 0.023],
+            "val_brier": [0.019, 0.021],
+            "val_ece": [0.01, 0.02],
+            "val_roc_auc": [0.5, 0.58],
+        }
+    )
+    verdict = select(summary, {})
+    assert verdict["chosen"] is None
+
+    write_report(
+        path,
+        make_panel(n_waves=4),
+        summary,
+        {name: pd.DataFrame(columns=list(FOLD_COLUMNS)) for name in summary["model"]},
+        verdict,
+        None,  # thresholds
+        None,  # calibration
+        None,  # by_source
+        None,  # by_carryover
+        blocker=None,
+    )
+    text = path.read_text()
+    assert "Models, with fold variance" in text
+    assert "xgboost" in text
+    assert "No threshold, calibration or breakdown yet" in text
+    # The sections that need a chosen model must be absent, not empty.
+    assert "## Threshold" not in text
+    assert "## Calibration" not in text
+    assert "## Per source" not in text
 
 
 def test_the_report_records_the_blocker_when_nothing_could_run(tmp_path):

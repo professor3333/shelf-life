@@ -10,17 +10,71 @@ Every engineered feature is computed inside the pipeline by
 for a single posting at serve time, and none of them can leak across the
 split however they are called.
 
-The constant-predictor reference remains PR-AUC **0.0124**
-on 8,037 labelled rows.
+The constant-predictor reference remains PR-AUC **0.0112**
+on 9,194 labelled rows.
 
-## Nothing below has run
+## The ladder, with the boosted rung
 
-No honest three-way split exists on this snapshot, so the ablation has no
-validation block to test a hypothesis against and the overfit sweep has no
-gap to open. The engineered features are built, audited and tested; what
-waits is the evidence for keeping or dropping each one.
+| model | description | pr_auc | brier | roc_auc | precision | recall |
+|---|---|---|---|---|---|---|
+| prior | constant base rate | 0.019 | 0.0186 | 0.5 | 0.019 | 1 |
+| rule_older_than_30d | rule: up more than a month, so not about to close | 0.017 | 0.0186 | 0.399 | 0.0101 | 0.2273 |
+| rule_posted_this_week | rule: fresh postings move, stale ones have stalled | 0.0197 | 0.0186 | 0.519 | 0.0198 | 0.9545 |
+| age_ceiling | the best any age-only rule could do (deciles, non-monotone) | 0.0229 | 0.0186 | 0.576 | 0.0278 | 0.1364 |
+| age_only | age_days alone, logistic | 0.0158 | 0.2493 | 0.4187 | 0 | 0 |
+| board_hazard | per-board historical rate | 0.0189 | 0.0187 | 0.4687 | 0.025 | 0.1818 |
+| logistic | logistic regression, all allowed features | 0.0174 | 0.0797 | 0.468 | 0 | 0 |
+| decision_tree | decision tree, depth-limited | 0.0197 | 0.2131 | 0.5066 | 0.0207 | 0.4091 |
+| random_forest | random forest, 300 trees | 0.0193 | 0.0318 | 0.4952 | 0 | 0 |
+| xgboost | gradient boosting | 0.0226 | 0.0214 | 0.5807 | 0 | 0 |
 
-```
-no cut of this panel yields three usable blocks.
-```
+## Hypothesis ablation
+
+Each row refits without the named column(s). `delta` is the validation
+PR-AUC they are worth: positive means removing them hurt. Every row
+shares the baseline's split, seed and preprocessing, so a delta is
+attributable to the withheld columns and nothing else.
+
+| removed | n_removed | hypothesis | val_pr_auc | delta | train_pr_auc | gap |
+|---|---|---|---|---|---|---|
+| nothing | 0 | — | 0.0226 | 0 | 1 | 0.9774 |
+| title_seniority | 1 | how senior a role is relates to how long it takes to fill | 0.0229 | -0.0003 | 1 | 0.9771 |
+| title_is_manager | 1 | management roles have longer hiring processes | 0.0225 | 0.0001 | 1 | 0.9775 |
+| title_words | 1 | terse titles are boilerplate on high-volume reqs and churn faster | 0.0221 | 0.0005 | 1 | 0.9779 |
+| title_chars | 1 | as title_words, by another measure | 0.0243 | -0.0017 | 1 | 0.9757 |
+| location_is_remote | 1 | remote roles draw a larger pool and close faster | 0.0247 | -0.0021 | 1 | 0.9753 |
+| n_locations | 1 | a posting open in several places is a wider net | 0.0227 | -0.0001 | 1 | 0.9773 |
+| salary_band | 1 | pay level relates to fill speed, non-linearly | 0.0211 | 0.0015 | 1 | 0.9789 |
+| board_size_at_t | 1 | a posting on a large board competes with more of them | 0.0229 | -0.0003 | 0.9917 | 0.9688 |
+| board_growth | 1 | a board that is growing is hiring, and hiring boards close reqs | 0.0238 | -0.0012 | 1 | 0.9762 |
+| n_same_title_on_board | 1 | a title duplicated across the board is a high-volume req and churns | 0.0223 | 0.0003 | 1 | 0.9777 |
+| n_same_req_on_board | 1 | one requisition posted in several places closes when any of them does | 0.0227 | -0.0001 | 1 | 0.9773 |
+| board context (all four) | 4 | board context is worth having at all — the question `docs/design.md` §12 is open on, and the only one that matches what a caller actually loses | 0.0221 | 0.0005 | 1 | 0.9779 |
+
+### What this settles about board context (`docs/design.md` §12)
+
+Withholding all four board columns costs **+0.0005** validation PR-AUC. The largest single board column is worth 0.0012.
+
+The group is worth about as much as its best single column, so the four are **not** redundant with each other — most of the value sits in one of them. Dropping all four costs roughly what dropping that one does.
+
+The number prices one thing only: what a caller who supplies no board context loses. It does not price a caller who can supply it — a board owner scoring their own requisitions has all four, and for them the imputation branch never runs.
+
+**No fold evidence yet.** The training window is not deep enough to cut
+rolling-origin folds from, so the delta above is a single draw on one
+validation block and cannot settle §12. `python -m src.data.split` reports
+how much longer.
+
+## The deliberate overfit
+
+Depth up and regularisation off until train and validation separate, then
+one knob at a time to close the gap again.
+
+| setting | max_depth | n_estimators | reg_lambda | min_child_weight | subsample | train_pr_auc | val_pr_auc | gap |
+|---|---|---|---|---|---|---|---|---|
+| stump, heavy shrinkage | 1 | 50 | 10 | — | — | 0.0785 | 0.0222 | 0.0563 |
+| moderate | 4 | 400 | 1 | — | — | 1 | 0.0226 | 0.9774 |
+| deep, unregularised | 12 | 1200 | 0 | 1 | 1 | 1 | 0.0202 | 0.9798 |
+| deep + min_child_weight | 12 | 1200 | 0 | 30 | 1 | 0.9401 | 0.02 | 0.92 |
+| deep + lambda | 12 | 1200 | 50 | 1 | 1 | 1 | 0.0201 | 0.9799 |
+| deep + subsampling | 12 | 1200 | 0 | 1 | 0.6 | 1 | 0.0238 | 0.9762 |
 

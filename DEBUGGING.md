@@ -4,6 +4,84 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-09 — The imputer deleted the feature it was supposed to fill
+
+- **Problem:** the first run of the ladder against the real panel printed
+  `UserWarning: Skipping features without any observed values: ['board_growth']`
+  seventeen times and carried on. Nothing raised. `board_growth` simply was not
+  in the matrix any model saw, and the fitted `ColumnTransformer` produced one
+  column fewer than `SPEC` describes.
+
+- **Root cause:** `SimpleImputer` **drops** a column with no observed value in
+  the fold it was fitted on, rather than filling it — `keep_empty_features`
+  defaults to `False`, and that is true even for `strategy="constant"`, where
+  the fill value is a literal that needs no data at all. `board_growth` is null
+  on each source's *first* observed wave by construction, and the deepest legal
+  training block today is exactly one wave, so it was null in every training
+  row. Two things follow, and the second is the serious one: the documented fill
+  policy ("zero says no observed change") silently stopped applying, and the
+  matrix width became a function of the training fold's missingness rather than
+  of the column spec — so two folds, or a rehearsal and the freeze after it, can
+  fit pipelines of different widths under the same name. That is training/serving
+  skew arriving through the imputer. `test_each_policy_fills_with_the_value_its_reason_states`
+  nulled ten rows and passed; the fixture never produced an all-null fold, and
+  the real panel produces one on its first wave.
+
+- **Solution:** `keep_empty_features=True` on all three numeric strategies in
+  `src/features/preprocessing.py::_branch`. Two new tests in
+  `tests/test_preprocessing.py`: one asserts an all-null column survives and is
+  filled, parametrised over `float64` and `Int64` because the fixture and the
+  assembled panel differ; the other asserts the feature names out do not depend
+  on which block was fitted, which is the property that actually matters.
+
+- **Lesson:** **a preprocessor's output schema must be a function of the spec,
+  not of the data it was fitted on.** Any transformer that can add or drop
+  columns based on what it saw is a training/serving skew generator, and the
+  test that catches it is not "does the fill value match" but "do two folds
+  produce the same columns". Separately: a fixture that only ever makes a
+  column *partly* missing cannot catch a policy that fails when it is *wholly*
+  missing — degenerate shapes have to be in the fixtures on purpose, because
+  real data supplies them at the edges and the edges are where you start.
+
+
+## 2026-09-09 — Zero folds is a number, and three modules treated it as impossible
+
+- **Problem:** the same first real-panel run died twice. First
+  `KeyError: 'pr_auc'`, raised by `summarise_folds` and surfacing inside
+  `experiments.tune`, four frames from anything that mentions folds. Fixed, it
+  then died in `evaluate.main` with `KeyError: 'None'`.
+
+- **Root cause:** one assumption in two places — that a cross-validation
+  produces at least one fold. `cross_validate` builds its result with
+  `pd.DataFrame(rows)`, which on an empty list yields a frame with **no
+  columns**, so `per_fold["pr_auc"]` raises rather than returning nothing.
+  Every consumer had been written to handle *no usable rows* — `tune` already
+  had an "every fold undefined, fall back to the default" branch it could never
+  reach — but none handled *no columns*. Downstream, `select` correctly returns
+  `{"chosen": None}` when nothing was scored, and `main` then did
+  `str(verdict["chosen"])`, turning the absence into the string `'None'` and
+  looking it up as a model name. The panel is at 8 labelled waves against the 13
+  needed for three folds, so zero folds is the expected state right now, not a
+  corner case — the synthetic panel in `tests/` is twenty waves deep and had
+  never produced it.
+
+- **Solution:** `src/models/evaluate.py` — `FOLD_COLUMNS` pins the schema
+  `cross_validate` returns whether or not it has rows, which makes
+  `summarise_folds` and `paired_fold_difference` work unchanged and lets `tune`'s
+  existing fallback fire. `main` checks `chosen is not None` and, when no model
+  was selected, writes the comparison table it *did* compute and stops before
+  everything that describes a single model. Picking one anyway — best validation
+  score, or top of the ladder — would have been selection on the validation
+  block or skipping the ladder.
+
+- **Lesson:** **an empty result must carry the same schema as a full one.**
+  `pd.DataFrame([])` is not an empty version of `pd.DataFrame(rows)`; it is a
+  differently-shaped object, and returning it pushes the error to whoever
+  indexes a column next. More generally, the count that is currently zero — folds,
+  positives, waves — is the one to write a test for first, because on a dataset
+  that is still accruing, zero is not the edge case, it is Monday.
+
+
 ## 2026-09-07 — A snapshot named for the day it was taken, not the data in it
 
 - **Problem:** `data/raw/2026-09-06` and `data/raw/2026-09-07` held **identical

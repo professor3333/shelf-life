@@ -78,6 +78,26 @@ DEFAULT_REPORT = Path("reports/model_comparison.md")
 #: defended against alternatives rather than asserted alone.
 BUDGET_SWEEP: tuple[int, ...] = (5, 10, 20, 50, 100)
 
+#: The columns `cross_validate` returns, always, including when it returns no
+#: rows at all. A zero-fold panel is the ordinary state of this build while the
+#: scraper is still accruing depth, and an empty frame carrying no columns is
+#: not "no folds" — it is a frame whose schema depends on the data, which every
+#: consumer then has to guess at. `summarise_folds` and `paired_fold_difference`
+#: both already handle *no usable rows*; neither survived *no columns*, and the
+#: first real-panel run turned that into a `KeyError: 'pr_auc'` two modules away
+#: from the cause (DEBUGGING.md, 2026-09-09).
+FOLD_COLUMNS: tuple[str, ...] = (
+    "fold",
+    "train_end",
+    "val_start",
+    "n_train",
+    "n_val",
+    "val_positives",
+    "pr_auc",
+    "brier",
+    "roc_auc",
+)
+
 
 @dataclass(frozen=True)
 class Fold:
@@ -213,7 +233,7 @@ def cross_validate(
                 "roc_auc": summary["roc_auc"],
             }
         )
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=list(FOLD_COLUMNS))
 
 
 def summarise_folds(per_fold: pd.DataFrame, metric: str = "pr_auc") -> dict[str, float]:
@@ -541,6 +561,30 @@ def write_report(
             "",
             f"**Chosen: {verdict.get('chosen')}** — {verdict.get('reason')}",
             "",
+        ]
+
+    if blocker is None and thresholds is None:
+        # A comparison ran but chose nothing. That is not a blocker — the table
+        # above is real — and it is not a selection either, so everything that
+        # needs a chosen model stops here rather than quietly running on a
+        # default nobody picked.
+        lines += [
+            "## No threshold, calibration or breakdown yet",
+            "",
+            "Every section below this point describes *one* model, and no model has been",
+            "selected: with no rolling-origin fold available inside the training window,",
+            "there is no evidence to select on. The `cv_pr_auc_mean` column above is empty",
+            "for exactly that reason.",
+            "",
+            "Picking one anyway — the best validation score, say, or the top of the ladder —",
+            "would be selection on the validation block, which is the thing the block exists",
+            "to prevent. So the threshold sweep, the calibration curve, the per-source table",
+            "and the leave-one-board-out transfer measurement all wait for fold depth. They",
+            "are exercised meanwhile against the synthetic panel in `tests/`.",
+            "",
+        ]
+    elif blocker is None:
+        lines += [
             "## Threshold",
             "",
             'The operating point is set by an alert budget, not by 0.5. A false "closing',
@@ -609,42 +653,51 @@ def main() -> None:
         split = temporal_split(frame, best_cuts(frame))
         summary, per_fold, val_scores = compare_models(split, args.budget)
         verdict = select(summary, per_fold)
-
-        chosen = str(verdict["chosen"])
-        scores = val_scores[chosen]
-        target = split.val["y"].astype(int)
-        thresholds = threshold_sweep(target, scores, prediction_days(split.val))
-        calibration = reliability_curve(target, scores)
-        by_source = evaluate_by(split.val, scores, "source", n_days=prediction_days(split.val))
-        by_carryover = evaluate_by(
-            split.val, scores, "seen_in_train", n_days=prediction_days(split.val)
-        )
-        # Refits per board, so it is a modelling activity and stays on the
-        # validation block.
-        folds, skipped = leave_one_board_out(split, lambda: build_xgboost(split), args.budget)
-        generalisation = (folds, skipped, *report_tables(folds, skipped))
         print(summary.to_string(index=False))
         print(f"\nchosen: {verdict['chosen']} — {verdict['reason']}")
 
-        row = summary[summary["model"] == chosen].iloc[0]
-        labelled = frame[frame["label_observable"]]
-        ledger.write_report(
-            ledger.append(
-                ledger.record(
-                    stage=ledger.VALIDATION,
-                    provenance=provenance.collect(args.panel, len(frame)),
-                    labelled_waves=len(crawl_waves(labelled)),
-                    labelled_rows=len(labelled),
-                    positives=int((labelled["y"] == 1).sum()),
-                    folds=len(per_fold[chosen]),
-                    chosen=chosen,
-                    pr_auc=row["val_pr_auc"],
-                    cv_pr_auc_mean=row["cv_pr_auc_mean"],
-                    cv_pr_auc_sd=row["cv_pr_auc_sd"],
-                    block_positives=int(target.sum()),
+        # `select` returns no model when no fold could be scored, which on a panel
+        # still accruing depth is the ordinary answer rather than a failure. Every
+        # section below needs *a* model, and the only ways to supply one here —
+        # best validation score, or top of the ladder — are respectively selection
+        # on the validation block and skipping the ladder. So the comparison table
+        # is written, and the rest waits. This used to read `str(verdict["chosen"])`
+        # and die on `KeyError: 'None'` (DEBUGGING.md, 2026-09-09).
+        chosen = verdict["chosen"]
+        if chosen is not None:
+            chosen = str(chosen)
+            scores = val_scores[chosen]
+            target = split.val["y"].astype(int)
+            thresholds = threshold_sweep(target, scores, prediction_days(split.val))
+            calibration = reliability_curve(target, scores)
+            by_source = evaluate_by(split.val, scores, "source", n_days=prediction_days(split.val))
+            by_carryover = evaluate_by(
+                split.val, scores, "seen_in_train", n_days=prediction_days(split.val)
+            )
+            # Refits per board, so it is a modelling activity and stays on the
+            # validation block.
+            folds, skipped = leave_one_board_out(split, lambda: build_xgboost(split), args.budget)
+            generalisation = (folds, skipped, *report_tables(folds, skipped))
+
+            row = summary[summary["model"] == chosen].iloc[0]
+            labelled = frame[frame["label_observable"]]
+            ledger.write_report(
+                ledger.append(
+                    ledger.record(
+                        stage=ledger.VALIDATION,
+                        provenance=provenance.collect(args.panel, len(frame)),
+                        labelled_waves=len(crawl_waves(labelled)),
+                        labelled_rows=len(labelled),
+                        positives=int((labelled["y"] == 1).sum()),
+                        folds=len(per_fold[chosen]),
+                        chosen=chosen,
+                        pr_auc=row["val_pr_auc"],
+                        cv_pr_auc_mean=row["cv_pr_auc_mean"],
+                        cv_pr_auc_sd=row["cv_pr_auc_sd"],
+                        block_positives=int(target.sum()),
+                    )
                 )
             )
-        )
     except SplitTooShallow as error:
         blocker = (
             "No honest three-way split exists on this snapshot, so there is no validation\n"
