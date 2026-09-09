@@ -20,7 +20,7 @@ A posting can vanish for reasons unrelated to hiring. They split in two:
   distinguishable, by this project or by a human reading the dead URL**, and no
   count of them appears in this file for that reason.
 
-## Relisting under a new posting id — 100 closure(s)
+## Relisting under a new posting id — 103 closure(s)
 
 If a posting disappears only to return under a new id, the label has recorded
 a closure that did not happen. Every rate is therefore reported against the
@@ -33,8 +33,8 @@ counts are not yet large enough to answer.
 
 | identity | closed | control (still open) | reading |
 |---|---|---|---|
-| `requisition_id` | 4/97 = 4.1% | 5/72 = 6.9% | **indistinguishable** (-2.8% ± 7.2%) — the difference does not clear twice its standard error, so this sample says nothing either way |
-| `title` | 12/100 = 12.0% | 8/73 = 11.0% | **indistinguishable** (+1.0% ± 9.8%) — the difference does not clear twice its standard error, so this sample says nothing either way |
+| `requisition_id` | 5/99 = 5.1% | 7/77 = 9.1% | **indistinguishable** (-4.0% ± 7.9%) — the difference does not clear twice its standard error, so this sample says nothing either way |
+| `title` | 12/103 = 11.7% | 10/78 = 12.8% | **indistinguishable** (-1.2% ± 9.9%) — the difference does not clear twice its standard error, so this sample says nothing either way |
 
 `requisition_id` is the employer's own key for a role, so a match is the same
 role by their definition. `title` is weak — many distinct roles share one on a
@@ -55,27 +55,27 @@ so it appears as a cliff rather than as drift.
 
 | source | days | smallest | largest | worst_daily_fall |
 |---|---|---|---|---|
-| greenhouse:anthropic | 8 | 571 | 595 | -0.3% |
-| greenhouse:gitlab | 8 | 219 | 232 | -2.2% |
-| greenhouse:figma | 8 | 157 | 163 | -1.9% |
-| greenhouse:duolingo | 8 | 83 | 90 | -1.1% |
-| greenhouse:discord | 8 | 48 | 51 | -5.9% |
-| python_org | 7 | 29 | 32 | -6.2% |
-| greenhouse:airtable | 8 | 16 | 16 | 0.0% |
+| greenhouse:anthropic | 9 | 571 | 595 | -0.5% |
+| greenhouse:gitlab | 9 | 219 | 232 | -2.2% |
+| greenhouse:figma | 9 | 157 | 163 | -1.9% |
+| greenhouse:duolingo | 9 | 83 | 90 | -1.1% |
+| greenhouse:discord | 9 | 48 | 51 | -5.9% |
+| python_org | 8 | 29 | 32 | -6.2% |
+| greenhouse:airtable | 9 | 16 | 16 | 0.0% |
 
 ## Closure dispersion
 
 Closures spread across sources and days are consistent with ordinary hiring.
 A systems change would empty one board on one day.
 
-| source | 2026-08-31 | 2026-09-01 | 2026-09-02 | 2026-09-03 | 2026-09-04 | 2026-09-05 |
-|---|---|---|---|---|---|---|
-| greenhouse:anthropic | 11 | 15 | 6 | 7 | 11 | 2 |
-| greenhouse:discord | 0 | 0 | 4 | 1 | 1 | 0 |
-| greenhouse:duolingo | 1 | 0 | 0 | 1 | 3 | 0 |
-| greenhouse:figma | 4 | 0 | 2 | 4 | 0 | 0 |
-| greenhouse:gitlab | 3 | 5 | 2 | 8 | 6 | 0 |
-| python_org | 0 | 0 | 0 | 1 | 0 | 2 |
+| source | 2026-08-31 | 2026-09-01 | 2026-09-02 | 2026-09-03 | 2026-09-04 | 2026-09-05 | 2026-09-06 |
+|---|---|---|---|---|---|---|---|
+| greenhouse:anthropic | 11 | 15 | 6 | 7 | 11 | 2 | 2 |
+| greenhouse:discord | 0 | 0 | 4 | 1 | 1 | 0 | 0 |
+| greenhouse:duolingo | 1 | 0 | 0 | 1 | 3 | 0 | 0 |
+| greenhouse:figma | 4 | 0 | 2 | 4 | 0 | 0 | 0 |
+| greenhouse:gitlab | 3 | 5 | 2 | 8 | 6 | 0 | 0 |
+| python_org | 0 | 0 | 0 | 1 | 0 | 2 | 1 |
 
 ## What would strengthen this
 

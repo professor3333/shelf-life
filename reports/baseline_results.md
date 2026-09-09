@@ -8,48 +8,89 @@ For a constant predictor, average precision **is** the base rate, ROC-AUC is
 exactly 0.5, and the Brier score of predicting `p` is `p(1-p)`. These are
 derived, not fitted, so they are available before any split is possible.
 
-- labelled rows: **8,037**
-- positives: **100**
-- base rate: **0.0124**
-- constant-predictor PR-AUC: **0.0124**
-- constant-predictor Brier: **0.0123**
+- labelled rows: **9,194**
+- positives: **103**
+- base rate: **0.0112**
+- constant-predictor PR-AUC: **0.0112**
+- constant-predictor Brier: **0.0111**
 
 Accuracy is not reported at any point in this file. At this base rate, always
-predicting "stays open" scores 98.8%.
+predicting "stays open" scores 98.9%.
 
-## The fitted ladder has not run
+## The split
 
-No honest three-way split exists on this snapshot, so no rung above the
-constant predictor has a validation block to be scored on. The refusal:
+- cut at `2026-08-31 03:45:35.705216+00:00` and `2026-09-03 03:45:42.003096+00:00`
+- embargo `2 days 10:21:37.132005` between blocks
+- train 1,104 rows / validation 1,159 rows
+- 4,615 rows discarded to the embargo, 1,161 unlabelled rows dropped before splitting
 
-```
-no cut of this panel yields three usable blocks.
+The test block is not scored here. It is opened once, at the end of the build.
 
-0 of 21 candidate cuts are usable.
-                       train_end                          val_end  embargoed  train_rows  train_pos  val_rows  val_pos  test_rows  test_pos  valid                      reason
-2026-08-31 03:45:35.705216+00:00 2026-09-01 14:07:14.634369+00:00       3445        1104         19         0        0       3488        25  False             val block empty
-2026-08-31 03:45:35.705216+00:00 2026-09-02 03:45:45.645648+00:00       4610        1104         19         0        0       2323         4  False             val block empty
-2026-08-31 03:45:35.705216+00:00 2026-09-03 03:45:42.003096+00:00       4615        1104         19      1159       22       1159         0  False test block has no positives
-2026-08-31 03:45:35.705216+00:00 2026-09-04 03:46:10.052068+00:00       4609        1104         19      2324       43          0         0  False            test block empty
-2026-08-31 03:45:35.705216+00:00 2026-09-05 03:45:34.936729+00:00       3445        1104         19      3488       47          0         0  False            test block empty
-2026-08-31 03:45:35.705216+00:00 2026-09-06 03:45:43.085104+00:00       2286        1104         19      4647       47          0         0  False            test block empty
-2026-09-01 14:07:14.634369+00:00 2026-09-02 03:45:45.645648+00:00       3467        2247         39         0        0       2323         4  False             val block empty
-2026-09-01 14:07:14.634369+00:00 2026-09-03 03:45:42.003096+00:00       4631        2247         39         0        0       1159         0  False             val block empty
-2026-09-01 14:07:14.634369+00:00 2026-09-04 03:46:10.052068+00:00       4625        2247         39      1165       21          0         0  False            test block empty
-2026-09-01 14:07:14.634369+00:00 2026-09-05 03:45:34.936729+00:00       3461        2247         39      2329       25          0         0  False            test block empty
-2026-09-01 14:07:14.634369+00:00 2026-09-06 03:45:43.085104+00:00       2302        2247         39      3488       25          0         0  False            test block empty
-2026-09-02 03:45:45.645648+00:00 2026-09-03 03:45:42.003096+00:00       3488        3390         53         0        0       1159         0  False             val block empty
-2026-09-02 03:45:45.645648+00:00 2026-09-04 03:46:10.052068+00:00       4647        3390         53         0        0          0         0  False             val block empty
-2026-09-02 03:45:45.645648+00:00 2026-09-05 03:45:34.936729+00:00       3483        3390         53      1164        4          0         0  False            test block empty
-2026-09-02 03:45:45.645648+00:00 2026-09-06 03:45:43.085104+00:00       2324        3390         53      2323        4          0         0  False            test block empty
-2026-09-03 03:45:42.003096+00:00 2026-09-04 03:46:10.052068+00:00       3488        4549         75         0        0          0         0  False             val block empty
-2026-09-03 03:45:42.003096+00:00 2026-09-05 03:45:34.936729+00:00       3488        4549         75         0        0          0         0  False             val block empty
-2026-09-03 03:45:42.003096+00:00 2026-09-06 03:45:43.085104+00:00       2329        4549         75      1159        0          0         0  False            test block empty
-2026-09-04 03:46:10.052068+00:00 2026-09-05 03:45:34.936729+00:00       2323        5714         96         0        0          0         0  False             val block empty
-2026-09-04 03:46:10.052068+00:00 2026-09-06 03:45:43.085104+00:00       2323        5714         96         0        0          0         0  False             val block empty
-2026-09-05 03:45:34.936729+00:00 2026-09-06 03:45:43.085104+00:00       1159        6878        100         0        0          0         0  False             val block empty
-```
+## The ladder, scored on validation
 
-This is panel depth, not a cut that can be moved. The scraper adds a wave
-a day; re-running this command is the readiness check.
+| model | description | pr_auc | brier | roc_auc | precision | recall | f1 | alert_budget | flagged | tp | fp | fn |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| prior | constant base rate | 0.019 | 0.0186 | 0.5 | 0.019 | 1 | 0.0373 | 20 | 1159 | 22 | 1137 | 0 |
+| rule_older_than_30d | rule: up more than a month, so not about to close | 0.017 | 0.0186 | 0.399 | 0.0101 | 0.2273 | 0.0194 | 20 | 493 | 5 | 488 | 17 |
+| rule_posted_this_week | rule: fresh postings move, stale ones have stalled | 0.0197 | 0.0186 | 0.519 | 0.0198 | 0.9545 | 0.0387 | 20 | 1063 | 21 | 1042 | 1 |
+| age_ceiling | the best any age-only rule could do (deciles, non-monotone) | 0.0229 | 0.0186 | 0.576 | 0.0278 | 0.1364 | 0.0462 | 20 | 108 | 3 | 105 | 19 |
+| age_only | age_days alone, logistic | 0.0158 | 0.2493 | 0.4187 | 0 | 0 | 0 | 20 | 20 | 0 | 20 | 22 |
+| board_hazard | per-board historical rate | 0.0189 | 0.0187 | 0.4687 | 0.025 | 0.1818 | 0.044 | 20 | 160 | 4 | 156 | 18 |
+| logistic | logistic regression, all allowed features | 0.0174 | 0.0797 | 0.468 | 0 | 0 | 0 | 20 | 20 | 0 | 20 | 22 |
+| decision_tree | decision tree, depth-limited | 0.0197 | 0.2131 | 0.5066 | 0.0207 | 0.4091 | 0.0394 | 20 | 435 | 9 | 426 | 13 |
+| random_forest | random forest, 300 trees | 0.0193 | 0.0318 | 0.4952 | 0 | 0 | 0 | 20 | 20 | 0 | 20 | 22 |
+
+The first rungs are rules, not fits: `rule_older_than_30d` and
+`rule_posted_this_week` are one sentence each, and `age_ceiling` bounds what
+any age-only rule could buy by binning age into deciles and predicting each
+bin's training rate — free to be non-monotone, which `age_only`'s logistic
+fit is not. Everything below them has to beat them.
+
+### Does the modelling beat a rule?
+
+At 20 alerts per prediction day:
+
+- best rule — `age_ceiling`, precision **0.0278**, PR-AUC 0.0229
+- best model — `decision_tree`, precision **0.0207**, PR-AUC 0.0197
+
+**The best rule wins**, by 0.0071 precision at the budget. That is a finding about this problem, not a bug to tune away: on this data a person following one sentence does better than the fitted models, and the honest report of that is worth more than a model that edges past it after enough attempts.
+
+Both numbers are single draws on one validation block. A difference smaller than the fold spread in `reports/model_comparison.md` is not a difference, and at this panel depth most of them will be.
+
+## Per source
+
+| source | n | positives | base_rate | pr_auc | brier |
+|---|---|---|---|---|---|
+| greenhouse:airtable | 16 | 0 | 0 | — | 0.0032 |
+| greenhouse:anthropic | 582 | 7 | 0.012 | 0.0136 | 0.0808 |
+| greenhouse:discord | 48 | 1 | 0.0208 | 0.0213 | 0.0245 |
+| greenhouse:duolingo | 89 | 1 | 0.0112 | 0.0286 | 0.0436 |
+| greenhouse:figma | 160 | 4 | 0.025 | 0.03 | 0.138 |
+| greenhouse:gitlab | 232 | 8 | 0.0345 | 0.0484 | 0.0742 |
+| python_org | 32 | 1 | 0.0312 | 0.0455 | 0.0312 |
+
+## Carried-over postings against unseen ones
+
+`design.md` §8 accepted subject overlap across the cut and promised this
+breakdown as the memorisation diagnosis. A large gap is the finding.
+
+| seen_in_train | n | positives | base_rate | pr_auc | brier |
+|---|---|---|---|---|---|
+| False | 107 | 1 | 0.0093 | 0.0112 | 0.076 |
+| True | 1052 | 21 | 0.02 | 0.0188 | 0.0801 |
+
+## Calibration, logistic regression
+
+| bin_low | bin_high | n | mean_predicted | observed_rate |
+|---|---|---|---|---|
+| 0 | 0.1 | 793 | 0.0221 | 0.0227 |
+| 0.1 | 0.2 | 124 | 0.1479 | 0.0081 |
+| 0.2 | 0.3 | 73 | 0.2416 | 0.0137 |
+| 0.3 | 0.4 | 44 | 0.3503 | 0.0227 |
+| 0.4 | 0.5 | 23 | 0.4548 | 0.0435 |
+| 0.5 | 0.6 | 28 | 0.5554 | 0 |
+| 0.6 | 0.7 | 25 | 0.6474 | 0 |
+| 0.7 | 0.8 | 15 | 0.7565 | 0 |
+| 0.8 | 0.9 | 14 | 0.8546 | 0 |
+| 0.9 | 1 | 20 | 0.9372 | 0 |
 

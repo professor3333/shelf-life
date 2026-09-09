@@ -405,10 +405,26 @@ def _branch(fill: Fill, min_category_frequency: int = MIN_CATEGORY_FREQUENCY) ->
                 ),
             ]
         )
+    # `keep_empty_features` is not a detail. Left at its default, `SimpleImputer`
+    # *drops* any column with no observed value in the fold it was fitted on —
+    # silently, and the ColumnTransformer's output then has one fewer column.
+    # Two things break. The stated fill policy stops being applied: `board_growth`
+    # is null on each source's first observed wave by construction, so on a
+    # training block one wave deep it is null *everywhere*, and the column whose
+    # documented reason is "zero says no observed change" is instead deleted.
+    # And the matrix width becomes a function of the training fold's missingness
+    # rather than of `SPEC`, so two folds — or a rehearsal and the freeze that
+    # follows it — can fit pipelines with different feature counts under the same
+    # name. That is training/serving skew arriving through the imputer.
+    #
+    # Keeping the column is also the more honest of the two: a fold that observed
+    # nothing of a feature has no information about it, and a constant column
+    # carries exactly no information. Dropping it carries none either, but
+    # changes the schema to say so.
     strategies = {
-        "median": SimpleImputer(strategy="median"),
-        "zero": SimpleImputer(strategy="constant", fill_value=0.0),
-        "one": SimpleImputer(strategy="constant", fill_value=1.0),
+        "median": SimpleImputer(strategy="median", keep_empty_features=True),
+        "zero": SimpleImputer(strategy="constant", fill_value=0.0, keep_empty_features=True),
+        "one": SimpleImputer(strategy="constant", fill_value=1.0, keep_empty_features=True),
     }
     return Pipeline([("impute", strategies[fill]), ("scale", StandardScaler())])
 

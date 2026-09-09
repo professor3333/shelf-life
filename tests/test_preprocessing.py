@@ -133,6 +133,73 @@ def test_each_policy_fills_with_the_value_its_reason_states():
     assert any(MISSING_CATEGORY in name for name in encoded)
 
 
+def _all_null_like(column: pd.Series, dtype: str) -> pd.Series:
+    """An all-null column in a *numeric* dtype.
+
+    Not `frame[c] = None`, which yields `object` — a dtype the panel never
+    produces and `select_columns` routes elsewhere entirely, so a test written
+    that way would exercise a path serving cannot reach and miss the one it can.
+    Both real dtypes are covered: the fixture builds `board_growth` as
+    `float64`, the assembled panel as nullable `Int64`.
+    """
+    return pd.Series([None] * len(column), index=column.index, dtype=dtype)
+
+
+@pytest.mark.parametrize("dtype", ["float64", "Int64"])
+def test_a_feature_absent_from_the_whole_training_fold_is_still_filled(dtype):
+    """`board_growth` is null on each source's *first* observed wave, because
+    there is no previous run to difference against. On a training block one wave
+    deep it is therefore null in every row — which is exactly what the real
+    panel handed the first rehearsal on 2026-09-09.
+
+    Left to its default, `SimpleImputer` drops such a column instead of filling
+    it, so the stated policy ("zero says no observed change") silently stops
+    being applied and the matrix loses a column. That makes the feature count a
+    function of the fold's missingness rather than of `SPEC`: two folds fit
+    pipelines of different widths under the same name, which is training/serving
+    skew arriving through the imputer.
+
+    The fixture only ever nulled *some* rows, so nothing caught it.
+    """
+    frame = _frame()
+    frame["board_growth"] = _all_null_like(frame["board_growth"], dtype)
+
+    preprocessor = build_preprocessor(min_category_frequency=1)
+    columns = tuple(column.name for column in feature_columns())
+    prepared = select_columns(derive_features(frame), columns)
+    matrix = preprocessor.fit_transform(prepared)
+
+    names = list(preprocessor.get_feature_names_out())
+    assert "board_growth" in names, "an all-null column must survive, not vanish"
+    assert len(names) == matrix.shape[1]
+    assert not np.isnan(np.asarray(matrix, dtype=float)).any()
+
+    # A column no fold observed carries no information, and says so by being
+    # constant rather than by disappearing.
+    assert np.ptp(np.asarray(matrix, dtype=float)[:, names.index("board_growth")]) == 0.0
+
+
+def test_the_matrix_width_does_not_depend_on_which_block_was_fitted():
+    """The corollary of the test above, stated as the property that matters: a
+    pipeline fitted on a fold where a feature is wholly absent must produce the
+    same columns as one fitted on a fold where it is present, or the frozen
+    artifact's contract means something different from the model behind it."""
+    frame = _frame()
+    columns = tuple(column.name for column in feature_columns())
+    prepared = select_columns(derive_features(frame), columns)
+
+    complete = build_preprocessor(min_category_frequency=1).fit(prepared)
+
+    starved = prepared.copy()
+    starved["board_growth"] = _all_null_like(starved["board_growth"], "Int64")
+    # A median-fill column too: a median of nothing is undefined, and the width
+    # must not depend on that either.
+    starved["salary_min_clean"] = _all_null_like(starved["salary_min_clean"], "float64")
+    depleted = build_preprocessor(min_category_frequency=1).fit(starved)
+
+    assert list(complete.get_feature_names_out()) == list(depleted.get_feature_names_out())
+
+
 def test_there_is_no_blanket_missing_indicator():
     """An indicator over the archive-derived columns reconstructs board identity,
     which design.md §4 has not decided to allow. Missingness is encoded only for
