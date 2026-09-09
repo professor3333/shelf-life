@@ -370,10 +370,15 @@ recorded next to the code that applies it, in `src/features/preprocessing.py`.
 absence as its own feature, because a posting that declines to state pay is
 telling you something.
 
-**Two postings came back from the dead.** The label requires that a posting
-never reappeared, which reads the whole remaining panel — so a label can flip as
-depth accrues. Two of 1,240 postings did exactly that. It is measured
-(`resurrection_risk`), reported, and still open (`docs/design.md` §11).
+**Postings come back from the dead, and the label now stops waiting for them.**
+Of 1,530 postings, 145 vanished and returned: 144 after a single absent run,
+which the two-run corroboration rule already refuses to call a removal, and
+**one** after two. None has ever returned after three. So a label is final the
+moment corroboration is satisfied (`docs/design.md` §11, decided 2026-09-09),
+which mislabels that one posting — 0.065% — and makes the embargo's arithmetic
+true. The clause it replaces read the whole remaining panel, so the reach was
+unbounded and no embargo of any width could seal a training label from the
+evaluation period.
 
 ---
 
@@ -1152,7 +1157,10 @@ Branch per unit of work, PR per feature, and the suite green before either.
 
 Generated files under `reports/` name the command that writes them; regenerate
 rather than edit. `docs/design.md` records every decision with a date, the
-reasoning, and what would change my mind — including the four still open.
+reasoning, the measurement behind it and what would change my mind. As of
+2026-09-09 none is open: the last three — board identity, the resurrection
+window, and board context at serve time — were closed on measurements from the
+2026-09-08 snapshot, and each carries the trigger that would reopen it.
 
 ---
 
@@ -1371,25 +1379,38 @@ screen rather than in a footnote — that is the mitigation, and it is deliberat
 1. **"Closed" is not "filled."** The label is disappearance from the board. A
    posting can be pulled, expire, be reposted, or be moved to another system.
    Every claim this project makes is about disappearance.
-2. **It is a Greenhouse model.** arbeitnow — 78% of the collected postings — is
-   excluded because its crawls never observed a whole board. Whatever is learned
-   here is learned from six Greenhouse boards and python_org, and the per-source
-   breakdown is mandatory reporting for exactly that reason.
+2. **It is trained on Greenhouse boards, though it does not use board identity.**
+   arbeitnow — 78% of the collected postings — is excluded because its crawls
+   never observed a whole board, so whatever is learned here is learned from six
+   Greenhouse boards and python_org. `docs/design.md` §4 excludes board identity
+   as a feature, which is what lets a posting from an unseen board be scored at
+   all; it does not make the *training population* representative. Those are
+   different claims and only the first is settled. The per-source breakdown and
+   the leave-one-board-out transfer measurement are mandatory reporting for
+   exactly that reason.
 3. **The panel is short and the positives are few.** 96 positives across 6,874
    labelled rows. Differences of a few points between models will be inside the
    noise, which is why fold variance is reported and paired differences are used
    rather than differences of averages.
-4. **Board context is missing at serve time.** Four features describe the board
-   rather than the posting, and a caller holding one job ad cannot supply them.
-   They are imputed when absent, which makes them inert for that caller — the
-   response says so, and `docs/design.md` §12 records the open decision.
+4. **Board context is missing at serve time, and it costs something.** Four
+   features describe the board rather than the posting, and a caller holding one
+   job ad cannot supply them. They are imputed when absent, which makes them
+   inert for that caller — the response says so via `board_context_supplied`,
+   and `docs/design.md` §12 keeps them on that basis. The cost is measured
+   rather than assumed: **0.0019 validation PR-AUC**, against the 0.0005 that a
+   refit-without-them suggests. The refit redistributes their weight; the
+   deployed model cannot, so it is the larger number that a stranger gets.
 5. **Left truncation.** Postings already on the board when collection started
    had been open for an unknown time. `age_days` is measured from the employer's
    own publication instant where the archive provides one, never from when this
    project first looked.
-6. **A label is never final.** "Never reappeared" reads the whole remaining
-   panel, so a posting returning after two absences flips its earlier label. Two
-   of 1,240 have. Measured, reported, and open.
+6. **A label is final at corroboration, and 0.065% of them are wrong for it.**
+   Two consecutive absences means removed, whatever the posting does afterwards
+   (`docs/design.md` §11, decided 2026-09-09). Of 1,530 postings, 145 vanished
+   and came back — 144 after a single absent run, which corroboration already
+   ignores, and **one** after two. That one is now labelled removed and was not.
+   The clause it replaces read the whole remaining panel, which meant no embargo
+   of any width could seal a training label from the evaluation period.
 7. **No real evaluation has happened yet.** Everything above describes a system
    that is built and verified on synthetic data. Until the depth gate clears,
    treat every capability claim as *tested*, and no accuracy claim as *made*.

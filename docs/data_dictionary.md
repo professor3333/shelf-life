@@ -39,7 +39,7 @@ by construction.
 | column | meaning | at prediction point? | notes |
 |---|---|---|---|
 | `observed_at` | the run's start instant — **this is `t`** | n/a | not a feature; it *is* the prediction point. Calendar derivations of it (day-of-week) are features |
-| `source` | which board the posting came from | **open** | see `design.md` §4. Strongest signal in the data and partly instrumental |
+| `source` | which board the posting came from | **excluded** | `design.md` §4, decided 2026-09-09. Every board's rate sits inside a 95% interval containing the pooled one, and a model needing the board cannot score an unseen board |
 | `source_id` | the board's own id for the posting | no | identity key. A surrogate id, monotonic in creation order |
 | `title` | job title as posted | **yes** | text feature; keyword and seniority flags derived from it are also as-of-`t` |
 | `company` | employer name as posted | **yes** | normalised, not canonicalised — see `src/data/clean.py` |
@@ -98,7 +98,7 @@ table.** Listed here so that each column's exclusion is on the record.
 | column | meaning | at prediction point? | why not |
 |---|---|---|---|
 | `id` | surrogate primary key | no | monotonic in insertion time; a model given it learns calendar order |
-| `source`, `source_id` | identity | n/a | used to join, never as a feature except as `design.md` §4 decides |
+| `source`, `source_id` | identity | n/a | used to join, never as a feature — `design.md` §4 excluded board identity on 2026-09-09 |
 | `last_seen` | last run that saw the posting | **no — this is the label** | anything derived from it is the outcome. `last_seen - first_seen` is the outcome minus a constant |
 | `first_seen` | first run that saw it | no | legal (`<= t`) but misleading: for 1,135 of 1,240 postings it records when *this project* started looking, not when the posting appeared |
 | `title`, `company`, `location`, `remote` | current values | no | current state. A posting edited after `t` leaks its edit backwards |

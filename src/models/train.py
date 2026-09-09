@@ -150,8 +150,8 @@ BOARD_CONTEXT_ABLATION = Ablation(
     name="board context (all four)",
     features=BOARD_CONTEXT,
     hypothesis=(
-        "board context is worth having at all — the question `docs/design.md` §12 "
-        "is open on, and the only one that matches what a caller actually loses"
+        "board context is worth having at all — what `docs/design.md` §12 was decided "
+        "on, and the closest a refit gets to what a caller actually loses"
     ),
 )
 

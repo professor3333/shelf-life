@@ -134,7 +134,7 @@ seven sources have exactly one company each — Anthropic 629 postings, GitLab
 reproduces board identity almost exactly. The seventh, python_org, carries 25
 companies with one to three postings apiece, so it has almost no variance there
 either. The feature therefore has essentially **no within-board information at
-all**, and admitting it would quietly re-open [`design.md`](design.md) §4. It is
+all**, and admitting it would quietly reverse [`design.md`](design.md) §4. It is
 gated with `source` and `company` rather than shipped as an ordinary feature.
 
 ### Excluded — leak, skew or dead
@@ -152,12 +152,17 @@ gated with `source` and `company` rather than shipped as an ordinary feature.
 | `posted_at` | **dead (superseded)** | a string date truncated to midnight. `first_published` is the same fact at full precision |
 | `salary_raw` | **leak-adjacent, excluded as text** | the value is as-of-`t`, but as a feature it is high-cardinality free text whose *shape* fingerprints the board. Its information is already carried by `salary_stated` and the clean amounts |
 
-### The two that Decision 4 owns
+### The two that Decision 4 owns — **settled 2026-09-09: excluded**
 
 | column | verdict | reason |
 |---|---|---|
-| `source` | **open** | [`design.md`](design.md) §4. The strongest signal in the data and partly instrumental |
-| `company` | **open, and tied to `source`** | see below |
+| `source` | **excluded** | [`design.md`](design.md) §4. Every board's closure rate sits inside a 95% interval containing the pooled 7.76%, so identity buys nothing this data can show — and a model that needs the board cannot score a posting from a board it has never seen, which is the product |
+| `company` | **excluded, and tied to `source`** | a lossless re-encoding of it; see below |
+
+Both stay behind `include_board_identity`, which is off. The switch remains
+because §4 names what would reverse the decision — a per-board rate whose
+interval clears the pooled one, or a large leave-one-board-out transfer gap —
+and neither is measurable at this depth.
 
 ---
 
@@ -176,7 +181,10 @@ Greenhouse only. A missingness indicator over any of them reconstructs part of
 
 Decision 4 is therefore not "is `source` a feature?" but "is *board identity* a
 feature?", and it has at least four columns and one missingness pattern in scope.
-That is a wider question than [`design.md`](design.md) §4 currently states.
+[`design.md`](design.md) §4 was rewritten around that wider question and answered
+it on 2026-09-09: **no**. The consequence for this audit is that all four
+columns and the missingness pattern move together — excluding `source` while
+keeping any of the others would exclude nothing.
 
 **2. Missingness here is structural, and it is a fingerprint.** This is the same
 lesson the raw data taught, arriving again one layer up. Nothing in the frame is
@@ -236,5 +244,5 @@ Three rules from the table are implemented rather than described:
   over four days and the tail will grow;
 - **there is no blanket missing-indicator step.** Missingness is encoded only
   for categoricals, where "not stated" is a real level. An indicator over the
-  archive-derived numerics would reconstruct board identity, which is the
-  decision [`design.md`](design.md) §4 has not yet made.
+  archive-derived numerics would reconstruct board identity, which
+  [`design.md`](design.md) §4 has decided against.
