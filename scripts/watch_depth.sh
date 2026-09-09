@@ -140,11 +140,25 @@ if [ "${USABLE}" -eq 0 ]; then
   exit 4
 fi
 
-if [ "${FOLDS}" -eq 0 ]; then
+# The gate is the *target* fold count, not the first fold. `SHORTFALL` counts
+# waves to the target rather than to one, and the two are days apart: one fold
+# gives a mean with no spread at all, and two give a standard deviation over two
+# numbers, which is not a standard deviation. Three is the fewest that can show a
+# model losing a fold it was expected to win, which is the whole reason to wait.
+#
+# The first draft branched on `FOLDS -eq 0` and would have announced "the fold
+# gate is OPEN" on a day the shortfall was still positive, then pointed at
+# `freeze` — contradicting the two-gate table in the README from a script whose
+# only job is to say which gate we are behind.
+if [ "${SHORTFALL}" -gt 0 ]; then
   if [ "${CHANGED}" -eq 1 ]; then
     echo
     echo "Still accruing: ${SHORTFALL} more labelled wave(s), projected ${CLEARS}."
-    echo "A model chosen today would be chosen on a single number with no spread."
+    if [ "${FOLDS}" -eq 0 ]; then
+      echo "A model chosen today would be chosen on a single number with no spread."
+    else
+      echo "${FOLDS} fold(s) is a mean without a believable spread — not yet a comparison."
+    fi
   fi
   exit 3
 fi

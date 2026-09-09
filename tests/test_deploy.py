@@ -30,6 +30,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from src.data.split import DEFAULT_TARGET_FOLDS
+
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW = ROOT / ".github" / "workflows" / "verify-deployment.yml"
 DOCKERFILE = ROOT / "Dockerfile"
@@ -81,6 +83,27 @@ def test_the_depth_watch_agent_runs_a_script_that_exists() -> None:
     # 09:30 local; this must come after it.
     assert parsed["StartCalendarInterval"]["Hour"] >= 10
     assert parsed["RunAtLoad"] is False
+
+
+def test_the_depth_watch_gates_on_the_target_fold_count() -> None:
+    """The watch must be behind the same gate the README's table names.
+
+    `SHORTFALL` counts waves to `DEFAULT_TARGET_FOLDS`; `FOLDS` is how many exist
+    today. Branching on `FOLDS -eq 0` — which the first draft did — announces
+    "the fold gate is OPEN" on a day the shortfall is still positive and points
+    the reader at `freeze`, from the one script whose entire job is to say which
+    gate we are behind. One fold is a mean with no spread; two give a standard
+    deviation over two numbers, which is not one.
+    """
+    script = Path("scripts/watch_depth.sh").read_text()
+    before_the_gate, _, _ = script.partition("== the fold gate is OPEN")
+
+    assert 'if [ "${SHORTFALL}" -gt 0 ]; then' in before_the_gate, (
+        "the gate must be the shortfall to the target, not the presence of any fold"
+    )
+    assert f"(want {DEFAULT_TARGET_FOLDS})" in script, (
+        "the script reports a target the project does not hold"
+    )
 
 
 def test_the_service_plan_is_free(render: dict) -> None:
