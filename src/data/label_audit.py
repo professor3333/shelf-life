@@ -189,6 +189,93 @@ def closure_dispersion(panel: pd.DataFrame) -> pd.DataFrame:
     return table.reset_index()
 
 
+#: How many complete crawls a posting has to be seen in before its disappearance
+#: is treated as evidence about hiring rather than about the crawl. Six is the
+#: first bucket at which the H=1 closure rate collapses to the panel's background
+#: level; below it the rate is an order of magnitude higher.
+SETTLED_OBSERVATIONS = 6
+
+
+def lifespan_concentration(panel: pd.DataFrame) -> pd.DataFrame:
+    """Closure rate against how many panel rows the posting ever has.
+
+    **What this is looking for.** A posting seen once and never again is
+    indistinguishable, in the panel, from a posting that was filled the next
+    morning — both are "absent from two consecutive complete runs and never seen
+    again". But one of those is a hire and the other is a crawl that briefly
+    included a row it then stopped returning, and the label cannot tell them
+    apart from the outside.
+
+    The signature of the second is that closures pile up on postings with almost
+    no observed life. If the closure rate among postings seen once is many times
+    the rate among postings seen throughout, the target is measuring the
+    collection process, and any feature correlated with how long a posting has
+    been around — `age_days` above all — will predict it beautifully and mean
+    nothing.
+    """
+    labelled = panel[panel["label_observable"]].copy()
+    if labelled.empty:
+        return pd.DataFrame()
+
+    observations = panel.groupby(["source", "source_id"]).size().rename("n_obs")
+    labelled = labelled.join(observations, on=["source", "source_id"])
+    labelled["seen in"] = pd.cut(
+        labelled["n_obs"],
+        [0, 1, 2, 3, 5, float("inf")],
+        labels=["1 run", "2 runs", "3 runs", "4-5 runs", "6+ runs"],
+    )
+    table = (
+        labelled.groupby("seen in", observed=True)["y"]
+        .agg(rows="size", closures="sum", closure_rate="mean")
+        .reset_index()
+    )
+    table["closure_rate"] = table["closure_rate"].round(4)
+    return table
+
+
+def lifespan_verdict(panel: pd.DataFrame) -> str:
+    """Is the target measuring hiring, or the crawl's grip on a listing?"""
+    labelled = panel[panel["label_observable"]].copy()
+    if labelled.empty or labelled["y"].sum() == 0:
+        return "_No closures yet._"
+
+    observations = panel.groupby(["source", "source_id"]).size().rename("n_obs")
+    labelled = labelled.join(observations, on=["source", "source_id"])
+    brief = labelled[labelled["n_obs"] < SETTLED_OBSERVATIONS]
+    settled = labelled[labelled["n_obs"] >= SETTLED_OBSERVATIONS]
+    if brief.empty or settled.empty:
+        return "_Every posting falls on one side of the threshold; nothing to compare._"
+
+    brief_rate, settled_rate = float(brief["y"].mean()), float(settled["y"].mean())
+    share = float(brief["y"].sum()) / float(labelled["y"].sum())
+    ratio = brief_rate / settled_rate if settled_rate else float("inf")
+
+    summary = (
+        f"Postings seen in fewer than {SETTLED_OBSERVATIONS} complete runs are "
+        f"{brief.shape[0] / labelled.shape[0]:.1%} of labelled rows and carry "
+        f"**{share:.1%} of all closures**: {brief_rate:.1%} against {settled_rate:.1%}, "
+        f"a factor of {ratio:.0f}."
+    )
+    if ratio >= 10:
+        return (
+            f"{summary}\n\n**The target is dominated by postings that barely existed in "
+            "the panel.** At this concentration the label is substantially a record of "
+            "which rows the crawl kept returning, not of which roles were filled, and any "
+            "feature that tracks how long a posting has been around will predict it "
+            "very well while meaning nothing. Numbers from this horizon describe the "
+            "collection process and must not be read as model quality."
+        )
+    if ratio >= 3:
+        return (
+            f"{summary}\n\nElevated but not overwhelming. Worth watching: the mechanism "
+            "that produces it does not switch on, it scales."
+        )
+    return (
+        f"{summary}\n\nFlat enough that closures are not concentrated on postings the "
+        "crawl barely held, which is what this check exists to rule out."
+    )
+
+
 def _verdict(comparison: Comparison) -> str:
     verdict = comparison.verdict
     if verdict == "not assessable":
@@ -217,6 +304,7 @@ def _verdict(comparison: Comparison) -> str:
 
 def render(panel: pd.DataFrame) -> str:
     comparisons = [compare_relisting(panel, key) for key in RELIST_KEYS]
+    lifespan = lifespan_concentration(panel)
     labelled = panel[panel["label_observable"]]
     positives = int((labelled["y"] == 1).sum())
 
@@ -302,6 +390,17 @@ def render(panel: pd.DataFrame) -> str:
         else "_No closures yet._"
     )
     lines += [
+        "",
+        "## Closures against observed lifespan",
+        "",
+        "A posting seen once and never again is indistinguishable, in the panel, from a",
+        "posting filled the next morning: both are absent from two consecutive complete",
+        "runs and never seen again. One is a hire, the other a crawl that briefly",
+        "included a row it then stopped returning, and the label cannot tell them apart.",
+        "",
+        _table(lifespan, list(lifespan.columns)) if not lifespan.empty else "_No closures yet._",
+        "",
+        lifespan_verdict(panel),
         "",
         "## What would strengthen this",
         "",

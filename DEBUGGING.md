@@ -4,6 +4,53 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-10 — 94% of the closures are postings the crawl barely held
+
+- **Problem:** no crash. The H=1 rehearsal produced `age_only` — a logistic
+  regression on `age_days` alone — at **PR-AUC 0.777** against a base rate of
+  0.0815, with precision 1.000 at the alert budget. Ranking by `-age_days` alone
+  gives 0.785. A single feature carrying a result like that on this panel is not
+  good news, it is a symptom.
+- **Root cause:** the target is concentrated on postings that barely appear in
+  the panel at all. Closure rate by how many complete runs a posting is ever
+  seen in, **at H = 7, the real horizon**:
+
+  | seen in | rows | closures | rate |
+  |---|---|---|---|
+  | 1 run | 20 | 20 | 1.000 |
+  | 2 runs | 38 | 38 | 1.000 |
+  | 3 runs | 29 | 29 | 1.000 |
+  | 4-5 runs | 78 | 78 | 1.000 |
+  | 6+ runs | 2,077 | 10 | 0.005 |
+
+  Postings seen in fewer than six runs are **7.4% of labelled rows and carry
+  94.3% of all closures** — 100.0% against 0.5%, a factor of 208. The measured
+  base rate of 7.8% is therefore very close to the rate at which the crawl shows
+  a row briefly and then stops returning it. A posting seen once and never again
+  is, from inside the panel, indistinguishable from one filled the next morning:
+  both are "absent from two consecutive complete runs and never seen again". One
+  is a hire; the other is crawl fidelity. `age_days` separates them almost
+  perfectly, which is why it scores, and it is measuring the collection process.
+- **Solution:** not attempted — the fix is a change to the labelling rule or to
+  which rows are `label_observable`, and that is a decision about what the
+  project is predicting, not a bug to patch. What is committed is the
+  measurement: `lifespan_concentration` and `lifespan_verdict` in
+  `src/data/label_audit.py`, which run on every audit, print the table above and
+  say plainly when the concentration is high enough that the numbers describe
+  the crawl. It was previously invisible.
+- **Lesson:** **an asymmetric label is a leak even when every row is honest.** A
+  closure is knowable the moment a posting vanishes; survival needs the whole
+  horizon to be observed. Anything correlated with how long a row has been
+  around therefore predicts the *observability* of the label rather than the
+  event, and the shorter the panel the larger that effect. The 2026-09-08 fix
+  removed the panel-edge cohort, which was the visible half of this; the general
+  form — short observed life implies positive, whatever the reason for the short
+  life — survived it. **Check a headline score against the thing that would make
+  it trivially achievable before believing it**, and prefer measuring the
+  suspect distribution over arguing about the number.
+
+---
+
 ## 2026-09-10 — A categorical whose levels are numbers, filled with a string
 
 - **Problem:** the ladder stopped on the real H=1 panel, on the first rung, for
