@@ -586,3 +586,156 @@ def test_no_fitted_model_wins_on_a_label_that_is_pure_noise():
         f"a fitted model ({verdict['chosen']}) was selected on a label that is pure "
         f"noise, by: {verdict['reason']}"
     )
+
+
+# --- showing the refusal rather than asserting it ----------------------------
+
+
+def test_the_fold_census_enumerates_every_legal_cut():
+    """ "No fold is available" invites the retort *try a different cut*.
+
+    The census answers it exhaustively, and pins the contract `best_cuts`
+    documents: once any cut reaches the target the chosen one must too, and while
+    no cut does, the chosen one must be the deepest available. `best_cuts` does
+    *not* simply maximise folds — past the target it prefers proportional blocks,
+    because maximising folds starves validation and test — so the check has to be
+    the contract rather than the maximum.
+    """
+    import sys
+
+    sys.path.insert(0, "tests")
+    from panels import make_panel
+
+    from src.data.split import DEFAULT_TARGET_FOLDS, best_cuts, temporal_split
+    from src.models.evaluate import fold_census, wave_forward_folds
+
+    panel = make_panel(n_waves=20)
+    census = fold_census(panel)
+    assert not census.empty, "a twenty-wave panel admits at least one legal cut"
+    assert set(census.columns) >= {"train_end", "val_end", "folds", "val_positives"}
+
+    chosen = temporal_split(panel, best_cuts(panel))
+    chosen_folds = len(wave_forward_folds(chosen.train, chosen.embargo))
+    available = int(census["folds"].max())
+
+    if available >= DEFAULT_TARGET_FOLDS:
+        assert chosen_folds >= DEFAULT_TARGET_FOLDS, (
+            f"a legal cut yields {available} fold(s) but the chosen cut yields "
+            f"{chosen_folds}, below the target of {DEFAULT_TARGET_FOLDS}"
+        )
+    else:
+        assert chosen_folds == available, (
+            f"no cut reaches the target, so the chosen cut must be the deepest available "
+            f"({available}); it yields {chosen_folds}"
+        )
+
+
+def test_the_census_is_empty_when_no_cut_is_legal():
+    """A panel too shallow to cut has nothing to enumerate, and must not raise."""
+    import sys
+
+    sys.path.insert(0, "tests")
+    from panels import make_panel
+
+    from src.models.evaluate import fold_census
+
+    assert fold_census(make_panel(n_waves=2)).empty
+
+
+# --- the reading that must not become a verdict ------------------------------
+
+
+def _summary(fitted: float, heuristic: float) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "model": ["xgboost", "age_ceiling"],
+            "val_pr_auc": [fitted, heuristic],
+        }
+    )
+
+
+def test_the_complexity_reading_never_reads_as_a_selection():
+    """It reports a direction. A direction is not evidence, and it has to say so.
+
+    The failure this guards is a reader taking the sentence "xgboost is ahead" out
+    of a report whose verdict is `Chosen: None` — which is selection on the
+    validation block arriving by paraphrase.
+    """
+    import sys
+
+    from src.models.evaluate import _complexity_reading
+
+    sys.path.insert(0, "tests")
+    from panels import make_panel
+
+    text = "\n".join(_complexity_reading(_summary(0.4, 0.1), make_panel(n_waves=6)))
+    assert "not evidence" in text
+    assert "selection on the validation block" in text
+    assert "Chosen" not in text
+
+
+def test_the_reading_branches_on_which_side_actually_leads():
+    """The consequence must follow the direction, not be pasted under both.
+
+    An earlier draft closed with "step 4 returns the heuristic" regardless, so a
+    report where the fitted model led contradicted itself two lines later.
+    """
+    import sys
+
+    from src.models.evaluate import _complexity_reading
+
+    sys.path.insert(0, "tests")
+    from panels import make_panel
+
+    panel = make_panel(n_waves=6)
+    ahead = "\n".join(_complexity_reading(_summary(0.4, 0.1), panel))
+    assert "step 3 of the rule buys the complexity" in ahead
+
+    behind = "\n".join(_complexity_reading(_summary(0.05, 0.2), panel))
+    assert "no fitted rung beats a rule" in behind
+    assert "step 4 of the rule returns the heuristic" in behind
+
+
+def test_a_target_dominated_by_short_lived_postings_is_flagged_in_the_reading():
+    """The score that looks most like a working model is the one to distrust here.
+
+    `label_validity.md` carries the measurement, but this is the table where
+    somebody decides whether a model works — and the two files being separate is
+    how a reader ends up believing the optimistic one.
+    """
+    import sys
+
+    sys.path.insert(0, "tests")
+    from panels import make_panel
+
+    from src.models.evaluate import _lifespan_caveat
+
+    panel = make_panel(n_waves=8).copy()
+    # Half the postings are held for one wave only and every one of them closes;
+    # the rest are held throughout and none do. That is the shape the real panel
+    # has, exaggerated so the threshold is unambiguous.
+    key = panel["source"].astype(str) + "|" + panel["source_id"].astype(str)
+    brief_ids = set(pd.unique(key)[: len(pd.unique(key)) // 2])
+    is_brief = key.isin(brief_ids)
+    panel = panel[~is_brief | (panel["t"] == panel["t"].min())].copy()
+    key = panel["source"].astype(str) + "|" + panel["source_id"].astype(str)
+    panel["y"] = key.isin(brief_ids).astype("Int8")
+    panel["label_observable"] = True
+
+    text = "\n".join(_lifespan_caveat(panel))
+    assert "of the closures in this panel belong to postings seen in fewer than" in text
+    assert "collection process" in text
+
+
+def test_a_target_spread_across_lifespans_is_not_flagged():
+    """A caveat that fires on every panel is a caveat nobody reads."""
+    import sys
+
+    sys.path.insert(0, "tests")
+    from panels import make_panel
+
+    from src.models.evaluate import _lifespan_caveat
+
+    panel = make_panel(n_waves=8).copy()
+    panel["label_observable"] = True
+    assert _lifespan_caveat(panel) == []
