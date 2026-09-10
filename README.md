@@ -16,6 +16,13 @@ the UI.
 > the leakage audit, the temporal split, the model ladder, experiment tracking,
 > the frozen-artifact packaging, the API, the container and the UI.
 >
+> **It is deployed, and it is serving no model.** The API answers at
+> <https://shelf-life-5hin.onrender.com> and the UI at
+> <https://shelf-life-2l8tanmdatboms9mhxh3rj.streamlit.app/> — both public, both
+> free tier, both live as you read this. `/health` reports `degraded` and
+> `/predict` returns 503, because `MODEL_TAG` names no release yet. That is the
+> intended state, not an outage: see [Deployment](#deployment).
+>
 > **The measured 7-day base rate is 7.76%** (2026-09-09, 174 closures in 2,242
 > settled job-days) — replacing the 11.3% that a constant-hazard extrapolation
 > had planned for. **No model has been fitted at H = 7 yet**: the horizon needs
@@ -1205,11 +1212,44 @@ kind it is, is stated wherever it matters.
 
 ## Deployment
 
-**Not yet deployed**, by choice. The service, the container and the UI are
-built and tested; what would go on the public URL today is a model fitted on a
-synthetic fixture, and a link a stranger can hit should return a number that
-means something. The deploy happens when the panel clears the depth gate and a
-real artifact exists.
+**Live, and serving no model — deliberately.** Both URLs answer right now:
+
+|     | URL                                                     | what it does today                                                |
+| --- | ------------------------------------------------------- | ----------------------------------------------------------------- |
+| API | <https://shelf-life-5hin.onrender.com>                  | `/health` → `degraded` · `/docs` browsable · `/predict` → **503**  |
+| UI  | <https://shelf-life-2l8tanmdatboms9mhxh3rj.streamlit.app/> | loads, and reports the API's health before showing you a form   |
+
+**What is absent is the model, not the deployment.** The service, the container,
+the UI and the release-fetching build all went up on 2026-09-06, before there was
+anything to serve, and that was the point: the cold-start baseline below is a
+measurement of a *real* instance, which is only possible if a real instance
+exists, and proving the deploy path while a failure is still cheap means the day
+the first artifact is frozen the only new thing in the chain is the artifact.
+
+`MODEL_TAG` is empty, so the image builds without a model and says so in the open
+rather than answering with a number nobody should trust:
+
+```
+$ curl -s -X POST https://shelf-life-5hin.onrender.com/predict \
+    -H 'Content-Type: application/json' \
+    -d '{"title":"Senior Data Engineer","location":"Berlin"}'
+{"detail":"no model loaded: no artifact at models/shelf_life.joblib. ..."}
+                                                          # HTTP 503
+```
+
+A 503 that names its own cause is the honest state for a service with no model in
+it. The alternative — shipping the synthetic-fixture model so the link returns
+*something* — would make the URL look more finished and mean strictly less, which
+is why the deploy verification refuses any build whose loaded model was fitted on
+that fixture.
+
+**So of the Stage 1 criterion "the model is deployed and returns predictions over
+HTTP from a URL you can share", the first clause is already true and you can check
+it yourself with the links above; the second is not.** It cannot be until a model
+is frozen, and freezing needs a legal three-way split: on 2026-09-10 the panel
+holds **2 labelled crawl waves against a minimum of 20**. That shortfall is not an
+outstanding task — it is the wait that the rest of this section is arranged
+around, and `./scripts/watch_depth.sh` is what ends it.
 
 **Where it goes, revised 2026-09-06:** the API on a **Render free web service**,
 the Streamlit UI on **Streamlit Community Cloud**, and the frozen model shipped
