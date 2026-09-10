@@ -449,6 +449,21 @@ _ABLATION_METRICS = (
 _REGIME_METRICS = ("n", "pr_auc", "brier", "precision", "recall", "delta_pr_auc")
 
 
+def _sweep_figures(sweep: pd.DataFrame, figures_dir: Path | None) -> list[Path]:
+    """The train-against-validation figure, or nothing if it cannot be drawn.
+
+    `figures_dir` is a parameter rather than a module constant read at call time
+    because a test that exercises this must not write into `reports/`, and
+    `tests/conftest.py` fails the ones that try. Binding the destination at the
+    call site is the version of that which cannot be forgotten.
+    """
+    from src import plots
+
+    if figures_dir is None or not plots.available():
+        return []
+    return [plots.complexity_gap(sweep, figures_dir / "complexity_gap.png")]
+
+
 def log_experiments(
     mlflow,
     split: SplitResult,
@@ -460,6 +475,7 @@ def log_experiments(
     sweep: pd.DataFrame | None = None,
     fold_evidence: tuple[pd.DataFrame, dict[str, float]] | None = None,
     serve_time: pd.DataFrame | None = None,
+    figures_dir: Path | None = None,
 ) -> int:
     """Write every experiment this module runs to the tracking store.
 
@@ -545,6 +561,9 @@ def log_experiments(
                 )
 
     if sweep is not None and not sweep.empty:
+        # The gap plot describes all six settings at once and belongs to none of
+        # them, so it hangs on the family parent rather than on a child.
+        sweep_figures = _sweep_figures(sweep, figures_dir)
         # Read from the sweep's own definition rather than from the result frame.
         # Settings override different knobs, so the frame carries a NaN wherever a
         # setting left one alone, and logging that NaN as a parameter would record
@@ -552,6 +571,7 @@ def log_experiments(
         overrides_by_setting = dict(OVERFIT_SWEEP)
         with tracking.family(mlflow, "overfit sweep", prov=prov, params=shared):
             written += 1
+            tracking.log_figures(mlflow, sweep_figures)
             for _, row in sweep.iterrows():
                 setting = str(row["setting"])
                 effective = _xgb_parameters(split, **overrides_by_setting.get(setting, {}))
@@ -877,6 +897,19 @@ def write_report(
         tracking_note or "Tracking status not recorded.",
         "",
     ]
+    gap_figure = Path("reports/figures/complexity_gap.png")
+    if gap_figure.exists():
+        lines[-1:-1] = [
+            "",
+            "## The gap, drawn",
+            "",
+            "The sweep opens a train/validation gap and closes it one knob at a time.",
+            "A gap is a distance between two lines, and as a table it is two columns the",
+            "reader has to subtract in their head, one row at a time.",
+            "",
+            f"![train against validation across complexity]"
+            f"({gap_figure.parent.name}/{gap_figure.name})",
+        ]
 
     path.write_text("\n".join(lines) + "\n")
 
@@ -904,6 +937,8 @@ def _track(args, frame, split, ladder, ablations, sweep, fold_evidence, serve_ti
             "record them."
         )
 
+    from src import plots
+
     prov = provenance.collect(args.panel, len(frame), provenance.REAL)
     mlflow = tracking.start(args.experiment, args.tracking_uri)
     written = log_experiments(
@@ -916,6 +951,7 @@ def _track(args, frame, split, ladder, ablations, sweep, fold_evidence, serve_ti
         sweep=sweep,
         fold_evidence=fold_evidence,
         serve_time=serve_time,
+        figures_dir=plots.FIGURES_DIR,
     )
     print(f"logged {written} run(s) to experiment {args.experiment!r} at {args.tracking_uri}")
     return (

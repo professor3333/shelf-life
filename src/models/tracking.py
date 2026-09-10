@@ -37,6 +37,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from pathlib import Path
 
 import pandas as pd
 
@@ -170,6 +171,49 @@ def family(
         yield active
 
 
+def log_figure_run(
+    run_name: str,
+    figures: Sequence[Path],
+    prov: provenance.Provenance,
+    experiment: str = DEFAULT_EXPERIMENT,
+    tracking_uri: str = DEFAULT_TRACKING_URI,
+    params: Mapping[str, object] | None = None,
+) -> str | None:
+    """One standalone run holding the figures a step produced.
+
+    For the steps that draw diagnostics without fitting a family of models — the
+    data profile and the model comparison. They still get the dataset version and
+    the git SHA, because a figure whose provenance is unknown is a picture rather
+    than evidence: six weeks from now the only question worth asking about it is
+    *which panel was this, and which code drew it*.
+
+    Returns `None` when MLflow is absent, so the caller can say so rather than
+    fail over a picture.
+    """
+    if not figures or not available():
+        return None
+    mlflow = start(experiment, tracking_uri)
+    return log_variant(
+        mlflow,
+        run_name=run_name,
+        prov=prov,
+        params=params,
+        tags={"family": "figures"},
+        figures=figures,
+    )
+
+
+def log_figures(mlflow, figures: Sequence[Path]) -> None:
+    """Attach figures to whichever run is already open.
+
+    Used by a family parent, whose figures describe the set rather than any one
+    variant — the overfit sweep's train-against-validation plot is a picture of
+    all six settings at once and belongs to none of them.
+    """
+    for figure in figures:
+        mlflow.log_artifact(str(figure), artifact_path="figures")
+
+
 def log_variant(
     mlflow,
     *,
@@ -180,6 +224,7 @@ def log_variant(
     tags: Mapping[str, object] | None = None,
     features: Sequence[str] | None = None,
     tables: Mapping[str, pd.DataFrame] | None = None,
+    figures: Sequence[Path] | None = None,
     nested: bool = False,
 ) -> str:
     """Write one run and return its id.
@@ -197,4 +242,8 @@ def log_variant(
         for name, table in (tables or {}).items():
             if table is not None and not table.empty:
                 mlflow.log_text(table.to_csv(index=False), f"{name}.csv")
+        for figure in figures or ():
+            # Under `figures/` rather than at the artifact root, so a run's
+            # pictures stay separable from its data when someone downloads it.
+            mlflow.log_artifact(str(figure), artifact_path="figures")
         return active.info.run_id

@@ -27,6 +27,14 @@ dependencies = [
 tracking = [
     "mlflow>=2.16",
 ]
+# Diagnostic figures. Optional for the reason the Dockerfile makes concrete: the
+# image installs `.[api]`, so anything in the base dependencies is shipped to a
+# 0.1-CPU instance whose cold start already spends 36% of its budget before a
+# model loads. A plotting library has no business in the serving image, and
+# `src/plots.py` is imported lazily so that nothing in `src/` requires it.
+plots = [
+    "matplotlib>=3.8",
+]
 # The HTTP service. Optional for the same reason `tracking` is: the modelling
 # code has no need of a web framework, and a stranger who wants to run the
 # ladder should not have to install one.
@@ -44,6 +52,7 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.6",
     "mlflow>=2.16",
+    "matplotlib>=3.8",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     # Starlette's TestClient speaks HTTP through httpx rather than through a
