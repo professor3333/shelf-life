@@ -8,6 +8,8 @@ fits on anything but the training fold.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 import pytest
 from panels import DAY, WAVE0, make_panel
@@ -492,3 +494,191 @@ def test_the_serve_time_regime_is_flat_when_the_columns_carry_nothing():
 
     regime = serve_time_regime(split)
     assert regime.loc[1, "delta_pr_auc"] == pytest.approx(0.0, abs=1e-9)
+
+
+# --- experiment tracking -----------------------------------------------------
+
+mlflow = pytest.importorskip("mlflow", reason="experiment tracking is an optional extra")
+
+
+def _logged(tmp_path, **families):
+    """Run the families through the tracker into a throwaway store, and read back."""
+    from src.models import provenance, tracking
+    from src.models.train import log_experiments
+
+    split = _split()
+    uri = f"sqlite:///{tmp_path}/runs.db"
+    client = tracking.start("tracking-test", uri)
+    prov = provenance.collect(Path("tests/panels.py"), len(split.frame), provenance.SYNTHETIC)
+    written = log_experiments(client, split, prov, 20, **families)
+    api = mlflow.MlflowClient(tracking_uri=uri)
+    experiment = api.get_experiment_by_name("tracking-test")
+    runs = api.search_runs([experiment.experiment_id], max_results=200)
+    return written, runs, api
+
+
+def test_the_ablations_are_logged_as_one_parent_with_a_child_per_variant(tmp_path):
+    """Flat sibling runs would lose which sweep a refit came from.
+
+    An ablation's `delta` is defined against the baseline in the same table, so a
+    variant logged with no marker of its family is a number nobody can put back
+    into the comparison it came from.
+    """
+    split = _split()
+    table = ablate(split, budget_per_day=20)
+    _, runs, _ = _logged(tmp_path, ablations=table)
+
+    parents = [r for r in runs if "mlflow.parentRunId" not in r.data.tags]
+    children = [r for r in runs if "mlflow.parentRunId" in r.data.tags]
+    assert [r.data.tags["mlflow.runName"] for r in parents] == ["ablations"]
+    assert len(children) == len(table), "one child per row of the ablation table"
+    assert all(c.data.tags["mlflow.parentRunId"] == parents[0].info.run_id for c in children)
+
+
+def test_each_ablation_records_the_feature_subset_it_actually_fitted_on(tmp_path):
+    """The field this whole exercise is about.
+
+    An ablation is *defined* by the columns it withheld. A run that keeps the
+    metric and drops the subset has kept the answer and thrown away the question
+    — and the board-context ablation is the one where that matters most, because
+    `docs/design.md` §12 was decided on it.
+    """
+    from src.models.train import BOARD_CONTEXT_ABLATION
+
+    split = _split()
+    table = ablate(split, budget_per_day=20)
+    _, runs, api = _logged(tmp_path, ablations=table)
+
+    by_name = {r.data.tags["mlflow.runName"]: r for r in runs}
+    run = by_name[f"ablation: {BOARD_CONTEXT_ABLATION.name}"]
+    logged = mlflow.artifacts.load_dict(f"{run.info.artifact_uri}/features.json")["features"]
+
+    assert logged, "no feature subset was recorded"
+    for withheld in BOARD_CONTEXT_ABLATION.features:
+        assert withheld not in logged, (
+            f"{withheld} was withheld from the refit but appears in the run's feature "
+            "subset, so the tracking store attributes the metric to columns the model "
+            "never saw"
+        )
+
+    baseline = by_name["ablation: nothing"]
+    full = mlflow.artifacts.load_dict(f"{baseline.info.artifact_uri}/features.json")["features"]
+    assert set(logged) < set(full), "the ablation kept as many columns as the baseline"
+
+
+def test_every_run_carries_the_split_the_dataset_and_the_code_version(tmp_path):
+    """Four things, and a run missing any of them cannot be compared with one that has them."""
+    split = _split()
+    _, runs, _ = _logged(tmp_path, sweep=overfit_sweep(split, budget_per_day=20))
+
+    child = next(r for r in runs if "mlflow.parentRunId" in r.data.tags)
+    for key in ("train_end", "val_end", "embargo", "n_train", "n_val"):
+        assert key in child.data.params, f"the split's {key} is not recorded"
+    for key in ("panel_sha256", "panel_path", "dataset"):
+        assert key in child.data.tags, f"the dataset version's {key} is not recorded"
+    assert "git_sha" in child.data.tags, "the code version is not recorded"
+    assert any(k.startswith("model__") for k in child.data.params), "no estimator parameters"
+
+
+def test_the_sweep_records_the_parameters_the_model_actually_used(tmp_path):
+    """Settings override different knobs, so the result frame carries NaN where one
+    was left alone. Logging that NaN would record a value the model never used."""
+    split = _split()
+    _, runs, _ = _logged(tmp_path, sweep=overfit_sweep(split, budget_per_day=20))
+
+    name, overrides = OVERFIT_SWEEP[0]
+    run = next(r for r in runs if r.data.tags.get("mlflow.runName") == f"overfit: {name}")
+    for key, value in overrides.items():
+        assert run.data.params[f"model__{key}"] == str(value)
+    assert "nan" not in [v.lower() for v in run.data.params.values()]
+
+
+def test_the_logger_and_the_refit_agree_on_which_columns_were_kept():
+    """One function, because two callers need the same answer.
+
+    `ablate` builds its pipeline from `kept_features` and the logger records the
+    same call. Recomputing it in the logger would work until the day the two
+    drift, and then the store would attribute a metric to the wrong columns.
+    """
+    from src.features.preprocessing import build_pipeline
+    from src.models.train import BOARD_CONTEXT_ABLATION, kept_features
+
+    kept = kept_features(BOARD_CONTEXT_ABLATION.features)
+    pipeline = build_pipeline(None, only=kept)
+    assert tuple(pipeline.named_steps["select"].kw_args["columns"]) == kept
+
+
+def test_an_untracked_run_says_so_in_the_report():
+    """A requirement that quietly stops holding is worse than one never claimed.
+
+    MLflow is an optional extra, so the ladder has to run without it — but an
+    untracked run that says nothing looks exactly like a tracked one in the
+    report, and `CLAUDE.md` §4.6 asks that every run record its params, metrics,
+    dataset version and git SHA.
+    """
+    import argparse
+
+    from src.models.train import _track
+
+    args = argparse.Namespace(no_mlflow=True, panel=Path("x.parquet"), budget=20)
+    note = _track(args, None, object(), None, None, None, None, None, blocker=None)
+    assert "Not tracked" in note and "--no-mlflow" in note
+
+    blocked = _track(args, None, None, None, None, None, None, None, blocker="too shallow")
+    assert "nothing ran" in blocked
+
+
+def test_the_report_carries_the_tracking_status(tmp_path):
+    """The status belongs in the artifact a reader opens, not only on stdout."""
+    path = tmp_path / "model_results.md"
+    write_report(
+        path,
+        make_panel(),
+        None,
+        None,
+        None,
+        "blocked",
+        tracking_note="**Not tracked**: MLflow is not installed in this environment.",
+    )
+    body = path.read_text()
+    assert "## Experiment tracking" in body
+    assert "**Not tracked**" in body
+
+
+def test_each_ladder_rung_records_the_columns_that_rung_restricts_itself_to(tmp_path):
+    """`age_only` is the rung that makes this worth checking.
+
+    It fits on one column by construction, so a run recording the full registry
+    against its metric would attribute the score to twenty-odd features it never
+    saw — the same failure the ablations would have, one rung further down.
+    """
+    from src.models.train_baseline import run_ladder
+
+    split = _split()
+    table, _ = run_ladder(split, budget_per_day=20)
+    _, runs, _ = _logged(tmp_path, ladder=table)
+
+    by_name = {r.data.tags["mlflow.runName"]: r for r in runs}
+    age_only = by_name["rung: age_only"]
+    logged = mlflow.artifacts.load_dict(f"{age_only.info.artifact_uri}/features.json")["features"]
+    assert logged == ["age_days"]
+
+    logistic = by_name["rung: logistic"]
+    full = mlflow.artifacts.load_dict(f"{logistic.info.artifact_uri}/features.json")["features"]
+    assert len(full) > len(logged)
+
+
+def test_a_rule_baseline_records_no_feature_subset_rather_than_a_wrong_one():
+    """`None` is a real answer here, not a failure to find one.
+
+    A rule baseline applies a stated rule to the frame and never builds a feature
+    matrix, so "which columns did it fit on" has no answer — and filling the slot
+    with the full registry would be a lie in exactly the place this change exists
+    to make truthful.
+    """
+    from src.models import tracking
+    from src.models.train_baseline import LADDER
+
+    rungs = {rung.name: rung.build for rung in LADDER}
+    assert tracking.pipeline_features(rungs["rule_older_than_30d"]()) is None
+    assert tracking.pipeline_features(rungs["age_only"]()) == ("age_days",)

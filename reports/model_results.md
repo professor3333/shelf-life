@@ -85,3 +85,14 @@ one knob at a time to close the gap again.
 | deep + lambda | 12 | 1200 | 50 | 1 | 1 | 1 | 0.1063 | 0.8937 |
 | deep + subsampling | 12 | 1200 | 0 | 1 | 0.6 | 1 | 0.1432 | 0.8568 |
 
+
+## Experiment tracking
+
+Every family above is logged to MLflow as a parent run with one child per
+variant — the ladder, the ablations, the overfit sweep, the board-context
+folds and the serve-time regime. Each child records the feature subset it
+actually fitted on, both cut instants and the embargo, the panel's path and
+sha256, its own parameters and metrics, and the git SHA that produced them.
+
+Tracked: **35 runs** in MLflow experiment `shelf-life`, as one parent per family with a child per variant. Each child carries its own feature subset, the split, the panel's sha256 and the git SHA.
+

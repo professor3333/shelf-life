@@ -831,9 +831,14 @@ Only features that exist:
   was a column, and is removed one at a time to see what it was worth.
 - **A deliberate overfit** — depth up and regularisation off until train and
   validation separate, then closed again one knob at a time.
-- **MLflow tracking** — params, metrics, dataset hash and git SHA per run, with
-  a replay path that reproduces a run from what was logged rather than from a
-  fresh search.
+- **MLflow tracking on every experiment** — the eight scripted runs *and* the
+  five families the training entry point runs each time: the ladder, the
+  ablations, the overfit sweep, the board-context folds and the serve-time
+  regime. Each is a parent run
+  with one child per variant, and each child records the feature subset it
+  actually fitted on, both cut instants and the embargo, the panel's sha256, its
+  own parameters and metrics, and the git SHA. There is a replay path that
+  reproduces a run from what was logged rather than from a fresh search.
 - **A frozen artifact** — the whole fitted pipeline plus threshold, metrics and
   provenance in one file, with a load-time check that it really is the pipeline.
 - **A FastAPI service** — `POST /predict`, `GET /health`, `GET /contract`.
@@ -930,6 +935,7 @@ python -m src.features.assemble --horizon 1    # build the job-day panel
 ```bash
 python -m src.models.train_baseline            # the ladder and the reference number
 python -m src.models.train                     # engineered features, XGBoost, ablation
+python -m src.models.train --no-mlflow         # the same, without the tracking extra
 python -m src.models.evaluate                  # comparison, threshold, calibration
 python -m src.models.experiments --synthetic   # replay the run history into MLflow
 mlflow ui --backend-store-uri sqlite:///mlflow.db
@@ -938,6 +944,12 @@ mlflow ui --backend-store-uri sqlite:///mlflow.db
 The first three now run on the real panel and write real validation numbers.
 They stop short of a verdict while the training window yields no fold, which is
 the expected output today, not a failure.
+
+`src.models.train` logs everything it runs. MLflow is an optional extra, so a
+base install has none of it — in that case the run still produces its report and
+says, in the report itself, that it was not tracked. `--no-mlflow` skips it
+deliberately and is recorded the same way. An untracked run that said nothing
+would be indistinguishable from a tracked one.
 
 ### Watching the depth
 
