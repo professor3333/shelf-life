@@ -357,6 +357,96 @@ def test_the_cold_start_script_cannot_accept_without_a_model() -> None:
     )
 
 
+def _artifact_cost_script() -> str:
+    return (ROOT / "scripts" / "artifact_cost.sh").read_text()
+
+
+def test_the_artifact_cost_script_enforces_the_same_criterion() -> None:
+    """Three places now name the criterion, and a projection must not get its own.
+
+    `artifact_cost.sh` projects a cold start and compares it to the stop rule. A
+    projection that carried a private, friendlier threshold would report a
+    comfortable headroom against a number nothing else recognises — which is the
+    same failure as raising the UI timeout, arriving by a different door.
+    """
+    script = _artifact_cost_script()
+    match = re.search(r'STOP_RULE_SECONDS="\$\{STOP_RULE_SECONDS:-(\d+(?:\.\d+)?)\}"', script)
+    assert match, "scripts/artifact_cost.sh no longer declares a STOP_RULE_SECONDS default"
+    assert float(match.group(1)) == _stop_rule_seconds(), (
+        "scripts/artifact_cost.sh and scripts/cold_start.sh enforce different criteria, "
+        "so the projection and the measurement it anticipates are answering different "
+        "questions"
+    )
+
+
+def test_the_artifact_cost_script_accepts_nothing() -> None:
+    """The one claim this script must never be able to make.
+
+    Its arms run on a local throttled container, not on the instance, so its
+    absolute numbers are not comparable to the criterion at all — only the
+    difference between its two arms travels. `docs/design.md` §7e reserves
+    acceptance for `cold_start.sh` against a real release. If the success path
+    here ever reads as an acceptance, the architecture acquires a passing grade
+    that nothing measured.
+    """
+    script = _artifact_cost_script()
+    assert "does NOT accept the architecture" in script, (
+        "the within-criterion branch no longer says out loud that it accepts nothing, "
+        "which is the only thing standing between an estimate and a README quoting it "
+        "as the definitive measurement"
+    )
+    assert "cold_start.sh" in script, (
+        "the script no longer points at the measurement that actually decides"
+    )
+
+
+def test_the_artifact_cost_arms_differ_by_exactly_one_thing() -> None:
+    """A difference is only the artifact's cost if the artifact is the only difference.
+
+    Both arms are started by the same function, so the CPU and memory limits are
+    shared by construction rather than by two call sites agreeing. The mount is
+    the single asymmetry, and it belongs to the caller.
+    """
+    script = _artifact_cost_script()
+    launches = [
+        line
+        for line in script.splitlines()
+        if "docker run -d" in line and not line.lstrip().startswith("#")
+    ]
+    assert len(launches) == 1, (
+        f"the script starts containers from {len(launches)} places, so the two arms no "
+        "longer share one set of limits by construction and their difference stops "
+        "meaning anything"
+    )
+    assert "--cpus 0.1 --memory 512m" in launches[0], (
+        "the single launch no longer throttles to the free instance's shape"
+    )
+    mounts = [
+        line
+        for line in script.splitlines()
+        if "/app/models:ro" in line and not line.lstrip().startswith("#")
+    ]
+    assert len(mounts) == 1, (
+        "the artifact mount appears somewhere other than the single with-artifact arm"
+    )
+
+
+def test_the_artifact_cost_script_checks_the_arm_it_timed() -> None:
+    """A silently failed mount is the one wrong answer nobody would question.
+
+    If the mount does not take, the with-artifact arm starts a model-less
+    container, answers `/health` at exactly the no-artifact speed, and the script
+    reports that loading the model is free. That number is wrong, cheerful and
+    entirely plausible, so each arm asserts the state it was supposed to be
+    measuring before it is allowed to contribute a time.
+    """
+    script = _artifact_cost_script()
+    assert "refusing to time it" in script, (
+        "the arms no longer verify model_loaded against what they intended to measure, "
+        "so a mount that silently fails would be reported as a free artifact"
+    )
+
+
 # --- the ones about the UI's boundary ----------------------------------------
 
 
