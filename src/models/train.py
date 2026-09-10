@@ -48,9 +48,11 @@ from src.features.preprocessing import (
     fit_on_training_fold,
 )
 from src.inference.contract import BOARD_CONTEXT
+from src.models import provenance, tracking
 from src.models.metrics import DEFAULT_ALERT_BUDGET, evaluate
 from src.models.train_baseline import (
     DEFAULT_PANEL,
+    LADDER,
     RANDOM_STATE,
     _table,
     analytic_reference,
@@ -242,6 +244,19 @@ def serve_time_regime(
     return pd.DataFrame(rows)
 
 
+def kept_features(withheld: tuple[str, ...]) -> tuple[str, ...]:
+    """The feature subset an ablation actually fits on.
+
+    One function because two callers need the same answer: `ablate` builds the
+    pipeline from it, and the MLflow logging records it as the run's feature
+    subset. Recomputing it in the logger would work until the day the two drift,
+    and then the tracking store would attribute a metric to a set of columns the
+    model never saw — which is worse than not recording the columns at all.
+    """
+    excluded = set(withheld)
+    return tuple(column.name for column in feature_columns() if column.name not in excluded)
+
+
 def ablate(split: SplitResult, budget_per_day: int = DEFAULT_ALERT_BUDGET) -> pd.DataFrame:
     """Refit without each ablation's features in turn.
 
@@ -268,13 +283,11 @@ def ablate(split: SplitResult, budget_per_day: int = DEFAULT_ALERT_BUDGET) -> pd
     same discipline runs 05/06/07 use in `src/models/experiments.py`, and it is
     what makes a difference evidence rather than an observation.
     """
-    everything = [column.name for column in feature_columns()]
     baseline = fit_and_score(build_xgboost(split), split, budget_per_day)
 
     rows = [{"removed": "nothing", "n_removed": 0, "hypothesis": "—", **baseline, "delta": 0.0}]
     for ablation in ABLATIONS:
-        withheld = set(ablation.features)
-        kept = tuple(name for name in everything if name not in withheld)
+        kept = kept_features(ablation.features)
         model = build_pipeline(XGBClassifier(**_xgb_parameters(split)), only=kept)
         scored = fit_and_score(model, split, budget_per_day)
         rows.append(
@@ -394,9 +407,7 @@ def board_context_folds(
     if not folds:
         return pd.DataFrame(), {"folds": 0.0}
 
-    everything = [column.name for column in feature_columns()]
-    withheld = set(BOARD_CONTEXT_ABLATION.features)
-    kept = tuple(name for name in everything if name not in withheld)
+    kept = kept_features(BOARD_CONTEXT_ABLATION.features)
     parameters = _xgb_parameters(split)
 
     full = cross_validate(
@@ -418,6 +429,210 @@ def board_context_folds(
     )
     table["difference"] = table["pr_auc_full"] - table["pr_auc_without_board"]
     return table, paired
+
+
+#: Which columns of each family's table are measurements. Everything else in a
+#: row identifies the variant and becomes a param or a tag, because a param is
+#: what you filter runs by and a metric is what you sort them on — putting a
+#: name in the metric slot loses the first and putting a number in the param
+#: slot loses the second.
+_ABLATION_METRICS = (
+    "train_pr_auc",
+    "val_pr_auc",
+    "gap",
+    "val_brier",
+    "val_roc_auc",
+    "val_precision",
+    "val_recall",
+    "delta",
+)
+_REGIME_METRICS = ("n", "pr_auc", "brier", "precision", "recall", "delta_pr_auc")
+
+
+def log_experiments(
+    mlflow,
+    split: SplitResult,
+    prov,
+    budget_per_day: int,
+    *,
+    ladder: pd.DataFrame | None = None,
+    ablations: pd.DataFrame | None = None,
+    sweep: pd.DataFrame | None = None,
+    fold_evidence: tuple[pd.DataFrame, dict[str, float]] | None = None,
+    serve_time: pd.DataFrame | None = None,
+) -> int:
+    """Write every experiment this module runs to the tracking store.
+
+    **Nested, not flat.** Each of these is a *family* of refits that only means
+    anything read beside its siblings: an ablation's `delta` is defined against
+    the baseline in the same table, and the overfit sweep's whole point is the
+    shape of the gap across settings. Logged as a dozen unrelated sibling runs
+    they would be arithmetic anyone could redo and nobody could find. So each
+    family gets a parent run carrying what the variants share — the split, the
+    dataset, the code, the alert budget — and each variant a child carrying only
+    what makes it different.
+
+    **Every child records its own feature subset**, from `kept_features`, which
+    is the same function `ablate` builds its pipeline from. That is the field
+    this whole exercise is about: an ablation is *defined* by the columns it
+    withheld, and a run that records the metric without the subset has kept the
+    answer and thrown away the question.
+
+    Returns the number of runs written, parents included, so the caller can say
+    what happened rather than assuming it worked.
+    """
+    from src.models import tracking
+
+    shared = {"alert_budget_per_day": budget_per_day, **tracking.split_params(split)}
+    # The estimator's parameters go on the parent for the families that hold them
+    # constant, and on the child for the sweep, which exists precisely to vary
+    # them. Logging them in both places would invite a reader to compare a
+    # child's value against a parent's and find them disagreeing by design.
+    base_model_params = {f"model__{k}": v for k, v in _xgb_parameters(split).items()}
+    written = 0
+
+    if ladder is not None and not ladder.empty:
+        # Each rung's subset comes from building the rung again and reading the
+        # column list off it. No fit is needed — `build_pipeline` fixes the list
+        # at construction — so this costs nothing and cannot disagree with what
+        # was scored, which recomputing it from the registry could.
+        builders = {rung.name: rung.build for rung in LADDER}
+        with tracking.family(mlflow, "ladder", prov=prov, params=shared):
+            written += 1
+            for _, row in ladder.iterrows():
+                name = str(row["model"])
+                build = builders.get(name)
+                features = tracking.pipeline_features(build()) if build else kept_features(())
+                written += 1
+                tracking.log_variant(
+                    mlflow,
+                    run_name=f"rung: {name}",
+                    prov=prov,
+                    nested=True,
+                    params={"model": name, **shared},
+                    metrics={
+                        key: value
+                        for key, value in row.items()
+                        if isinstance(value, int | float) and not isinstance(value, bool)
+                    },
+                    tags={"family": "ladder", "description": row.get("description", "")},
+                    features=features,
+                )
+
+    if ablations is not None and not ablations.empty:
+        withheld_by_name = {"nothing": ()}
+        withheld_by_name.update({a.name: a.features for a in ABLATIONS})
+        with tracking.family(
+            mlflow, "ablations", prov=prov, params={**shared, **base_model_params}
+        ):
+            written += 1
+            for _, row in ablations.iterrows():
+                removed = str(row["removed"])
+                written += 1
+                tracking.log_variant(
+                    mlflow,
+                    run_name=f"ablation: {removed}",
+                    prov=prov,
+                    nested=True,
+                    params={
+                        "removed": removed,
+                        "n_removed": int(row["n_removed"]),
+                        **shared,
+                    },
+                    metrics={key: row[key] for key in _ABLATION_METRICS if key in row},
+                    tags={"family": "ablations", "hypothesis": row.get("hypothesis", "")},
+                    features=kept_features(withheld_by_name.get(removed, ())),
+                )
+
+    if sweep is not None and not sweep.empty:
+        # Read from the sweep's own definition rather than from the result frame.
+        # Settings override different knobs, so the frame carries a NaN wherever a
+        # setting left one alone, and logging that NaN as a parameter would record
+        # a value the model never used.
+        overrides_by_setting = dict(OVERFIT_SWEEP)
+        with tracking.family(mlflow, "overfit sweep", prov=prov, params=shared):
+            written += 1
+            for _, row in sweep.iterrows():
+                setting = str(row["setting"])
+                effective = _xgb_parameters(split, **overrides_by_setting.get(setting, {}))
+                written += 1
+                tracking.log_variant(
+                    mlflow,
+                    run_name=f"overfit: {setting}",
+                    prov=prov,
+                    nested=True,
+                    params={
+                        **{f"model__{k}": v for k, v in effective.items()},
+                        "setting": setting,
+                        **shared,
+                    },
+                    metrics={key: row[key] for key in _ABLATION_METRICS if key in row},
+                    tags={"family": "overfit sweep"},
+                    features=kept_features(()),
+                )
+
+    if fold_evidence is not None:
+        table, paired = fold_evidence
+        if not table.empty:
+            with tracking.family(
+                mlflow, "board context, per fold", prov=prov, params={**shared, **base_model_params}
+            ):
+                written += 1
+                mlflow.log_metrics({k: float(v) for k, v in paired.items() if pd.notna(v)})
+                mlflow.log_text(table.to_csv(index=False), "per_fold.csv")
+                # The table is one row per fold with a column per arm, which is
+                # the shape the paired comparison needs. Each child takes its own
+                # column: reading the frame's numeric mean would hand both arms
+                # the same figures and quietly make the comparison vacuous.
+                for variant, column, withheld in (
+                    ("with board context", "pr_auc_full", ()),
+                    (
+                        "without board context",
+                        "pr_auc_without_board",
+                        BOARD_CONTEXT_ABLATION.features,
+                    ),
+                ):
+                    scores = table[column]
+                    written += 1
+                    tracking.log_variant(
+                        mlflow,
+                        run_name=f"board context: {variant}",
+                        prov=prov,
+                        nested=True,
+                        params={"variant": variant, "folds": int(len(table)), **shared},
+                        metrics={
+                            "cv_pr_auc_mean": scores.mean(),
+                            "cv_pr_auc_sd": scores.std(ddof=1) if len(scores) > 1 else float("nan"),
+                        },
+                        tags={"family": "board context, per fold"},
+                        features=kept_features(withheld),
+                        tables={"folds": table[["fold", column]]},
+                    )
+
+    if serve_time is not None and not serve_time.empty:
+        with tracking.family(
+            mlflow, "serve-time regime", prov=prov, params={**shared, **base_model_params}
+        ):
+            written += 1
+            for _, row in serve_time.iterrows():
+                regime = str(row["regime"])
+                written += 1
+                tracking.log_variant(
+                    mlflow,
+                    run_name=f"regime: {regime}",
+                    prov=prov,
+                    nested=True,
+                    params={"regime": regime, **shared},
+                    metrics={key: row[key] for key in _REGIME_METRICS if key in row},
+                    # One fitted model, scored twice. The feature subset is the
+                    # full one in both arms: this measures what the *deployed*
+                    # object does when columns arrive null, not what a refit
+                    # without them would score.
+                    tags={"family": "serve-time regime", "refit": False},
+                    features=kept_features(()),
+                )
+
+    return written
 
 
 def _fold_evidence(table: pd.DataFrame, paired: dict[str, float]) -> list[str]:
@@ -569,6 +784,7 @@ def write_report(
     blocker: str | None,
     fold_evidence: tuple[pd.DataFrame, dict[str, float]] | None = None,
     serve_time: pd.DataFrame | None = None,
+    tracking_note: str | None = None,
 ) -> None:
     reference = analytic_reference(frame)
     derived = ", ".join(f"`{name}`" for name in DERIVED_COLUMNS)
@@ -648,7 +864,65 @@ def write_report(
         ]
 
     path.parent.mkdir(parents=True, exist_ok=True)
+    lines += [
+        "",
+        "## Experiment tracking",
+        "",
+        "Every family above is logged to MLflow as a parent run with one child per",
+        "variant \u2014 the ladder, the ablations, the overfit sweep, the board-context",
+        "folds and the serve-time regime. Each child records the feature subset it",
+        "actually fitted on, both cut instants and the embargo, the panel's path and",
+        "sha256, its own parameters and metrics, and the git SHA that produced them.",
+        "",
+        tracking_note or "Tracking status not recorded.",
+        "",
+    ]
+
     path.write_text("\n".join(lines) + "\n")
+
+
+def _track(args, frame, split, ladder, ablations, sweep, fold_evidence, serve_time, blocker) -> str:
+    """Log the families, and return the sentence the report will carry.
+
+    The return value is the point as much as the logging is. An untracked run
+    that says nothing looks exactly like a tracked one in the report, and
+    `CLAUDE.md` §4.6 asks that every run record its params, metrics, dataset
+    version and git SHA — a requirement that quietly stops holding is worse than
+    one that was never claimed.
+    """
+    if blocker is not None or split is None:
+        return "Not tracked: nothing ran, so there is no run to log."
+    if args.no_mlflow:
+        return "**Not tracked**, by `--no-mlflow`. The numbers above are in this report only."
+    if not tracking.available():
+        print(
+            "mlflow is not installed — the runs above were NOT logged. `pip install -e .[tracking]`"
+        )
+        return (
+            "**Not tracked**: MLflow is not installed in this environment, so the runs "
+            "above exist only in this file. `pip install -e '.[tracking]'` and re-run to "
+            "record them."
+        )
+
+    prov = provenance.collect(args.panel, len(frame), provenance.REAL)
+    mlflow = tracking.start(args.experiment, args.tracking_uri)
+    written = log_experiments(
+        mlflow,
+        split,
+        prov,
+        args.budget,
+        ladder=ladder,
+        ablations=ablations,
+        sweep=sweep,
+        fold_evidence=fold_evidence,
+        serve_time=serve_time,
+    )
+    print(f"logged {written} run(s) to experiment {args.experiment!r} at {args.tracking_uri}")
+    return (
+        f"Tracked: **{written} runs** in MLflow experiment `{args.experiment}`, as one parent "
+        f"per family with a child per variant. Each child carries its own feature subset, the "
+        f"split, the panel's sha256 and the git SHA."
+    )
 
 
 def main() -> None:
@@ -656,10 +930,19 @@ def main() -> None:
     parser.add_argument("--panel", type=Path, default=DEFAULT_PANEL)
     parser.add_argument("--out", type=Path, default=DEFAULT_REPORT)
     parser.add_argument("--budget", type=int, default=DEFAULT_ALERT_BUDGET)
+    parser.add_argument("--experiment", default=tracking.DEFAULT_EXPERIMENT)
+    parser.add_argument("--tracking-uri", default=tracking.DEFAULT_TRACKING_URI)
+    parser.add_argument(
+        "--no-mlflow",
+        action="store_true",
+        help="skip experiment tracking deliberately. Without this flag the runs are "
+        "logged, and if MLflow is not installed the report says the run was untracked "
+        "rather than passing over it in silence",
+    )
     args = parser.parse_args()
 
     frame = pd.read_parquet(args.panel)
-    ladder = ablations = sweep = blocker = fold_evidence = serve_time = None
+    split = ladder = ablations = sweep = blocker = fold_evidence = serve_time = None
     try:
         split = temporal_split(frame, best_cuts(frame))
         ladder, _ = run_ladder(split, args.budget)
@@ -698,7 +981,20 @@ def main() -> None:
         )
         print(f"not run: {str(error).splitlines()[0]}")
 
-    write_report(args.out, frame, ladder, ablations, sweep, blocker, fold_evidence, serve_time)
+    tracking_note = _track(
+        args, frame, split, ladder, ablations, sweep, fold_evidence, serve_time, blocker
+    )
+    write_report(
+        args.out,
+        frame,
+        ladder,
+        ablations,
+        sweep,
+        blocker,
+        fold_evidence,
+        serve_time,
+        tracking_note,
+    )
     print(f"wrote -> {args.out}")
 
 

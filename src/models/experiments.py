@@ -71,23 +71,16 @@ from src.features.preprocessing import (
     features_and_target,
     fit_on_training_fold,
 )
-from src.models import provenance
+from src.models import provenance, tracking
 from src.models.evaluate import cross_validate, summarise_folds, wave_forward_folds
 from src.models.metrics import DEFAULT_ALERT_BUDGET, evaluate, expected_calibration_error
 from src.models.train import _xgb_parameters
 from src.models.train_baseline import DEFAULT_PANEL, RANDOM_STATE, _table, prediction_days
 
-DEFAULT_EXPERIMENT = "shelf-life"
-#: SQLite rather than the `./mlruns` directory. MLflow 3 put the filesystem
-#: store into maintenance mode and refuses it without an opt-out environment
-#: variable, and the database backend is what `mlflow ui` expects anyway:
-#:
-#:     mlflow ui --backend-store-uri sqlite:///mlflow.db
-#:
-#: The file is gitignored. It is a cache of runs that `replay` can rebuild, not
-#: a source artifact — which is the same reason `data/processed/` is not
-#: committed.
-DEFAULT_TRACKING_URI = "sqlite:///mlflow.db"
+#: Re-exported from `src/models/tracking.py`, which both entry points share.
+#: Named here too because this module's CLI defaults quote them.
+DEFAULT_EXPERIMENT = tracking.DEFAULT_EXPERIMENT
+DEFAULT_TRACKING_URI = tracking.DEFAULT_TRACKING_URI
 DEFAULT_REPORT = Path("reports/experiment_log.md")
 
 #: The synthetic panel's "dataset version". Hashing the builder is the right
@@ -375,60 +368,39 @@ def execute(
 
 
 def _mlflow():
-    """Imported lazily so the rest of `src/` does not depend on it.
-
-    MLflow pulls in a large dependency tree and the modelling code has no need
-    of it; a stranger who wants to run the ladder should not have to install a
-    tracking server to do so.
-    """
-    import mlflow
-
-    return mlflow
+    """Kept as a name because tests and callers reach for it here. See `tracking`."""
+    return tracking._mlflow()
 
 
 def start(experiment: str = DEFAULT_EXPERIMENT, tracking_uri: str = DEFAULT_TRACKING_URI):
-    mlflow = _mlflow()
-    mlflow.set_tracking_uri(tracking_uri)
-    mlflow.set_experiment(experiment)
-    return mlflow
+    return tracking.start(experiment, tracking_uri)
 
 
 def log_run(mlflow, result: RunResult, prov: provenance.Provenance, budget_per_day: int) -> str:
-    """Write one run to the tracking store. Returns its run id.
+    """Write one scripted run to the tracking store. Returns its run id.
 
-    Feature names go in as an artifact rather than a param: MLflow truncates
-    long param values, and a truncated feature list is worse than none — it
-    reads as complete.
+    The spec-shaped wrapper around `tracking.log_variant`: everything about
+    *what* is logged lives there, and this decides only which of a `RunSpec`'s
+    fields are params and which are tags.
     """
     spec = result.spec
-    with mlflow.start_run(run_name=spec.run_name) as active:
-        mlflow.log_params(
-            {
-                "run": spec.name,
-                "n_features": len(result.features),
-                "include_leaky": spec.leaky,
-                "tuned": spec.tuned,
-                "alert_budget_per_day": budget_per_day,
-                **{f"model__{key}": value for key, value in result.params.items()},
-            }
-        )
-        mlflow.log_metrics(
-            {key: float(value) for key, value in result.metrics.items() if pd.notna(value)}
-        )
-        mlflow.set_tags(
-            {
-                "run_number": spec.number,
-                "question": spec.question,
-                "leaky": spec.leaky,
-                **prov.as_tags(),
-            }
-        )
-        mlflow.log_dict({"features": list(result.features)}, "features.json")
-        if not result.per_fold.empty:
-            mlflow.log_text(result.per_fold.to_csv(index=False), "per_fold.csv")
-        if result.tuning is not None:
-            mlflow.log_text(result.tuning.to_csv(index=False), "tuning.csv")
-        return active.info.run_id
+    return tracking.log_variant(
+        mlflow,
+        run_name=spec.run_name,
+        prov=prov,
+        params={
+            "run": spec.name,
+            "n_features": len(result.features),
+            "include_leaky": spec.leaky,
+            "tuned": spec.tuned,
+            "alert_budget_per_day": budget_per_day,
+            **{f"model__{key}": value for key, value in result.params.items()},
+        },
+        metrics=result.metrics,
+        tags={"run_number": spec.number, "question": spec.question, "leaky": spec.leaky},
+        features=result.features,
+        tables={"per_fold": result.per_fold, "tuning": result.tuning},
+    )
 
 
 def replay(
