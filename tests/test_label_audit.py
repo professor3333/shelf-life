@@ -225,7 +225,12 @@ def test_closures_piled_onto_postings_the_crawl_barely_held_are_called_out():
 
     verdict = lifespan_verdict(_panel(rows))
     assert "dominated by postings that barely existed" in verdict
-    assert "must not be read as model quality" in verdict
+    # And it must point at the external check rather than concluding for itself.
+    # The concentration is real; whether it is a *scraping defect* is a question
+    # this file cannot answer from inside the panel, and `label_check.md` answers
+    # it by asking the boards.
+    assert "label_check.md" in verdict
+    assert "removed is not filled" in verdict
 
 
 def test_closures_spread_across_lifespans_are_not_called_out():

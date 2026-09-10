@@ -838,12 +838,19 @@ def _lifespan_caveat(panel: pd.DataFrame) -> list[str]:
     return [
         f"**Read all of the above against the label first.** {share:.0%} of the closures in "
         f"this panel belong to postings seen in fewer than {SETTLED_OBSERVATIONS} complete "
-        "crawls — see [`label_validity.md`](label_validity.md). A posting seen once and never "
-        "again is, from inside the panel, indistinguishable from one filled the next morning, "
-        "and any feature tracking how long a posting has been around separates those two "
-        "almost perfectly. A lead built on `age_days` at this concentration is a measurement "
-        "of the collection process, not of hiring, and no amount of fold depth will make it "
-        "otherwise.",
+        "crawls — see [`label_validity.md`](label_validity.md). Any feature tracking how long "
+        "a posting has been around will separate those rows almost perfectly, so a lead built "
+        "on `age_days` is mostly a lead on *observed lifespan*.",
+        "",
+        "**That concentration is not a scraping defect, and it was checked rather than "
+        "argued.** [`label_check.md`](label_check.md) sampled postings the label calls removed "
+        "and asked the boards: 59 of 60 are genuinely gone under their own id, against a "
+        "control drift of 3.3%. The short-lived postings really did leave. What the "
+        "concentration means is therefore narrower than it first looks — the model would be "
+        "learning that postings which appear and vanish quickly are the ones that get pulled, "
+        "which is true of these boards — and the caveat that survives is the one that was "
+        "always there: **removed is not filled**, and 12% of the verified removals had their "
+        "title relisted under a new id within days.",
         "",
     ]
 

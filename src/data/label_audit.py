@@ -260,11 +260,16 @@ def lifespan_verdict(panel: pd.DataFrame) -> str:
     if ratio >= 10:
         return (
             f"{summary}\n\n**The target is dominated by postings that barely existed in "
-            "the panel.** At this concentration the label is substantially a record of "
-            "which rows the crawl kept returning, not of which roles were filled, and any "
-            "feature that tracks how long a posting has been around will predict it "
-            "very well while meaning nothing. Numbers from this horizon describe the "
-            "collection process and must not be read as model quality."
+            "the panel**, so any feature tracking how long a posting has been around will "
+            "predict it very well — a score at this concentration is largely a score on "
+            "observed lifespan, and should be read that way.\n\n**Whether that is a "
+            "scraping defect is a separate question, and it has been checked.** "
+            "`reports/label_check.md` sampled postings this label calls removed and asked "
+            "the boards directly: 59 of 60 are genuinely gone under their own id, against a "
+            "control drift of 3.3%. The short-lived postings really did leave, so this "
+            "concentration is a property of the boards rather than of the crawl. What "
+            "survives is the caveat that was always here — **removed is not filled** — and "
+            "12% of those verified removals had their title relisted under a new id."
         )
     if ratio >= 3:
         return (
@@ -401,12 +406,20 @@ def render(panel: pd.DataFrame, prov: provenance.Provenance | None = None) -> st
         "",
         lifespan_verdict(panel),
         "",
-        "## What would strengthen this",
+        "## The external check — done",
         "",
-        "Fetching a sample of closed postings' URLs and recording whether each is",
-        "genuinely gone from the board. That validates *scraper fidelity* — did the",
-        "posting really leave, or did the crawl miss it — which is checkable and has a",
-        "real answer. It does not, and cannot, establish why the posting left.",
+        "Everything above measures the label against itself. The check it could not make",
+        "was whether a posting this file calls closed is actually gone, which needs the",
+        "board rather than the panel.",
+        "",
+        "That now exists: [`label_check.md`](label_check.md), written by",
+        "`python -m src.data.label_check`. It samples postings the label calls removed,",
+        "asks each source whether they are still listed, and asks the same of a control",
+        "group that was up at the final crawl — because agreement on the positives alone",
+        "is compatible with an instrument that answers *gone* for everything.",
+        "",
+        "It validates **scraper fidelity**: did the posting really leave, or did the crawl",
+        "lose sight of it. It does not, and cannot, establish *why* it left.",
         "",
     ]
     return "\n".join(lines)

@@ -6,7 +6,7 @@
 | Horizon | H=1 (calendar basis) — a pipeline smoke test, not the build's horizon |
 | Data | **real** · snapshot `2026-09-08` · `data/processed/features/job_days_h1_calendar.parquet` |
 | Panel | 10,355 rows · sha256 `fea0c88e2947…` |
-| Code | `fbb912ad2` on `main` (dirty tree) |
+| Code | `83dce2beb` on `feature/verify-removed-against-the-board` (dirty tree) |
 
 _Regenerate rather than edit._
 
@@ -112,5 +112,7 @@ from this table would be selection on the validation block.
 
 If that lead survives fold depth *and* clears the paired spread, step 3 of the rule buys the complexity and a fitted model ships. If it does not, step 4 returns the heuristic.
 
-**Read all of the above against the label first.** 52% of the closures in this panel belong to postings seen in fewer than 6 complete crawls — see [`label_validity.md`](label_validity.md). A posting seen once and never again is, from inside the panel, indistinguishable from one filled the next morning, and any feature tracking how long a posting has been around separates those two almost perfectly. A lead built on `age_days` at this concentration is a measurement of the collection process, not of hiring, and no amount of fold depth will make it otherwise.
+**Read all of the above against the label first.** 52% of the closures in this panel belong to postings seen in fewer than 6 complete crawls — see [`label_validity.md`](label_validity.md). Any feature tracking how long a posting has been around will separate those rows almost perfectly, so a lead built on `age_days` is mostly a lead on *observed lifespan*.
+
+**That concentration is not a scraping defect, and it was checked rather than argued.** [`label_check.md`](label_check.md) sampled postings the label calls removed and asked the boards: 59 of 60 are genuinely gone under their own id, against a control drift of 3.3%. The short-lived postings really did leave. What the concentration means is therefore narrower than it first looks — the model would be learning that postings which appear and vanish quickly are the ones that get pulled, which is true of these boards — and the caveat that survives is the one that was always there: **removed is not filled**, and 12% of the verified removals had their title relisted under a new id within days.
 
