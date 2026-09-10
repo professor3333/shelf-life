@@ -201,3 +201,56 @@ def test_the_report_states_the_arithmetic_behind_every_verdict():
 def test_an_empty_panel_does_not_raise(key):
     empty = _panel([_row("a", 0)])
     assert compare_relisting(empty, key).closed_n == 0
+
+
+# --- closures against observed lifespan --------------------------------------
+
+
+def test_closures_piled_onto_postings_the_crawl_barely_held_are_called_out():
+    """The measurement that stopped the H=7 target on 2026-09-10.
+
+    A posting seen once and never again is, in the panel, indistinguishable from
+    one filled the next morning. When *every* short-lived posting is a closure
+    and the settled ones almost never are, the target has stopped being about
+    hiring — and `age_days`, which tracks exactly how long a posting has been
+    around, will predict it beautifully and mean nothing.
+    """
+    from src.data.label_audit import lifespan_verdict
+
+    rows = []
+    for short in range(8):  # seen once, closed
+        rows.append(_row(f"brief-{short}", 0, y=1))
+    for settled in range(8):  # seen in every run, never closed
+        rows += [_row(f"settled-{settled}", wave) for wave in range(8)]
+
+    verdict = lifespan_verdict(_panel(rows))
+    assert "dominated by postings that barely existed" in verdict
+    assert "must not be read as model quality" in verdict
+
+
+def test_closures_spread_across_lifespans_are_not_called_out():
+    """A check that can only say 'contaminated' is not a check.
+
+    Closures here fall on postings the crawl held throughout, which is what the
+    label is supposed to be measuring.
+    """
+    from src.data.label_audit import lifespan_verdict
+
+    rows = []
+    for i in range(10):
+        rows += [_row(f"settled-{i}", wave, y=1 if wave == 7 and i < 3 else 0) for wave in range(8)]
+    rows += [_row("brief", 0, y=0)]
+
+    verdict = lifespan_verdict(_panel(rows))
+    assert "Flat enough" in verdict
+
+
+def test_the_lifespan_table_counts_rows_not_postings():
+    """The denominator is job-days, like every other rate in the report."""
+    from src.data.label_audit import lifespan_concentration
+
+    rows = [_row("brief", 0, y=1)] + [_row("settled", wave) for wave in range(8)]
+    table = lifespan_concentration(_panel(rows))
+    by_bucket = dict(zip(table["seen in"], table["rows"], strict=True))
+    assert by_bucket["1 run"] == 1
+    assert by_bucket["6+ runs"] == 8
