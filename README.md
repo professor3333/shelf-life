@@ -1243,11 +1243,14 @@ it. The alternative — shipping the synthetic-fixture model so the link returns
 is why the deploy verification refuses any build whose loaded model was fitted on
 that fixture.
 
-**So of the Stage 1 criterion "the model is deployed and returns predictions over
-HTTP from a URL you can share", the first clause is already true and you can check
-it yourself with the links above; the second is not.** It cannot be until a model
-is frozen, and freezing needs a legal three-way split: on 2026-09-10 the panel
-holds **2 labelled crawl waves against a minimum of 20**. That shortfall is not an
+**So the Stage 1 criterion — "the model is deployed and returns predictions over
+HTTP from a URL you can share" — is not met, and it is worth being exact about
+which part is missing.** Not the URL: it exists, it is public, it is the one this
+project will serve from, and the links above can be checked by anyone. What is
+missing is the model, and therefore the predictions. Nothing about the deployment
+is outstanding work; the artifact is, and freezing one needs a legal three-way
+split, which on 2026-09-10 the panel cannot give: it holds **2 labelled crawl
+waves against a minimum of 20**. That shortfall is not an
 outstanding task — it is the wait that the rest of this section is arranged
 around, and `./scripts/watch_depth.sh` is what ends it.
 
