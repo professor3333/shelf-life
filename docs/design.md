@@ -1316,3 +1316,92 @@ to disagree.
 
 **Would change my mind:** a validation block large enough that discarding it
 from the fit is measurably expensive. On the current panel it is one crawl wave.
+
+
+---
+
+## 14. The selection rule — **PRE-REGISTERED 2026-09-10, while every fold count was zero**
+
+**The decision:** which model ships is decided by a rule written down *before the
+numbers it will be applied to exist*, and applied mechanically once they do.
+
+**Why the timing is the whole point.** A selection rule written after the fold
+scores are visible is not a rule, it is a description of the winner. Every degree
+of freedom in it — which metric, how to break a tie, how large a gap has to be,
+whether to prefer the simpler model — is a place to arrive at the model one
+already likes, and none of those choices looks arbitrary once there is a table on
+the screen to justify it. On 2026-09-10 `reports/model_comparison.md` carried
+`folds_scored = 0` for all ten candidates, at both horizons: **8 labelled waves at
+H = 1 against the 13 that yield three folds, and 2 at H = 7 against 31.** There
+was nothing to select on, which is exactly when the rule is cheapest to write
+honestly.
+
+### The rule, in four steps
+
+Implemented in `src/models/evaluate.py:select`, whose docstring quotes this
+section.
+
+1. **Eligibility.** A candidate needs at least `MIN_SELECTION_FOLDS = 3` scored
+   rolling-origin folds. Below that there is no spread to judge a lead against,
+   and the verdict is that *nothing was selected* — not that the leader wins by
+   default. Three is the same number `src/data/split.py` sizes the panel for.
+2. **The tied set.** Rank by `cv_pr_auc_mean`. Take the leader, and collect every
+   candidate whose *paired* per-fold difference from the leader is no larger than
+   the standard deviation of that difference. Paired, because two models scored on
+   the same fold share whatever made that fold hard; averaging each separately and
+   subtracting leaves a week's weather in the answer.
+3. **Parsimony decides among equals.** From the leader and everything tied with
+   it, take the one earliest in `LADDER` — the simplest. Only a lead that survives
+   fold variance buys complexity. `CLAUDE.md` §4.4: *the goal is not to reach the
+   top rung, it is to learn whether increasing model complexity actually buys
+   anything on this problem.*
+4. **The heuristic floor is a gate.** If the pick is a fitted model whose lead over
+   the best `HEURISTIC_RUNGS` entry does not itself survive fold variance, the
+   heuristic is selected instead. `CLAUDE.md` §4.4 #12: *a model that does not beat
+   the baseline is not a model, it is a slower baseline.*
+
+### What this changes, and the bug it closes
+
+The previous implementation documented step 3 and did not do it. `select` returned
+the highest `cv_pr_auc_mean` whatever the spread, appending "treat them as tied"
+to the *reason* while still crowning the winner — so a boosted model half a
+standard deviation ahead of a logistic regression was selected, and the report
+asserted both things at once. `learning_log/learning-log.md` had already recorded
+the right conclusion on 2026-09-05 ("these two are tied"); the code never
+implemented it. Step 4 did not exist at all.
+
+**Step 4 is not redundant with step 3, and the synthetic panel is what showed
+that.** Heuristic rungs sit at the simple end of the ladder, so a fitted model
+that cannot separate from one *usually* finds it in its own tied set and loses on
+parsimony. But "tied with the leader" and "better than a rule" are different
+questions, and on a noisy label they come apart. With steps 1–3 only, the panel
+whose label is drawn independently of every feature selected `age_only` — a fitted
+model that does not beat a constant — because `prior` sat too far from the leader
+to be tied with it, so the failure was never tested. With step 4 the same panel
+returns `prior`.
+
+### How it can be falsified
+
+The rule is not a preference for simplicity; it is parsimony *among equals*, and
+it must be able to choose a boosted model. Tests hold both directions:
+
+- a lead larger than its own spread selects the complex model (`separation`)
+- a lead smaller than its own spread selects the simpler one (`parsimony`)
+- on the noise panel, a fitted model at 0.2078 against a base rate of 0.1000 loses
+  to a heuristic — pinned end to end, because a rule that quietly began preferring
+  the top of the ladder would produce a *better-looking* report and nothing else
+  in the suite would notice
+
+**Would change my mind:** a panel deep enough that one paired standard deviation
+stops being the right width. At thirty folds rather than three it is a weak bar,
+and a proper interval on the paired difference would be better; the current
+arithmetic is chosen for a handful of folds and should be revisited if the panel
+ever affords more. Separately: if a heuristic wins on the real panel, that is a
+finding to write down, not a reason to weaken step 4.
+
+### What it does not decide
+
+Nothing here opens the test block. Selection happens on folds inside the training
+window. `src/models/freeze.py` remains the only module that reads test, still
+refuses on `SplitTooShallow` and `NoFoldEvidence`, and the freeze itself stays a
+deliberate act with a `--run` argument naming the chosen model.

@@ -350,16 +350,89 @@ def test_the_paired_difference_ignores_folds_either_model_could_not_score():
 # --- selection --------------------------------------------------------------
 
 
-def test_a_gap_inside_one_standard_deviation_is_reported_as_a_tie():
+def test_a_gap_inside_one_standard_deviation_hands_the_pick_to_the_simpler_model():
+    """The rule the old implementation documented and did not apply.
+
+    `forest` has the higher mean and loses anyway, because the lead is smaller
+    than its own fold-to-fold spread and `logistic` is earlier in the ladder.
+    Complexity has to be *bought* with a lead that survives fold variance;
+    CLAUDE.md §4.4 is explicit that reaching the top rung is not the goal.
+    """
     summary = pd.DataFrame({"model": ["forest", "logistic"], "cv_pr_auc_mean": [0.44, 0.43]})
     per_fold = {
         "forest": pd.DataFrame({"fold": [0, 1, 2], "pr_auc": [0.60, 0.20, 0.52]}),
         "logistic": pd.DataFrame({"fold": [0, 1, 2], "pr_auc": [0.20, 0.60, 0.49]}),
     }
     verdict = select(summary, per_fold)
-    assert verdict["chosen"] == "forest"
+    assert verdict["chosen"] == "logistic"
+    assert verdict["leader"] == "forest"
+    assert verdict["chosen_on"] == "parsimony"
     assert verdict["separated"] is False
-    assert "treat them as tied" in verdict["reason"]
+    assert "ties with" in verdict["reason"]
+
+
+def test_a_fitted_model_that_cannot_separate_from_a_rule_loses_to_the_rule():
+    """CLAUDE.md §4.4 #12, enforced by the ladder's ordering rather than beside it.
+
+    `age_ceiling` is a heuristic rung — the best any age-only rule could do — and
+    it sits early in the ladder. An XGBoost that leads it on the mean but not
+    past the spread finds it in its own tied set and loses on parsimony. A model
+    that does not beat the baseline is not a model, it is a slower baseline.
+    """
+    summary = pd.DataFrame({"model": ["xgboost", "age_ceiling"], "cv_pr_auc_mean": [0.31, 0.30]})
+    per_fold = {
+        "xgboost": pd.DataFrame({"fold": [0, 1, 2], "pr_auc": [0.45, 0.16, 0.32]}),
+        "age_ceiling": pd.DataFrame({"fold": [0, 1, 2], "pr_auc": [0.20, 0.42, 0.28]}),
+    }
+    verdict = select(summary, per_fold)
+    assert verdict["chosen"] == "age_ceiling"
+    assert verdict["chosen_is_heuristic"] is True
+    assert verdict["chosen_on"] == "parsimony"
+
+
+def test_a_lead_that_survives_fold_variance_does_buy_complexity():
+    """The rule is parsimony among *equals*, not a preference for simplicity.
+
+    Without this the rule would be unfalsifiable in the other direction: it would
+    always return the simplest candidate and the ladder would be decoration.
+    """
+    summary = pd.DataFrame({"model": ["xgboost", "logistic"], "cv_pr_auc_mean": [0.60, 0.30]})
+    per_fold = {
+        "xgboost": pd.DataFrame({"fold": [0, 1, 2], "pr_auc": [0.60, 0.61, 0.59]}),
+        "logistic": pd.DataFrame({"fold": [0, 1, 2], "pr_auc": [0.30, 0.31, 0.29]}),
+    }
+    verdict = select(summary, per_fold)
+    assert verdict["chosen"] == "xgboost"
+    assert verdict["chosen_on"] == "separation"
+    assert verdict["separated"] is True
+    assert verdict["tied_with"] == []
+
+
+def test_selection_refuses_a_candidate_with_too_few_folds():
+    """Two folds is a number without a spread, and the verdict says so.
+
+    The failure this prevents is the quiet one: a leader crowned on two folds
+    reads in the report exactly like a leader crowned on ten.
+    """
+    summary = pd.DataFrame({"model": ["xgboost", "logistic"], "cv_pr_auc_mean": [0.6, 0.3]})
+    per_fold = {
+        "xgboost": pd.DataFrame({"fold": [0, 1], "pr_auc": [0.6, 0.6]}),
+        "logistic": pd.DataFrame({"fold": [0, 1], "pr_auc": [0.3, 0.3]}),
+    }
+    verdict = select(summary, per_fold)
+    assert verdict["chosen"] is None
+    assert "2" in verdict["reason"]
+
+
+def test_the_ladder_order_is_complexity_and_an_unknown_name_sorts_last():
+    """Parsimony must never be an argument *for* something the ladder never saw."""
+    from src.models.evaluate import _complexity, ladder_order
+
+    order = ladder_order()
+    assert order[0] == "prior", "the constant is no longer the simplest rung"
+    assert order[-1] == "xgboost", "the boosted rung is no longer the most complex"
+    assert _complexity("logistic") < _complexity("random_forest")
+    assert _complexity("a name the ladder never had") == len(order)
 
 
 def test_a_consistent_lead_is_reported_as_separated():
@@ -473,3 +546,43 @@ def test_the_report_records_the_blocker_when_nothing_could_run(tmp_path):
     text = path.read_text()
     assert "No split yet." in text
     assert "ROC-AUC is reported but not decisive" in text
+
+
+def test_no_fitted_model_wins_on_a_label_that_is_pure_noise():
+    """The end-to-end guarantee, on data whose correct answer is known.
+
+    The panel's label is drawn independently of every feature, so nothing can
+    legitimately beat the base rate. Individual means still scatter above it —
+    that is what makes this the right test — and a rule that reads the highest
+    of them as a result would crown a random forest at 0.2078 against a base rate
+    of 0.1000.
+
+    It is pinned here rather than left as prose in the report because this is the
+    failure that would look like success: a selection rule that quietly starts
+    preferring the top of the ladder produces a *better-looking* comparison, and
+    nothing else in the suite would notice.
+    """
+    import sys
+
+    sys.path.insert(0, "tests")
+    from panels import make_panel
+
+    from src.data.split import temporal_split
+    from src.models.evaluate import compare_models, select
+    from src.models.experiments import default_cuts
+    from src.models.train_baseline import HEURISTIC_RUNGS
+
+    panel = make_panel(n_waves=20, random_labels=True, positives_per_wave=4)
+    split = temporal_split(panel, default_cuts(panel))
+    summary, per_fold, _ = compare_models(split)
+    verdict = select(summary, per_fold)
+
+    best_mean = summary["cv_pr_auc_mean"].max()
+    assert best_mean > 0.15, (
+        "the panel stopped producing a tempting leader, so this test no longer "
+        f"exercises the thing it exists for (best mean {best_mean:.4f})"
+    )
+    assert verdict["chosen"] in HEURISTIC_RUNGS, (
+        f"a fitted model ({verdict['chosen']}) was selected on a label that is pure "
+        f"noise, by: {verdict['reason']}"
+    )

@@ -67,6 +67,7 @@ from src.models.metrics import (
 from src.models.train import build_xgboost
 from src.models.train_baseline import (
     DEFAULT_PANEL,
+    HEURISTIC_RUNGS,
     LADDER,
     _table,
     analytic_reference,
@@ -372,40 +373,220 @@ def compare_models(
     return pd.DataFrame(rows), per_fold, val_scores
 
 
-def select(summary: pd.DataFrame, per_fold: dict[str, pd.DataFrame]) -> dict[str, object]:
-    """Pick a model, and say whether the pick is defensible.
+#: The fewest scored folds a selection may rest on. The same three that
+#: `src/data/split.py` sizes the panel for, and for the same reason: two folds
+#: can agree by accident, and the first thing worth seeing is a model losing a
+#: fold it was expected to win.
+MIN_SELECTION_FOLDS = 3
 
-    The best CV mean wins — but the verdict also carries the paired comparison
-    against the runner-up, because "best" is only meaningful if the gap survives
-    fold variance. When it does not, the honest report is that the two are
-    indistinguishable on this data and the simpler one should be preferred.
+
+def ladder_order() -> tuple[str, ...]:
+    """Every candidate, simplest first — complexity order, not score order.
+
+    `LADDER` is already built to be climbed "in ascending seriousness" and
+    `candidate_models` appends the boosted rung to it, so this is that same
+    sequence read back rather than a second opinion about which model is more
+    complicated than which. A name this does not know sorts last: an unknown
+    candidate is treated as the most complex thing present, so parsimony can
+    never be used to argue *for* it.
     """
-    ranked = summary.dropna(subset=["cv_pr_auc_mean"]).sort_values(
-        "cv_pr_auc_mean", ascending=False
-    )
-    if ranked.empty:
-        return {"chosen": None, "reason": "no model was scored on any fold"}
-    if len(ranked) == 1:
-        return {"chosen": ranked.iloc[0]["model"], "reason": "only one model scored"}
+    return tuple(rung.name for rung in LADDER) + ("xgboost",)
 
-    best, runner_up = ranked.iloc[0]["model"], ranked.iloc[1]["model"]
-    difference = paired_fold_difference(per_fold[best], per_fold[runner_up])
-    separated = (
+
+def _complexity(name: str) -> int:
+    order = ladder_order()
+    return order.index(name) if name in order else len(order)
+
+
+def _scored_folds(per_fold: pd.DataFrame | None, metric: str = "pr_auc") -> int:
+    if per_fold is None or len(per_fold) == 0 or metric not in per_fold:
+        return 0
+    return int(per_fold[metric].notna().sum())
+
+
+def _indistinguishable(difference: dict[str, float]) -> bool:
+    """Is a paired lead smaller than the fold-to-fold spread of that lead?"""
+    return (
         difference["folds"] > 1
         and not np.isnan(difference["sd"])
-        and abs(difference["mean_difference"]) > difference["sd"]
+        and abs(difference["mean_difference"]) <= difference["sd"]
     )
+
+
+def select(summary: pd.DataFrame, per_fold: dict[str, pd.DataFrame]) -> dict[str, object]:
+    """Pick a model by a rule fixed before the numbers it would be applied to.
+
+    **The rule, pre-registered in `docs/design.md` §14 on 2026-09-10, while every
+    `folds_scored` in the comparison was still zero.** That timing is the entire
+    source of its authority. A selection rule written after the fold scores are
+    visible is not a rule, it is a description of the winner, and every degree of
+    freedom in it — which metric, how to break a tie, how big a gap has to be —
+    is a place to prefer the model one already likes.
+
+    Three steps, in order:
+
+    1. **Eligibility.** A candidate needs `MIN_SELECTION_FOLDS` scored folds. Below
+       that there is no spread to judge a lead against, and the honest verdict is
+       that nothing was selected — not that the leader wins by default.
+    2. **The tied set.** Rank by `cv_pr_auc_mean`, take the leader, and collect
+       every candidate whose paired difference from the leader is no larger than
+       the spread of that difference. Paired, because two models scored on the
+       same fold share whatever made it hard.
+    3. **Parsimony decides among equals.** From the leader and everything tied
+       with it, take the one *earliest in the ladder* — the simplest. Only a lead
+       that survives fold variance can buy complexity.
+    4. **The heuristic floor is a gate, not a footnote.** If the pick is a fitted
+       model whose lead over the best `HEURISTIC_RUNGS` entry does not itself
+       survive fold variance, the heuristic is selected instead.
+
+    Step 3 is what the old implementation documented and did not do: it returned
+    the highest mean whatever the spread, so a boosted model half a standard
+    deviation ahead of a logistic regression was crowned, and `CLAUDE.md` §4.4 is
+    explicit that this is backwards — *"the goal is not to reach the top rung, it
+    is to learn whether increasing model complexity actually buys anything"*.
+
+    **The floor needs both step 3 and step 4, and the reason is worth keeping.**
+    `HEURISTIC_RUNGS` — the rules a person could follow without a computer — sit
+    at the simple end of the ladder, so a fitted model that cannot separate from
+    `age_ceiling` usually finds `age_ceiling` in its own tied set and loses to it
+    on parsimony alone. But "tied with the leader" and "better than a rule" are
+    different questions, and on a noisy label they come apart: the leader can
+    fail to clear a heuristic that is nonetheless too far from it to be tied with
+    it, and then every model tied with the leader inherits a failure none of them
+    is measured against. Step 4 closes that. Verified on the synthetic panel whose
+    label is drawn independently of every feature, where step 3 alone returned
+    `age_only` — a fitted model that does not beat a constant — and the gate
+    returns `prior`.
+
+    Together they are `CLAUDE.md` §4.4 #12: *a model that does not beat the
+    baseline is not a model, it is a slower baseline.*
+    """
+    scored = summary.dropna(subset=["cv_pr_auc_mean"]).copy()
+    if scored.empty:
+        return {"chosen": None, "reason": "no model was scored on any fold"}
+
+    folds = {name: _scored_folds(per_fold.get(name)) for name in scored["model"]}
+    eligible = scored[[folds[name] >= MIN_SELECTION_FOLDS for name in scored["model"]]]
+    if eligible.empty:
+        deepest = max(folds.values(), default=0)
+        return {
+            "chosen": None,
+            "reason": (
+                f"no model reached {MIN_SELECTION_FOLDS} scored folds — the deepest "
+                f"managed {deepest}, which is a number without a spread to read it against"
+            ),
+        }
+
+    ranked = eligible.sort_values("cv_pr_auc_mean", ascending=False)
+    leader = str(ranked.iloc[0]["model"])
+
+    if len(ranked) == 1:
+        verdict: dict[str, object] = {
+            "chosen": leader,
+            "chosen_on": "sole candidate",
+            "reason": f"{leader} was the only model with {MIN_SELECTION_FOLDS} scored folds",
+        }
+        return {**verdict, **_floor(leader, eligible, per_fold)}
+
+    runner_up = str(ranked.iloc[1]["model"])
+    difference = paired_fold_difference(per_fold[leader], per_fold[runner_up])
+    separated = not _indistinguishable(difference) and difference["folds"] > 1
+
+    tied = [
+        str(name)
+        for name in ranked["model"][1:]
+        if _indistinguishable(paired_fold_difference(per_fold[leader], per_fold[name]))
+    ]
+    pool = [leader, *tied]
+    chosen = min(pool, key=_complexity)
+
+    if tied and chosen != leader:
+        reason = (
+            f"{leader} leads {runner_up} by {difference['mean_difference']:.4f} PR-AUC but "
+            f"ties with {', '.join(tied)} inside fold variance, so the simplest of them "
+            f"wins: {chosen}"
+        )
+        chosen_on = "parsimony"
+    elif tied:
+        reason = (
+            f"{leader} ties with {', '.join(tied)} inside fold variance and is already the "
+            f"simplest of them, so it stands"
+        )
+        chosen_on = "parsimony"
+    else:
+        reason = (
+            f"{leader} leads {runner_up} by {difference['mean_difference']:.4f} PR-AUC, "
+            f"winning {difference['wins']:.0f} of {difference['folds']:.0f} folds, and the "
+            f"lead is larger than its own spread"
+        )
+        chosen_on = "separation"
+
+    # Step 4, the floor. Parsimony picks the simplest of the models tied with the
+    # leader, but "tied with the leader" is not the same question as "better than
+    # a rule a person could follow" — on a label that is mostly noise the leader
+    # itself may not clear one, and then everything tied with it inherits that
+    # failure. Without this gate the rule returns the simplest member of a set
+    # that nothing in it deserved to be in.
+    floor = _floor(chosen, eligible, per_fold)
+    if (
+        floor.get("best_heuristic") is not None
+        and not floor["chosen_is_heuristic"]
+        and not floor.get("clears_heuristic_floor", False)
+    ):
+        beaten = chosen
+        chosen = str(floor["best_heuristic"])
+        chosen_on = "heuristic floor"
+        reason = (
+            f"no fitted model separated from {chosen}: {beaten} was the simplest of those "
+            f"tied with {leader}, and its lead over {chosen} does not survive fold "
+            f"variance either. CLAUDE.md §4.4 #12 — a model that does not beat the "
+            f"baseline is not a model, it is a slower baseline."
+        )
+        floor = _floor(chosen, eligible, per_fold)
+
     return {
-        "chosen": best,
+        "chosen": chosen,
+        "chosen_on": chosen_on,
+        "leader": leader,
         "runner_up": runner_up,
+        "tied_with": tied,
         **{f"vs_runner_up_{key}": value for key, value in difference.items()},
         "separated": separated,
-        "reason": (
-            f"{best} leads {runner_up} by {difference['mean_difference']:.4f} PR-AUC, "
-            f"winning {difference['wins']:.0f} of {difference['folds']:.0f} folds"
-            + ("" if separated else " — inside one standard deviation, so treat them as tied")
-        ),
+        "reason": reason,
+        **floor,
     }
+
+
+def _floor(chosen: str, eligible: pd.DataFrame, per_fold: dict[str, pd.DataFrame]) -> dict:
+    """Did the pick clear the best rule a person could follow without a computer?
+
+    Pure measurement, called twice by `select`: once to ask the question, and —
+    if the answer was no and the gate swapped the pick for the heuristic — once
+    more to describe what was finally chosen. Keeping it free of the decision
+    means the numbers in the verdict always describe the model named beside them.
+    """
+    heuristics = eligible[eligible["model"].isin(HEURISTIC_RUNGS)]
+    if heuristics.empty:
+        return {"chosen_is_heuristic": chosen in HEURISTIC_RUNGS, "best_heuristic": None}
+
+    best = str(heuristics.sort_values("cv_pr_auc_mean", ascending=False).iloc[0]["model"])
+    floor: dict[str, object] = {
+        "chosen_is_heuristic": chosen in HEURISTIC_RUNGS,
+        "best_heuristic": best,
+    }
+    if chosen == best:
+        return floor
+
+    difference = paired_fold_difference(per_fold[chosen], per_fold[best])
+    floor.update(
+        {f"vs_best_heuristic_{key}": value for key, value in difference.items()},
+    )
+    floor["clears_heuristic_floor"] = bool(
+        difference["folds"] > 1
+        and not np.isnan(difference["sd"])
+        and difference["mean_difference"] > difference["sd"]
+    )
+    return floor
 
 
 def _generalisation_section(generalisation) -> list[str]:
@@ -505,6 +686,19 @@ def write_report(
         "or anywhere in `src/` outside the property that defines it. A test set looked at",
         "twice is a validation set.",
         "",
+        "**The rule below was fixed before any fold could be scored** — pre-registered in",
+        "`docs/design.md` §14 on 2026-09-10, when every `folds_scored` in this table was",
+        "zero at both horizons. A rule written after the scores are visible is not a rule,",
+        "it is a description of the winner. It runs in four steps:",
+        "",
+        f"1. a candidate needs {MIN_SELECTION_FOLDS} scored folds, or nothing is selected;",
+        "2. rank by `cv_pr_auc_mean`, and everything whose *paired* difference from the",
+        "   leader is no bigger than that difference's own spread is tied with it;",
+        "3. among the leader and everything tied with it, the **simplest** wins — only a",
+        "   lead that survives fold variance buys complexity;",
+        "4. and if that pick is a fitted model that cannot separate from the best rule a",
+        "   person could follow unaided, the rule is selected instead.",
+        "",
     ]
 
     if blocker is not None:
@@ -523,15 +717,22 @@ def write_report(
             "|---|---|---|---|---|",
             "| prior | 0.1000 | 0.0000 | 0.1000 | 0.0000 |",
             "| board_hazard | 0.1000 | 0.0000 | 0.1000 | 0.0000 |",
-            "| logistic | 0.1937 | 0.1294 | 0.1560 | 0.3849 |",
-            "| random_forest | 0.2532 | 0.1844 | 0.1412 | 0.2156 |",
-            "| xgboost | 0.1910 | 0.1083 | 0.1538 | 0.1899 |",
+            "| age_only | 0.1133 | 0.0340 | 0.1057 | 0.3801 |",
+            "| logistic | 0.1846 | 0.0996 | 0.1339 | 0.3540 |",
+            "| random_forest | 0.2078 | 0.0885 | 0.1441 | 0.2640 |",
+            "| xgboost | 0.1974 | 0.1088 | 0.1198 | 0.4529 |",
             "",
-            "The random forest posts the best mean and the verdict still refuses it:",
-            "*random_forest leads logistic by 0.0595 PR-AUC, winning 4 of 7 folds — inside",
-            "one standard deviation, so treat them as tied.* That is the whole point of the",
-            "error bars. On a label that is pure noise, every score above 0.10 is noise, and",
-            "a comparison that reported the 0.2532 as a result would be inventing one.",
+            "**The random forest posts the best mean and the rule selects `prior`.** It",
+            "leads by 0.0232 over xgboost, which is inside the spread of that lead, so",
+            "xgboost, logistic and age_only are all tied with it; parsimony takes the",
+            "simplest of those, `age_only`; and `age_only` in turn cannot separate from a",
+            "constant, so the floor returns the constant. On a label drawn independently of",
+            "every feature that is the only correct answer, and a comparison that reported",
+            "the 0.2078 as a result would be inventing one.",
+            "",
+            "That is what the error bars are for. `tests/test_evaluate.py` pins this run,",
+            "so a change that lets a fitted model win on noise fails CI rather than",
+            "producing a better-looking report.",
             "",
             "Note also `prior`: PR-AUC exactly at the base rate and **ECE 0.0000** —",
             "perfectly calibrated and completely useless. That is why calibration is never",
