@@ -6,7 +6,7 @@
 | Horizon | H=1 (calendar basis) — a pipeline smoke test, not the build's horizon |
 | Data | **real** · snapshot `2026-09-08` · `data/processed/features/job_days_h1_calendar.parquet` |
 | Panel | 10,355 rows · sha256 `fea0c88e2947…` |
-| Code | `62b04c6ed` on `main` (dirty tree) |
+| Code | `fbb912ad2` on `main` (dirty tree) |
 
 _Regenerate rather than edit._
 
@@ -86,4 +86,31 @@ would be selection on the validation block, which is the thing the block exists
 to prevent. So the threshold sweep, the calibration curve, the per-source table
 and the leave-one-board-out transfer measurement all wait for fold depth. They
 are exercised meanwhile against the synthetic panel in `tests/`.
+
+### Which cuts were tried
+
+Not one cut — every cut. *No fold is available* read as a property of the
+chosen cut invites the obvious retort, so here is the enumeration:
+
+| train_end | val_end | train_rows | val_rows | val_positives | folds |
+|---|---|---|---|---|---|
+| 2026-08-31 | 2026-09-03 | 1104 | 1159 | 71 | 0 |
+| 2026-08-31 | 2026-09-04 | 1104 | 2324 | 166 | 0 |
+| 2026-09-01 | 2026-09-04 | 2247 | 1165 | 95 | 0 |
+
+The best any legal cut manages is **0 fold(s)**, against the 3 the rule requires.
+
+### Does complexity earn its place? What the one draw points at
+
+On the single validation draw above, the best fitted rung, `age_only` at 0.7772, is **ahead** of the best rule a person could follow unaided, `rule_older_than_30d` at 0.1379 — by 0.6393.
+
+**That is a direction, not evidence, and the difference is the whole point.** One
+number has no spread, so it cannot separate a real ordering from the ordering this
+particular block happened to produce — which is exactly why the rule in
+`docs/design.md` §14 requires folds before anything is chosen. Reporting a winner
+from this table would be selection on the validation block.
+
+If that lead survives fold depth *and* clears the paired spread, step 3 of the rule buys the complexity and a fitted model ships. If it does not, step 4 returns the heuristic.
+
+**Read all of the above against the label first.** 52% of the closures in this panel belong to postings seen in fewer than 6 complete crawls — see [`label_validity.md`](label_validity.md). A posting seen once and never again is, from inside the panel, indistinguishable from one filled the next morning, and any feature tracking how long a posting has been around separates those two almost perfectly. A lead built on `age_days` at this concentration is a measurement of the collection process, not of hiring, and no amount of fold depth will make it otherwise.
 

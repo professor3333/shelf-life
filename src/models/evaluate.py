@@ -39,7 +39,15 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.data.split import SplitResult, SplitTooShallow, best_cuts, crawl_waves, temporal_split
+from src.data.split import (
+    Cuts,
+    SplitResult,
+    SplitTooShallow,
+    best_cuts,
+    crawl_waves,
+    feasible_cuts,
+    temporal_split,
+)
 from src.features.assemble import horizon_banner
 from src.features.preprocessing import features_and_target, fit_on_frame
 from src.models import ledger, provenance
@@ -456,6 +464,47 @@ def write_figures(
     return [pr_path, calibration_path]
 
 
+def fold_census(panel: pd.DataFrame) -> pd.DataFrame:
+    """Every legal cut of this panel, and how many folds each one yields.
+
+    **Why an enumeration rather than a number.** "No fold is available" read as a
+    property of *the* cut invites the obvious retort — try a different one. The
+    cut is chosen to maximise folds, so the answer is already no, but that is a
+    claim about a function rather than about the data and a reader has to take it
+    on trust. This walks every cut the panel admits and reports the fold count of
+    each, which turns the refusal into a table: not *this cut* yields nothing,
+    but *no cut does*.
+
+    It also makes `best_cuts`' contract checkable. That function deliberately does
+    *not* maximise folds — past `DEFAULT_TARGET_FOLDS` it prefers blocks split in
+    proportion, because maximising folds deepens training without limit and leaves
+    validation and test one and two waves wide for ever. What it must do is reach
+    the target when any cut can, and otherwise return the deepest cut available.
+    Both are visible in this table, and while the panel is too shallow the second
+    is the one that matters: it is the difference between waiting for depth and
+    waiting for depth longer than necessary.
+    """
+    rows = []
+    for _, candidate in feasible_cuts(panel).iterrows():
+        if not candidate["valid"]:
+            continue
+        try:
+            split = temporal_split(panel, Cuts(candidate["train_end"], candidate["val_end"]))
+        except SplitTooShallow:
+            continue
+        rows.append(
+            {
+                "train_end": pd.Timestamp(candidate["train_end"]).date().isoformat(),
+                "val_end": pd.Timestamp(candidate["val_end"]).date().isoformat(),
+                "train_rows": int(len(split.train)),
+                "val_rows": int(len(split.val)),
+                "val_positives": int(split.val["y"].sum()),
+                "folds": len(wave_forward_folds(split.train, split.embargo)),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def select(summary: pd.DataFrame, per_fold: dict[str, pd.DataFrame]) -> dict[str, object]:
     """Pick a model by a rule fixed before the numbers it would be applied to.
 
@@ -691,6 +740,152 @@ def _generalisation_section(generalisation) -> list[str]:
     return lines
 
 
+def _complexity_reading(summary: pd.DataFrame, frame_for_caveat: pd.DataFrame) -> list[str]:
+    """What the single validation draw shows about complexity — and why it is not the answer.
+
+    **This is not a selection and must not read as one.** It reports a direction
+    the one available draw points in, and says plainly that a direction is not
+    evidence. The distinction is the whole discipline: a number with no spread
+    cannot separate a real ordering from the ordering a single block happened to
+    produce, which is why the rule requires folds before anything is chosen.
+
+    It is written because the negative finding is worth stating early.
+    `CLAUDE.md` §4.4: the goal is not to reach the top rung, it is to learn
+    whether increasing complexity buys anything — and *it did not, here* is a
+    finding about the data to be written down rather than tuned past. If it
+    survives fold depth, step 4 of the rule returns a heuristic and this project
+    ships a rule a person could follow unaided, which is a legitimate outcome and
+    not a failure to produce a model.
+    """
+    if summary is None or summary.empty or "val_pr_auc" not in summary:
+        return []
+
+    heuristics = summary[summary["model"].isin(HEURISTIC_RUNGS)]
+    fitted = summary[~summary["model"].isin(HEURISTIC_RUNGS)]
+    if heuristics.empty or fitted.empty:
+        return []
+
+    best_heuristic = heuristics.loc[heuristics["val_pr_auc"].idxmax()]
+    best_fitted = fitted.loc[fitted["val_pr_auc"].idxmax()]
+    margin = float(best_fitted["val_pr_auc"] - best_heuristic["val_pr_auc"])
+
+    if margin > 0:
+        direction = (
+            f"the best fitted rung, `{best_fitted['model']}` at "
+            f"{best_fitted['val_pr_auc']:.4f}, is **ahead** of the best rule a person could "
+            f"follow unaided, `{best_heuristic['model']}` at "
+            f"{best_heuristic['val_pr_auc']:.4f} — by {margin:.4f}"
+        )
+        consequence = (
+            "If that lead survives fold depth *and* clears the paired spread, step 3 of "
+            "the rule buys the complexity and a fitted model ships. If it does not, step 4 "
+            "returns the heuristic."
+        )
+    else:
+        direction = (
+            f"**no fitted rung beats a rule a person could follow unaided.** The best of "
+            f"them, `{best_fitted['model']}`, scores {best_fitted['val_pr_auc']:.4f} against "
+            f"`{best_heuristic['model']}` at {best_heuristic['val_pr_auc']:.4f} — behind by "
+            f"{abs(margin):.4f}"
+        )
+        consequence = (
+            "If that holds once folds exist, step 4 of the rule returns the heuristic and "
+            "this project ships a rule a person could follow without a computer. That is a "
+            "legitimate result and not a failure to produce a model: `CLAUDE.md` §4.4 asks "
+            "whether increasing complexity buys anything, and *it did not* is an answer."
+        )
+
+    return [
+        "### Does complexity earn its place? What the one draw points at",
+        "",
+        f"On the single validation draw above, {direction}.",
+        "",
+        "**That is a direction, not evidence, and the difference is the whole point.** One",
+        "number has no spread, so it cannot separate a real ordering from the ordering this",
+        "particular block happened to produce — which is exactly why the rule in",
+        "`docs/design.md` §14 requires folds before anything is chosen. Reporting a winner",
+        "from this table would be selection on the validation block.",
+        "",
+        consequence,
+        "",
+        *_lifespan_caveat(frame_for_caveat),
+    ]
+
+
+def _lifespan_caveat(panel: pd.DataFrame) -> list[str]:
+    """The reading above is worthless if the target is measuring the crawl.
+
+    Carried here rather than left in `reports/label_validity.md` because this is
+    the table where somebody decides whether a model is working, and a score
+    driven by how long a posting has been observed will look exactly like a model
+    working. The two files being separate is how a reader ends up believing the
+    optimistic one.
+    """
+    from src.data.label_audit import SETTLED_OBSERVATIONS, lifespan_concentration
+
+    census = lifespan_concentration(panel)
+    if census.empty:
+        return []
+
+    brief = census[census["seen in"] != f"{SETTLED_OBSERVATIONS}+ runs"]
+    total = float(census["closures"].sum())
+    if not total:
+        return []
+    share = float(brief["closures"].sum()) / total
+    if share < 0.5:
+        return []
+
+    return [
+        f"**Read all of the above against the label first.** {share:.0%} of the closures in "
+        f"this panel belong to postings seen in fewer than {SETTLED_OBSERVATIONS} complete "
+        "crawls — see [`label_validity.md`](label_validity.md). A posting seen once and never "
+        "again is, from inside the panel, indistinguishable from one filled the next morning, "
+        "and any feature tracking how long a posting has been around separates those two "
+        "almost perfectly. A lead built on `age_days` at this concentration is a measurement "
+        "of the collection process, not of hiring, and no amount of fold depth will make it "
+        "otherwise.",
+        "",
+    ]
+
+
+def _census_section(frame: pd.DataFrame) -> list[str]:
+    """Every legal cut and its fold count, so the refusal is shown rather than asserted.
+
+    "No fold is available" invites the retort *try a different cut*. This answers
+    it in advance and exhaustively: the table below is every cut this panel
+    admits, and the `folds` column is the whole argument.
+    """
+    census = fold_census(frame)
+    if census.empty:
+        return [
+            "### Which cuts were tried",
+            "",
+            "**No cut of this panel is legal at all** — every candidate leaves the",
+            "validation or the held-out block empty, so there is nothing to enumerate.",
+            "`scripts/watch_depth.sh` reports the shortfall and the date it clears.",
+            "",
+        ]
+
+    best = int(census["folds"].max())
+    verdict = (
+        f"The best any legal cut manages is **{best} fold(s)**, against the "
+        f"{MIN_SELECTION_FOLDS} the rule requires."
+        if best < MIN_SELECTION_FOLDS
+        else f"The deepest legal cut yields **{best} fold(s)**."
+    )
+    return [
+        "### Which cuts were tried",
+        "",
+        "Not one cut — every cut. *No fold is available* read as a property of the",
+        "chosen cut invites the obvious retort, so here is the enumeration:",
+        "",
+        _table(census, list(census.columns)),
+        "",
+        verdict,
+        "",
+    ]
+
+
 def _figure_section(figures: list[Path] | None) -> list[str]:
     """The two diagnostics, or the reason there are none.
 
@@ -861,6 +1056,8 @@ def write_report(
             "and the leave-one-board-out transfer measurement all wait for fold depth. They",
             "are exercised meanwhile against the synthetic panel in `tests/`.",
             "",
+            *_census_section(frame),
+            *_complexity_reading(summary, frame),
         ]
     elif blocker is None:
         lines += [
