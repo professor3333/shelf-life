@@ -1319,12 +1319,53 @@ imports, and nothing else. It leaves **57 s of the 90 s budget** for everything 
 real model adds. The definitive figure is still owed and gets written here before
 the link is given to anyone.
 
+**And the term the baseline is missing is now estimated: 25.18 s.** The baseline
+covers everything *except* the one thing the criterion exists to bound — reading
+a fitted pipeline off disk and unpickling it on a tenth of a CPU.
+`./scripts/artifact_cost.sh` measures that term without waiting for a freeze: one
+image started twice, once empty and once with `models/` mounted read-only, both
+throttled to `--cpus 0.1 --memory 512m`, timed from `docker run` to the first
+`/health` that answers, three repeats each.
+
+|                                            |              |
+| ------------------------------------------ | ------------ |
+| median, no artifact (local, throttled)     | 169.73 s     |
+| median, with artifact (local, throttled)   | 194.91 s     |
+| **what the artifact costs**                | **25.18 s**  |
+| measured remote baseline **+** that cost   | **57.83 s**  |
+| the criterion                              | 90 s         |
+
+**Those absolute figures are not Render's and are never to be quoted as if they
+were.** The local no-artifact arm takes 169.73 s where the real instance took
+32.65 s — the plainest available evidence that Docker's hard CFS quota and a free
+instance's burstable share are not the same tenth of a CPU. Only the *difference*
+travels, and it travels because the two arms differ by exactly one thing: both
+pay the same interpreter start and the same scikit-learn and XGBoost imports, and
+only one also unpickles a pipeline. Adding that difference to the remote baseline
+is pessimistic by construction, because the slower of the two CPUs is the one
+that produced the 25.18 s.
+
+The honest reading of **57.83 s against 90 s** is deliberately narrow. It does not
+accept the architecture — nothing measured locally can, and the artifact in
+`models/` is the synthetic-fixture one, so its size is not the frozen model's
+size. What it buys is the removal of the largest unknown from the critical path
+of a day that happens once. Freeze day opens the test block, spends it, and
+ships; discovering *there* that the load path costs 60 s would be discovering it
+at the only moment when the documented response — reassess the architecture —
+is also the most expensive one. This run says that is unlikely, and had it said
+the opposite it would have said so while the test block was still unspent.
+
+One arm came in at 271.50 s against its own median of 194.91 s. That is a
+throttled container losing a scheduling slice, and it is why the script reports
+medians: the mean would have moved the headline by about seven seconds for
+reasons having nothing to do with the model.
+
 **There is a stop rule attached to it.** Past 90 seconds, the hosting decision is
 reassessed rather than tuned around — `scripts/cold_start.sh` exits non-zero, and
 a test fails if the UI's timeout is raised above the criterion to make the
 symptom go away.
 
-**And it is measured twice.** A *baseline* against the no-artifact image can be
+**And the criterion itself is measured twice.** A *baseline* against the no-artifact image can be
 taken before the panel clears, because starting the process and importing
 scikit-learn and XGBoost costs the same whether or not a model loads. That
 baseline can **fail** — conclusively, since the definitive measurement can only

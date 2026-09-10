@@ -697,6 +697,61 @@ run it just did rather than taking the caller's word for it — it asks `/health
 whether a model is loaded — because a caller who has to remember which sort of
 measurement they are looking at will eventually file a lower bound as a result.
 
+### 7e-ii. The omitted work, measured on its own — **2026-09-10**
+
+The `nothing` in the table above is what this subsection exists to attack. The
+baseline cannot bound the load path, and the definitive measurement cannot be
+taken until a model is frozen, so as written the largest unknown in the
+deployment was scheduled to resolve itself on **the one day that cannot absorb a
+bad answer**: freeze day opens the test block, spends it, and ships, and the
+documented response to a blown criterion — reassess the architecture — is at its
+most expensive precisely then.
+
+`scripts/artifact_cost.sh` breaks that dependency by measuring the *difference*
+the baseline is missing instead of the total it cannot reach. One image, started
+twice under `--cpus 0.1 --memory 512m`, once with no artifact and once with
+`models/` mounted read-only, timed from `docker run` to the first `/health` that
+answers — the model loads in the app's lifespan, so that answer is already past
+the unpickle. Three repeats per arm.
+
+| | |
+|---|---|
+| median, no artifact (local, throttled) | 169.73 s |
+| median, with artifact (local, throttled) | 194.91 s |
+| **the artifact's cost — the difference** | **25.18 s** |
+| measured remote baseline **+** that difference | **57.83 s** |
+| the criterion | 90 s |
+| headroom | 32.17 s |
+
+**Why the difference is portable when neither total is.** The local no-artifact
+arm takes 169.73 s where the real instance took 32.65 s. That gap is the evidence
+that Docker's hard CFS quota and a free instance's burstable share are not the
+same tenth of a CPU, and it is why no absolute figure here may ever be quoted
+against the criterion. The difference survives because the two arms differ by
+exactly one thing — same image, same limits, same launch site, same interpreter
+start, same scikit-learn and XGBoost imports — and only one of them also reads
+and unpickles a pipeline. Adding a local difference to the remote baseline is
+then **pessimistic by construction**, because the slower of the two CPUs is the
+one that produced the 25.18 s.
+
+**What it still does not do, and the list is the point.** It does not accept the
+architecture; nothing measured locally can, and §7e reserves acceptance for
+`cold_start.sh` against a real release. The artifact it loads is the
+synthetic-fixture one, so it exercises the real load path with a pipeline of the
+real *shape* but not of the frozen model's *size*. And it is an estimate of a
+term, not the term.
+
+So the claim it supports is narrow, and stating it exactly is the whole
+discipline: **the hosting decision is unlikely to fall over on freeze day, and if
+it were going to, this run had a fair chance of saying so while the test block
+was still unspent.** The architecture remains provisional. What changed is that
+the risk is now quantified instead of merely acknowledged.
+
+One arm returned 271.50 s against its own median of 194.91 s — a throttled
+container losing a scheduling slice. The script reports medians for that reason;
+a mean would have moved the headline by roughly seven seconds for reasons with no
+connection to the model.
+
 The criterion is applied to the **slowest request**, not to the wake alone. The
 UI's timeout is per request and guards both, so a `/health` that wakes in 40
 seconds followed by a `/predict` that takes 100 is a failure even though the wake
