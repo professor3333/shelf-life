@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from src import plots
 from src.data.load import load_snapshot
 from src.data.snapshot import latest_snapshot
 
@@ -123,7 +124,71 @@ def panel_shape(jobs, runs, observations) -> pd.DataFrame:
     return table.sort_values("jobs", ascending=False)
 
 
-def build_report(snapshot_dir: Path) -> str:
+#: Numeric columns whose *shape* a median and a standard deviation misdescribe.
+#: Each is a long tail or a spike, which is the reason the figure exists — see
+#: `src/plots.py` for why these five and not every numeric column.
+DISTRIBUTION_COLUMNS = ("salary_min", "salary_max", "content_chars", "n_offices", "n_metadata")
+
+
+def _log_figures(figures: list[Path], snapshot: str, n_jobs: int) -> None:
+    """Put the profile's figures in MLflow, with the snapshot they describe.
+
+    A data profile is a run over a pinned snapshot, so it has exactly the
+    provenance a model run has — and a missingness grid six weeks old is only
+    worth anything if you can say which snapshot it came from.
+    """
+    from src.models import provenance, tracking
+
+    prov = provenance.collect(
+        Path("data/raw") / snapshot / "manifest.json", n_jobs, provenance.REAL
+    )
+    run = tracking.log_figure_run("data profile", figures, prov, params={"snapshot": snapshot})
+    if run:
+        print(f"logged figures to MLflow run {run[:8]}")
+
+
+def _figure_section(jobs: pd.DataFrame, snapshot: str, figures_dir: Path | None) -> list[str]:
+    """The two figures for this report, or the reason there are none.
+
+    Written as a section rather than appended at the end because the missingness
+    grid belongs *beside* the coverage table it draws — the table is the evidence
+    and the figure is how the pattern in it becomes visible at a glance.
+
+    Matplotlib is an optional extra, so its absence is reported rather than
+    raised: a data profile is still worth having without pictures, and a report
+    that silently dropped them would leave a reader wondering whether the figures
+    were omitted or never produced.
+    """
+    if figures_dir is None:
+        return []
+    if not plots.available():
+        return [
+            "_Figures not rendered: matplotlib is not installed. "
+            "`pip install -e '.[plots]'` and re-run._",
+            "",
+        ]
+
+    grid = figures_dir / f"missingness_{snapshot}.png"
+    spread = figures_dir / f"distributions_{snapshot}.png"
+    plots.missingness_by_source(coverage_by_source(jobs), grid)
+    plots.distributions(jobs, DISTRIBUTION_COLUMNS, spread)
+    _log_figures([grid, spread], snapshot, len(jobs))
+    relative = Path(grid.name).parent
+    return [
+        f"![Percent present by source and column]({figures_dir.name}/{grid.name})",
+        "",
+        "Missing is not random here: the blocks of red are whole sources that never",
+        'populate a field, so "this column is null" is largely a restatement of which',
+        "board the row came from.",
+        "",
+        f"![Distributions of the long-tailed columns]({figures_dir.name}/{spread.name})",
+        "",
+        f"_Figures regenerate with the report; `{relative}` is written beside it._",
+        "",
+    ]
+
+
+def build_report(snapshot_dir: Path, figures_dir: Path | None = None) -> str:
     frames = load_snapshot(snapshot_dir)
     jobs, runs, observations = frames["jobs"], frames["runs"], frames["job_observations"]
     manifest = json.loads((snapshot_dir / "manifest.json").read_text())
@@ -143,6 +208,7 @@ def build_report(snapshot_dir: Path) -> str:
         "",
         "## Coverage by source (% non-null)",
         "",
+        *_figure_section(jobs, snapshot_dir.name, figures_dir),
         "Read this as the missingness fingerprint: where a column is 0 or 100 for a",
         "whole source, 'missing' is a synonym for 'came from that source'.",
         "",
@@ -189,7 +255,7 @@ def main() -> None:
     snapshot_dir = Path("data/raw") / args.date if args.date else latest_snapshot()
     REPORTS_ROOT.mkdir(exist_ok=True)
     report_path = REPORTS_ROOT / f"data_profile_{snapshot_dir.name}.md"
-    report_path.write_text(build_report(snapshot_dir))
+    report_path.write_text(build_report(snapshot_dir, figures_dir=plots.FIGURES_DIR))
     print(f"wrote {report_path}")
 
     if not DICTIONARY_PATH.exists():

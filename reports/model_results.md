@@ -96,3 +96,11 @@ sha256, its own parameters and metrics, and the git SHA that produced them.
 
 Tracked: **35 runs** in MLflow experiment `shelf-life`, as one parent per family with a child per variant. Each child carries its own feature subset, the split, the panel's sha256 and the git SHA.
 
+## The gap, drawn
+
+The sweep opens a train/validation gap and closes it one knob at a time.
+A gap is a distance between two lines, and as a table it is two columns the
+reader has to subtract in their head, one row at a time.
+
+![train against validation across complexity](figures/complexity_gap.png)
+

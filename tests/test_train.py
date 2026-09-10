@@ -510,7 +510,7 @@ def _logged(tmp_path, **families):
     uri = f"sqlite:///{tmp_path}/runs.db"
     client = tracking.start("tracking-test", uri)
     prov = provenance.collect(Path("tests/panels.py"), len(split.frame), provenance.SYNTHETIC)
-    written = log_experiments(client, split, prov, 20, **families)
+    written = log_experiments(client, split, prov, 20, figures_dir=tmp_path, **families)
     api = mlflow.MlflowClient(tracking_uri=uri)
     experiment = api.get_experiment_by_name("tracking-test")
     runs = api.search_runs([experiment.experiment_id], max_results=200)

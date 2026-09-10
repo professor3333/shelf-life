@@ -413,6 +413,49 @@ def _indistinguishable(difference: dict[str, float]) -> bool:
     )
 
 
+#: Which rungs the figures draw, chosen by **position on the ladder** — the
+#: constant, a linear fit, and the boosted rung — and never by score. Picking the
+#: three best-scoring candidates would be selection on the validation block
+#: wearing a picture, which is the one thing this module may not do.
+FIGURE_RUNGS: tuple[str, ...] = ("prior", "logistic", "xgboost")
+
+
+def write_figures(
+    split: SplitResult,
+    val_scores: dict[str, np.ndarray],
+    figures_dir: Path,
+) -> list[Path]:
+    """The PR curve and the calibration diagram, for a fixed spread of the ladder.
+
+    **These do not need a chosen model, and that is deliberate.** Every table
+    below the verdict waits for a selection the panel cannot yet support, but a
+    diagnostic is not a verdict: the question "does anything here clear the base
+    rate" is worth a picture long before the question "which one ships" has an
+    answer. Drawing a fixed three rungs keeps it that way.
+    """
+    from sklearn.metrics import precision_recall_curve
+
+    from src import plots
+
+    target = split.val["y"].astype(int)
+    drawn = [name for name in FIGURE_RUNGS if name in val_scores]
+
+    curves = {}
+    for name in drawn:
+        precision, recall, _ = precision_recall_curve(target, val_scores[name])
+        curves[name] = (recall, precision)
+
+    pr_path = plots.precision_recall(
+        curves, float(target.mean()), figures_dir / "precision_recall.png"
+    )
+    calibration_path = plots.calibration(
+        {name: reliability_curve(target, val_scores[name]) for name in drawn},
+        figures_dir / "calibration.png",
+        eces={name: expected_calibration_error(target, val_scores[name]) for name in drawn},
+    )
+    return [pr_path, calibration_path]
+
+
 def select(summary: pd.DataFrame, per_fold: dict[str, pd.DataFrame]) -> dict[str, object]:
     """Pick a model by a rule fixed before the numbers it would be applied to.
 
@@ -648,6 +691,36 @@ def _generalisation_section(generalisation) -> list[str]:
     return lines
 
 
+def _figure_section(figures: list[Path] | None) -> list[str]:
+    """The two diagnostics, or the reason there are none.
+
+    Placed above the sections that wait on a selection, because these two do
+    not: a picture of whether anything clears the base rate is worth having
+    while the question of *which* model ships is still unanswerable.
+    """
+    if not figures:
+        return [
+            "## Diagnostics",
+            "",
+            "_Figures not rendered: matplotlib is not installed. "
+            "`pip install -e '.[plots]'` and re-run._",
+            "",
+        ]
+    return [
+        "## Diagnostics",
+        "",
+        "Drawn for a fixed spread of the ladder — the constant, the linear fit and the",
+        "boosted rung — chosen by **position on the ladder, never by score**. Picking the",
+        "three best-scoring candidates would be selection on the validation block wearing",
+        "a picture.",
+        "",
+        *[f"![{path.stem.replace('_', ' ')}](figures/{path.name})\n" for path in figures],
+        "The dashed line on the first is what a constant predictor scores. A curve below",
+        "it has not beaten predicting the base rate for every posting.",
+        "",
+    ]
+
+
 def write_report(
     path: Path,
     frame: pd.DataFrame,
@@ -660,6 +733,7 @@ def write_report(
     by_carryover: pd.DataFrame | None,
     blocker: str | None,
     generalisation: tuple | None = None,
+    figures: list[Path] | None = None,
 ) -> None:
     reference = analytic_reference(frame)
     lines = [
@@ -766,6 +840,7 @@ def write_report(
             "",
             f"**Chosen: {verdict.get('chosen')}** — {verdict.get('reason')}",
             "",
+            *_figure_section(figures),
         ]
 
     if blocker is None and thresholds is None:
@@ -843,6 +918,34 @@ def write_report(
     path.write_text("\n".join(lines) + "\n")
 
 
+def _draw(val_scores, split, panel_path: Path, n_rows: int) -> list[Path]:
+    """Render the figures and log them, or say why not.
+
+    Never fails the report over a picture, and never over a tracking server
+    either: both are diagnostics of the comparison, and the comparison's tables
+    are the artifact that has to survive.
+    """
+    from src import plots
+    from src.models import provenance, tracking
+
+    if not plots.available():
+        print("matplotlib is not installed — no figures. `pip install -e '.[plots]'`")
+        return []
+
+    figures = write_figures(split, val_scores, plots.FIGURES_DIR)
+    run = tracking.log_figure_run(
+        "comparison diagnostics",
+        figures,
+        provenance.collect(panel_path, n_rows, provenance.REAL),
+        params={"rungs_drawn": ", ".join(FIGURE_RUNGS)},
+    )
+    print(
+        f"figures -> {plots.FIGURES_DIR}"
+        + (f", logged to MLflow run {run[:8]}" if run else " (not logged: mlflow absent)")
+    )
+    return figures
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--panel", type=Path, default=DEFAULT_PANEL)
@@ -851,6 +954,7 @@ def main() -> None:
     args = parser.parse_args()
 
     frame = pd.read_parquet(args.panel)
+    figures: list[Path] = []
     summary = per_fold = verdict = thresholds = calibration = None
     generalisation = None
     by_source = by_carryover = blocker = None
@@ -858,6 +962,7 @@ def main() -> None:
         split = temporal_split(frame, best_cuts(frame))
         summary, per_fold, val_scores = compare_models(split, args.budget)
         verdict = select(summary, per_fold)
+        figures = _draw(val_scores, split, args.panel, len(frame))
         print(summary.to_string(index=False))
         print(f"\nchosen: {verdict['chosen']} — {verdict['reason']}")
 
@@ -924,6 +1029,7 @@ def main() -> None:
         by_carryover,
         blocker,
         generalisation,
+        figures=figures,
     )
     print(f"wrote -> {args.out}")
 

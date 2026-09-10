@@ -52,6 +52,20 @@ a disagreement between them as a warning rather than an average.
 
 **Chosen: None** — no model was scored on any fold
 
+## Diagnostics
+
+Drawn for a fixed spread of the ladder — the constant, the linear fit and the
+boosted rung — chosen by **position on the ladder, never by score**. Picking the
+three best-scoring candidates would be selection on the validation block wearing
+a picture.
+
+![precision recall](figures/precision_recall.png)
+
+![calibration](figures/calibration.png)
+
+The dashed line on the first is what a constant predictor scores. A curve below
+it has not beaten predicting the base rate for every posting.
+
 ## No threshold, calibration or breakdown yet
 
 Every section below this point describes *one* model, and no model has been

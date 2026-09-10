@@ -831,6 +831,11 @@ Only features that exist:
   was a column, and is removed one at a time to see what it was worth.
 - **A deliberate overfit** — depth up and regularisation off until train and
   validation separate, then closed again one knob at a time.
+- **Diagnostic figures** — missingness by source, the long-tailed distributions,
+  a precision–recall curve against the base rate, calibration per rung, and
+  train against validation across model complexity. Written to
+  `reports/figures/` beside the reports that cite them, and logged to MLflow
+  with the panel's sha256 and the git SHA that drew them.
 - **MLflow tracking on every experiment** — the eight scripted runs *and* the
   five families the training entry point runs each time: the ladder, the
   ablations, the overfit sweep, the board-context folds and the serve-time
@@ -854,7 +859,7 @@ different project.
 ## Tech stack
 
 Python 3.12 · pandas · numpy · scikit-learn (`Pipeline`, `ColumnTransformer`) ·
-XGBoost · MLflow · FastAPI · pydantic · Streamlit · Docker · pytest · ruff ·
+XGBoost · MLflow · matplotlib · FastAPI · pydantic · Streamlit · Docker · pytest · ruff ·
 SQLite (read-only, upstream) · Parquet.
 
 ---
@@ -911,8 +916,12 @@ pip install -e ".[dev,api,ui]"
 ```
 
 The extras are separable on purpose: `api` for the service, `ui` for the form,
-`tracking` for MLflow, `dev` for everything plus the test tooling. Running the
-model ladder should not require installing a web framework.
+`tracking` for MLflow, `plots` for the diagnostic figures, `dev` for everything
+plus the test tooling. Running the model ladder should not require installing a
+web framework — and `plots` is separate for a sharper reason: the Dockerfile
+installs `.[api]`, so a plotting library in the base dependencies would ship to
+a 0.1-CPU instance, draw nothing, and be paid for on every cold start. A test
+asserts it stays out.
 
 ---
 
