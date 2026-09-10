@@ -12,6 +12,14 @@ The label is **removed from the board**, which is not the same thing as
 distinction is repeated everywhere a number appears — including on the screen of
 the UI.
 
+**That the label measures removal has been checked against the boards, not just
+argued.** A sample of postings the panel calls removed was verified against each
+source's live listing: **59 of 60 are genuinely gone under their own id** (98.3%,
+95% Wilson 91.1–99.7%), against a control drift of 3.3% among postings that were
+up at the last crawl. Twelve percent of those verified removals had their title
+relisted under a new id within days — which is the caveat above, measured:
+the posting left, the role did not. [`reports/label_check.md`](reports/label_check.md).
+
 > **Status, stated plainly.** The full system is built: ingestion, labelling,
 > the leakage audit, the temporal split, the model ladder, experiment tracking,
 > the frozen-artifact packaging, the API, the container and the UI.
@@ -831,6 +839,10 @@ Only features that exist:
   was a column, and is removed one at a time to see what it was worth.
 - **A deliberate overfit** — depth up and regularisation off until train and
   validation separate, then closed again one knob at a time.
+- **Label verification against the source** — postings the panel calls removed
+  are checked against each board's live listing, with a control arm, because
+  agreement on the positives alone is compatible with an instrument that answers
+  *gone* for everything.
 - **Diagnostic figures** — missingness by source, the long-tailed distributions,
   a precision–recall curve against the base rate, calibration per rung, and
   train against validation across model complexity. Written to
@@ -1483,7 +1495,10 @@ screen rather than in a footnote — that is the mitigation, and it is deliberat
 
 1. **"Closed" is not "filled."** The label is disappearance from the board. A
    posting can be pulled, expire, be reposted, or be moved to another system.
-   Every claim this project makes is about disappearance.
+   Every claim this project makes is about disappearance. The disappearance
+   itself is verified — 59 of 60 sampled removals are genuinely gone from the
+   board — and **12% of them were relisted under a new id within days**, which is
+   this caveat with a number on it rather than a hedge.
 2. **It is trained on Greenhouse boards, though it does not use board identity.**
    arbeitnow — 78% of the collected postings — is excluded because its crawls
    never observed a whole board, so whatever is learned here is learned from six

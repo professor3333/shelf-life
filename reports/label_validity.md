@@ -6,7 +6,7 @@
 | Horizon | H=7 (calendar basis) |
 | Data | **real** · snapshot `2026-09-08` · `data/processed/features/job_days_h7_calendar.parquet` |
 | Panel | 10,355 rows · sha256 `5e77952a17bc…` |
-| Code | `62b04c6ed` on `main` (dirty tree) |
+| Code | `83dce2beb` on `feature/verify-removed-against-the-board` (dirty tree) |
 
 _Regenerate rather than edit._
 
@@ -102,11 +102,21 @@ included a row it then stopped returning, and the label cannot tell them apart.
 
 Postings seen in fewer than 6 complete runs are 7.4% of labelled rows and carry **94.3% of all closures**: 100.0% against 0.5%, a factor of 208.
 
-**The target is dominated by postings that barely existed in the panel.** At this concentration the label is substantially a record of which rows the crawl kept returning, not of which roles were filled, and any feature that tracks how long a posting has been around will predict it very well while meaning nothing. Numbers from this horizon describe the collection process and must not be read as model quality.
+**The target is dominated by postings that barely existed in the panel**, so any feature tracking how long a posting has been around will predict it very well — a score at this concentration is largely a score on observed lifespan, and should be read that way.
 
-## What would strengthen this
+**Whether that is a scraping defect is a separate question, and it has been checked.** `reports/label_check.md` sampled postings this label calls removed and asked the boards directly: 59 of 60 are genuinely gone under their own id, against a control drift of 3.3%. The short-lived postings really did leave, so this concentration is a property of the boards rather than of the crawl. What survives is the caveat that was always here — **removed is not filled** — and 12% of those verified removals had their title relisted under a new id.
 
-Fetching a sample of closed postings' URLs and recording whether each is
-genuinely gone from the board. That validates *scraper fidelity* — did the
-posting really leave, or did the crawl miss it — which is checkable and has a
-real answer. It does not, and cannot, establish why the posting left.
+## The external check — done
+
+Everything above measures the label against itself. The check it could not make
+was whether a posting this file calls closed is actually gone, which needs the
+board rather than the panel.
+
+That now exists: [`label_check.md`](label_check.md), written by
+`python -m src.data.label_check`. It samples postings the label calls removed,
+asks each source whether they are still listed, and asks the same of a control
+group that was up at the final crawl — because agreement on the positives alone
+is compatible with an instrument that answers *gone* for everything.
+
+It validates **scraper fidelity**: did the posting really leave, or did the crawl
+lose sight of it. It does not, and cannot, establish *why* it left.

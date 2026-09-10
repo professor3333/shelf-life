@@ -724,7 +724,11 @@ def test_a_target_dominated_by_short_lived_postings_is_flagged_in_the_reading():
 
     text = "\n".join(_lifespan_caveat(panel))
     assert "of the closures in this panel belong to postings seen in fewer than" in text
-    assert "collection process" in text
+    # The caveat must carry the verification, not the superseded reading of it:
+    # the concentration is real, and `label_check.md` showed the removals behind
+    # it are genuine, so "this is measuring the crawl" is the wrong conclusion.
+    assert "label_check.md" in text
+    assert "removed is not filled" in text
 
 
 def test_a_target_spread_across_lifespans_is_not_flagged():

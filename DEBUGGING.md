@@ -48,6 +48,20 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
   life — survived it. **Check a headline score against the thing that would make
   it trivially achievable before believing it**, and prefer measuring the
   suspect distribution over arguing about the number.
+- **Resolved 2026-09-10, and the resolution corrects this entry.** The suspicion
+  above — that the target was substantially a record of which rows the crawl kept
+  returning — was tested against the boards rather than reasoned about further.
+  `reports/label_check.md`: of 60 sampled postings the label calls removed, **59
+  are genuinely gone under their own id** (98.3%, 95% Wilson 91.1–99.7%), against
+  a control drift of 3.3% among postings that were up at the last crawl. The
+  short-lived postings really did leave. So the concentration is a property of
+  these boards, not a scraping defect, and `age_days` predicting removal is real
+  signal rather than an artifact. What survives is narrower and was always true:
+  **removed is not filled**, and 12% of the verified removals had their title
+  relisted under a new id within days. The second lesson, then: *a suspicion
+  measured from inside the data can only be settled from outside it* — and the
+  measurement was cheap, eight requests, which makes having argued instead the
+  more expensive choice.
 
 ---
 
