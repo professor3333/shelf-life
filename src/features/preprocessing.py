@@ -45,7 +45,7 @@ fact. One caller passes it: `src/models/experiments.py`, for run 06.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, get_args
 
 import numpy as np
 import pandas as pd
@@ -64,13 +64,20 @@ from src.features.leaky import LEAKY_COLUMNS
 #: null was a fact about the board, not an accident.
 MISSING_CATEGORY = "__missing__"
 
+#: The same idea for a categorical whose levels are already numbers. It cannot be
+#: `MISSING_CATEGORY`: putting a string into a float column produces a column of
+#: floats and strings, which every scikit-learn encoder refuses outright. -1 is
+#: safe because the numeric categoricals here are non-negative codes, so it
+#: cannot collide with a real level.
+MISSING_NUMERIC_CATEGORY = -1.0
+
 #: One-hot levels rarer than this in the *training fold* are folded into an
 #: "infrequent" level. Learned from training data only, like every other
 #: statistic in the transformer.
 MIN_CATEGORY_FREQUENCY = 5
 
 Kind = Literal["numeric", "categorical", "boolean"]
-Fill = Literal["median", "zero", "one", "category"]
+Fill = Literal["median", "zero", "one", "category", "category_numeric"]
 
 
 @dataclass(frozen=True)
@@ -136,9 +143,11 @@ FEATURES: tuple[Column, ...] = (
     Column(
         "posted_dow",
         "categorical",
-        "category",
+        "category_numeric",
         "day of week of publication. Categorical rather than numeric: "
-        "Monday is not less than Friday",
+        "Monday is not less than Friday — but its levels are already numbers, "
+        "so it is filled with a numeric sentinel rather than a string one. "
+        "Null for python_org, which publishes no date",
     ),
     Column("salary_currency_clean", "categorical", "category", "null when no pay stated"),
     # --- booleans ----------------------------------------------------------
@@ -391,10 +400,57 @@ class CompanyVolumeEncoder(BaseEstimator, TransformerMixin):
 
 def _branch(fill: Fill, min_category_frequency: int = MIN_CATEGORY_FREQUENCY) -> Pipeline:
     """The transformer chain for one missing-value policy."""
+    if fill == "category_numeric":
+        # A categorical whose levels are already numbers, one-hot encoded exactly
+        # like any other categorical — only the sentinel differs, and it has to.
+        # `MISSING_CATEGORY` is a string, and a string written into a float column
+        # gives a column of floats and strings that every encoder refuses with
+        # "input argument must be uniformly strings or numbers".
+        #
+        # The alternative — stringifying the whole column in `select_columns` —
+        # was rejected because the level names would then depend on how the value
+        # arrived. A day-of-week read back from Parquet as float renders "3.0" and
+        # the same day computed at serve time from an int renders "3": two names
+        # for one level, no error, and a category silently unknown to the model.
+        # Training/serving skew arriving through a format string.
+        return Pipeline(
+            [
+                (
+                    "impute",
+                    SimpleImputer(
+                        strategy="constant",
+                        fill_value=MISSING_NUMERIC_CATEGORY,
+                        keep_empty_features=True,
+                    ),
+                ),
+                (
+                    "encode",
+                    OneHotEncoder(
+                        handle_unknown="infrequent_if_exist",
+                        min_frequency=min_category_frequency,
+                        sparse_output=False,
+                    ),
+                ),
+            ]
+        )
     if fill == "category":
         return Pipeline(
             [
-                ("impute", SimpleImputer(strategy="constant", fill_value=MISSING_CATEGORY)),
+                (
+                    "impute",
+                    # `keep_empty_features=True` for the same reason the numeric
+                    # branches carry it, and the failure here is quieter: without
+                    # it a categorical with no observed value in the training fold
+                    # is dropped, and the matrix width becomes a function of that
+                    # fold's missingness rather than of the schema. On this panel
+                    # `salary_currency_clean` is null for three sources at once,
+                    # so a shallow training block reaches exactly that state.
+                    SimpleImputer(
+                        strategy="constant",
+                        fill_value=MISSING_CATEGORY,
+                        keep_empty_features=True,
+                    ),
+                ),
                 (
                     "encode",
                     # handle_unknown="ignore" is the requirement that a category
@@ -448,10 +504,25 @@ def build_preprocessor(
     """
     columns = feature_columns(include_board_identity, only, include_leaky)
     branches = []
-    for fill in ("median", "zero", "one", "category"):
+    # Read off `Fill` rather than repeated here. The hand-written tuple this
+    # replaces silently omitted a newly added policy, and because the remainder
+    # is dropped the only symptom was a feature quietly missing from the matrix
+    # — no error, a model that still fits, and one column less than the schema
+    # says. Deriving the list makes adding a policy sufficient to wire it in.
+    for fill in get_args(Fill):
         names = [column.name for column in columns if column.fill == fill]
         if names:
             branches.append((f"{fill}_fill", _branch(fill, min_category_frequency), names))
+
+    covered = {name for _, _, names in branches for name in names}
+    uncovered = [column.name for column in columns if column.name not in covered]
+    if uncovered:
+        # `remainder="drop"` means an unrouted column leaves no trace, so it is
+        # caught here instead of being discovered as a hole in the matrix.
+        raise ValueError(
+            f"no fill policy routed {uncovered}; every feature column must reach a "
+            f"branch or it is silently dropped from the feature matrix"
+        )
     return ColumnTransformer(branches, remainder="drop", verbose_feature_names_out=False)
 
 

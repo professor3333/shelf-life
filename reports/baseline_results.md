@@ -9,20 +9,20 @@ exactly 0.5, and the Brier score of predicting `p` is `p(1-p)`. These are
 derived, not fitted, so they are available before any split is possible.
 
 - labelled rows: **9,194**
-- positives: **103**
-- base rate: **0.0112**
-- constant-predictor PR-AUC: **0.0112**
-- constant-predictor Brier: **0.0111**
+- positives: **533**
+- base rate: **0.0580**
+- constant-predictor PR-AUC: **0.0580**
+- constant-predictor Brier: **0.0546**
 
 Accuracy is not reported at any point in this file. At this base rate, always
-predicting "stays open" scores 98.9%.
+predicting "stays open" scores 94.2%.
 
 ## The split
 
-- cut at `2026-08-31 03:45:35.705216+00:00` and `2026-09-03 03:45:42.003096+00:00`
+- cut at `2026-09-01 14:07:14.634369+00:00` and `2026-09-04 03:46:10.052068+00:00`
 - embargo `2 days 10:21:37.132005` between blocks
-- train 1,104 rows / validation 1,159 rows
-- 4,615 rows discarded to the embargo, 1,161 unlabelled rows dropped before splitting
+- train 2,247 rows / validation 1,165 rows
+- 4,628 rows discarded to the embargo, 1,161 unlabelled rows dropped before splitting
 
 The test block is not scored here. It is opened once, at the end of the build.
 
@@ -30,15 +30,15 @@ The test block is not scored here. It is opened once, at the end of the build.
 
 | model | description | pr_auc | brier | roc_auc | precision | recall | f1 | alert_budget | flagged | tp | fp | fn |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| prior | constant base rate | 0.019 | 0.0186 | 0.5 | 0.019 | 1 | 0.0373 | 20 | 1159 | 22 | 1137 | 0 |
-| rule_older_than_30d | rule: up more than a month, so not about to close | 0.017 | 0.0186 | 0.399 | 0.0101 | 0.2273 | 0.0194 | 20 | 493 | 5 | 488 | 17 |
-| rule_posted_this_week | rule: fresh postings move, stale ones have stalled | 0.0197 | 0.0186 | 0.519 | 0.0198 | 0.9545 | 0.0387 | 20 | 1063 | 21 | 1042 | 1 |
-| age_ceiling | the best any age-only rule could do (deciles, non-monotone) | 0.0229 | 0.0186 | 0.576 | 0.0278 | 0.1364 | 0.0462 | 20 | 108 | 3 | 105 | 19 |
-| age_only | age_days alone, logistic | 0.0158 | 0.2493 | 0.4187 | 0 | 0 | 0 | 20 | 20 | 0 | 20 | 22 |
-| board_hazard | per-board historical rate | 0.0189 | 0.0187 | 0.4687 | 0.025 | 0.1818 | 0.044 | 20 | 160 | 4 | 156 | 18 |
-| logistic | logistic regression, all allowed features | 0.0174 | 0.0797 | 0.468 | 0 | 0 | 0 | 20 | 20 | 0 | 20 | 22 |
-| decision_tree | decision tree, depth-limited | 0.0197 | 0.2131 | 0.5066 | 0.0207 | 0.4091 | 0.0394 | 20 | 435 | 9 | 426 | 13 |
-| random_forest | random forest, 300 trees | 0.0193 | 0.0318 | 0.4952 | 0 | 0 | 0 | 20 | 20 | 0 | 20 | 22 |
+| prior | constant base rate | 0.0815 | 0.079 | 0.5 | 0.0815 | 1 | 0.1508 | 20 | 1165 | 95 | 1070 | 0 |
+| rule_older_than_30d | rule: up more than a month, so not about to close | 0.1379 | 0.0787 | 0.7019 | 0.152 | 0.8 | 0.2555 | 20 | 500 | 76 | 424 | 19 |
+| rule_posted_this_week | rule: fresh postings move, stale ones have stalled | 0.0663 | 0.08 | 0.1479 | 0.0236 | 0.2632 | 0.0433 | 20 | 1060 | 25 | 1035 | 70 |
+| age_ceiling | the best any age-only rule could do (deciles, non-monotone) | 0.0708 | 0.0801 | 0.2157 | 0.03 | 0.0316 | 0.0308 | 20 | 100 | 3 | 97 | 92 |
+| age_only | age_days alone, logistic | 0.7772 | 0.2447 | 0.847 | 1 | 0.2105 | 0.3478 | 20 | 20 | 20 | 0 | 75 |
+| board_hazard | per-board historical rate | 0.0901 | 0.0788 | 0.5472 | 0.0881 | 0.5474 | 0.1518 | 20 | 590 | 52 | 538 | 43 |
+| logistic | logistic regression, all allowed features | 0.1023 | 0.1716 | 0.5418 | 0.05 | 0.0105 | 0.0174 | 20 | 20 | 1 | 19 | 94 |
+| decision_tree | decision tree, depth-limited | 0.0993 | 0.1857 | 0.5785 | 0.0986 | 0.0737 | 0.0843 | 20 | 71 | 7 | 64 | 88 |
+| random_forest | random forest, 300 trees | 0.114 | 0.0795 | 0.5885 | 0.1 | 0.0211 | 0.0348 | 20 | 20 | 2 | 18 | 93 |
 
 The first rungs are rules, not fits: `rule_older_than_30d` and
 `rule_posted_this_week` are one sentence each, and `age_ceiling` bounds what
@@ -50,10 +50,10 @@ fit is not. Everything below them has to beat them.
 
 At 20 alerts per prediction day:
 
-- best rule — `age_ceiling`, precision **0.0278**, PR-AUC 0.0229
-- best model — `decision_tree`, precision **0.0207**, PR-AUC 0.0197
+- best rule — `rule_older_than_30d`, precision **0.1520**, PR-AUC 0.1379
+- best model — `age_only`, precision **1.0000**, PR-AUC 0.7772
 
-**The best rule wins**, by 0.0071 precision at the budget. That is a finding about this problem, not a bug to tune away: on this data a person following one sentence does better than the fitted models, and the honest report of that is worth more than a model that edges past it after enough attempts.
+The modelling buys **+0.8480** precision at the budget over the best rule. Whether that is worth the pipeline is a judgement, but it is a judgement about a real number rather than about a model comparison.
 
 Both numbers are single draws on one validation block. A difference smaller than the fold spread in `reports/model_comparison.md` is not a difference, and at this panel depth most of them will be.
 
@@ -61,13 +61,13 @@ Both numbers are single draws on one validation block. A difference smaller than
 
 | source | n | positives | base_rate | pr_auc | brier |
 |---|---|---|---|---|---|
-| greenhouse:airtable | 16 | 0 | 0 | — | 0.0032 |
-| greenhouse:anthropic | 582 | 7 | 0.012 | 0.0136 | 0.0808 |
-| greenhouse:discord | 48 | 1 | 0.0208 | 0.0213 | 0.0245 |
-| greenhouse:duolingo | 89 | 1 | 0.0112 | 0.0286 | 0.0436 |
-| greenhouse:figma | 160 | 4 | 0.025 | 0.03 | 0.138 |
-| greenhouse:gitlab | 232 | 8 | 0.0345 | 0.0484 | 0.0742 |
-| python_org | 32 | 1 | 0.0312 | 0.0455 | 0.0312 |
+| greenhouse:airtable | 16 | 0 | 0 | — | 0.0037 |
+| greenhouse:anthropic | 590 | 52 | 0.0881 | 0.1249 | 0.2392 |
+| greenhouse:discord | 49 | 4 | 0.0816 | 0.0802 | 0.0814 |
+| greenhouse:duolingo | 90 | 7 | 0.0778 | 0.1262 | 0.0896 |
+| greenhouse:figma | 157 | 3 | 0.0191 | 0.0232 | 0.0812 |
+| greenhouse:gitlab | 231 | 28 | 0.1212 | 0.111 | 0.1426 |
+| python_org | 32 | 1 | 0.0312 | 0.0312 | 0.0313 |
 
 ## Carried-over postings against unseen ones
 
@@ -76,21 +76,21 @@ breakdown as the memorisation diagnosis. A large gap is the finding.
 
 | seen_in_train | n | positives | base_rate | pr_auc | brier |
 |---|---|---|---|---|---|
-| False | 107 | 1 | 0.0093 | 0.0112 | 0.076 |
-| True | 1052 | 21 | 0.02 | 0.0188 | 0.0801 |
+| False | 77 | 76 | 0.987 | 0.998 | 0.5714 |
+| True | 1088 | 19 | 0.0175 | 0.0201 | 0.1433 |
 
 ## Calibration, logistic regression
 
 | bin_low | bin_high | n | mean_predicted | observed_rate |
 |---|---|---|---|---|
-| 0 | 0.1 | 793 | 0.0221 | 0.0227 |
-| 0.1 | 0.2 | 124 | 0.1479 | 0.0081 |
-| 0.2 | 0.3 | 73 | 0.2416 | 0.0137 |
-| 0.3 | 0.4 | 44 | 0.3503 | 0.0227 |
-| 0.4 | 0.5 | 23 | 0.4548 | 0.0435 |
-| 0.5 | 0.6 | 28 | 0.5554 | 0 |
-| 0.6 | 0.7 | 25 | 0.6474 | 0 |
-| 0.7 | 0.8 | 15 | 0.7565 | 0 |
-| 0.8 | 0.9 | 14 | 0.8546 | 0 |
-| 0.9 | 1 | 20 | 0.9372 | 0 |
+| 0 | 0.1 | 653 | 0.0239 | 0.0643 |
+| 0.1 | 0.2 | 110 | 0.1458 | 0.0909 |
+| 0.2 | 0.3 | 56 | 0.2535 | 0.0536 |
+| 0.3 | 0.4 | 64 | 0.3533 | 0.0938 |
+| 0.4 | 0.5 | 47 | 0.4492 | 0.1489 |
+| 0.5 | 0.6 | 39 | 0.5487 | 0.1026 |
+| 0.6 | 0.7 | 49 | 0.6474 | 0.102 |
+| 0.7 | 0.8 | 53 | 0.7518 | 0.0943 |
+| 0.8 | 0.9 | 53 | 0.8507 | 0.1509 |
+| 0.9 | 1 | 41 | 0.948 | 0.122 |
 

@@ -432,3 +432,56 @@ def test_company_volume_is_absent_unless_board_identity_is_admitted():
     )
     fit_on_training_fold(with_board, split)
     assert "company_volume" in with_board.named_steps
+
+
+# --- a categorical whose levels are numbers ----------------------------------
+
+
+def test_every_categorical_survives_being_entirely_null_in_the_training_fold():
+    """The general form of the bug that stopped the ladder on 2026-09-10.
+
+    `posted_dow` is declared categorical — Monday is not less than Friday — but
+    its values are numbers, and it landed in the branch that fills missing
+    categoricals with the string `__missing__`. For as long as no training row
+    had a null it worked. The first null arrived from `python_org`, which
+    publishes no date, and the imputer wrote a string into a float column:
+
+        TypeError: Encoders require their input argument must be uniformly
+        strings or numbers. Got ['float', 'str']
+
+    Nulling every categorical in turn is the general check, because the defect
+    was never about that column — it was about a fill policy chosen by kind
+    while the failure depends on dtype.
+    """
+    for name in CATEGORICAL:
+        frame = _frame()
+        frame[name] = pd.NA
+        split = _split(frame)
+        pipeline = _pipeline()
+        fit_on_training_fold(pipeline, split)
+        assert pipeline.predict_proba(split.val)[:, 1].shape[0] == len(split.val), (
+            f"the pipeline did not survive {name} being null throughout the training fold"
+        )
+
+
+def test_a_numeric_categorical_is_filled_with_a_number_not_a_string():
+    """The fill policy has to follow the dtype, not only the kind.
+
+    Stated as a property of the schema rather than of one column, so a new
+    numeric categorical added later cannot quietly inherit the string sentinel
+    and reintroduce the crash the moment its first null shows up.
+    """
+    from src.features.preprocessing import MISSING_NUMERIC_CATEGORY
+
+    frame = _frame()
+    for column in FEATURES + DERIVED:
+        if column.kind != "categorical" or column.name not in frame.columns:
+            continue
+        values = frame[column.name]
+        if pd.api.types.is_numeric_dtype(values) and not pd.api.types.is_bool_dtype(values):
+            assert column.fill == "category_numeric", (
+                f"{column.name} holds numbers and is filled with the string "
+                f"{MISSING_CATEGORY!r}; the first null in a training fold will make it "
+                f"a column of floats and strings, which no encoder accepts. Use "
+                f"'category_numeric' ({MISSING_NUMERIC_CATEGORY})."
+            )

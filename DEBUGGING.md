@@ -4,6 +4,50 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-10 — A categorical whose levels are numbers, filled with a string
+
+- **Problem:** the ladder stopped on the real H=1 panel, on the first rung, for
+  every rung. `TypeError: Encoders require their input argument must be
+  uniformly strings or numbers. Got ['float', 'str']`, raised by `OneHotEncoder`
+  inside `category_fill`. It had run end to end on the same panel the day before.
+- **Root cause:** `posted_dow` is declared `categorical` — Monday is not less
+  than Friday — so it was routed to the branch that fills missing categoricals
+  with the string `MISSING_CATEGORY`. But its values are `float64`, and the fill
+  policy was chosen by the column's *kind* while the failure depends on its
+  *dtype*. The imputer wrote `"__missing__"` into a float column and the encoder
+  refused the result. It worked for as long as no training row had a null. The
+  first ones came from `python_org`, which publishes no date and so has no day of
+  week: 247 nulls in the panel, all from that one source, none from any other.
+  Nothing changed on 2026-09-10 except which rows the training block contained —
+  the panel deepened, the cut moved, and a latent defect became a crash. The
+  missingness was a fingerprint of the source, exactly as the data profile says.
+- **Solution:** a `category_numeric` fill policy in
+  `src/features/preprocessing.py` — one-hot encoded like any other categorical,
+  but with the numeric sentinel `MISSING_NUMERIC_CATEGORY = -1.0` — and
+  `posted_dow` declared to use it. Stringifying the column instead was rejected:
+  a day read back from Parquet as float renders `"3.0"` and the same day computed
+  at serve time from an int renders `"3"`, which is two names for one level and a
+  category silently unknown to the model.
+- **Two more defects surfaced while fixing it, both silent, both worse than the
+  crash.** `build_preprocessor` iterated a hand-written tuple of policy names, so
+  the new policy was not wired in and `posted_dow` fell through to
+  `remainder="drop"` — a feature quietly missing from the matrix, no error, a
+  model that still fits. The policy list is now read from the `Fill` type and an
+  unrouted feature column raises. Separately the string branch lacked
+  `keep_empty_features=True`, so a categorical with no observed value in the
+  training fold was dropped and the matrix width became a function of that fold's
+  missingness; `salary_currency_clean` is null for three sources at once, so a
+  shallow training block reaches that state.
+- **Lesson:** **a fill policy has to match the dtype, not the kind** — "this is a
+  categorical" says how to *encode* a column, not what value can legally be
+  written into it. And when a defect is latent, the thing that "changed" is
+  rarely the code: ask which rows are new. The general test is worth more than
+  the specific one, so the regression test nulls *every* categorical in turn
+  rather than `posted_dow`, and a schema-level test refuses any numeric
+  categorical carrying the string sentinel.
+
+---
+
 ## 2026-09-09 — The measurement named to settle a decision answered a different question
 
 - **Problem:** no error, and nothing to see. `docs/design.md` §12 — should the
