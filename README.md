@@ -3,9 +3,12 @@
 [![CI](https://github.com/professor3333/shelf-life/actions/workflows/ci.yml/badge.svg)](https://github.com/professor3333/shelf-life/actions/workflows/ci.yml)
 
 A job posting has a shelf life: it sits on a board until it is pulled. This
-project predicts how long that takes, from a panel of postings collected daily
-by my own scraper, and serves the prediction over HTTP so a single posting can
-be scored at the moment it first appears.
+project predicts which postings on today's board will be gone within a week,
+from a panel of postings collected daily by my own scraper, and serves the
+prediction over HTTP — one posting at a time, or a whole board ranked. The
+product is the ranking; a posting scored on the day it first appears is a case
+the same model must handle and is measured on its own
+([`reports/cohort_audit.md`](reports/cohort_audit.md), `docs/design.md` §15).
 
 The label is **removed from the board**, which is not the same thing as
 **filled**. The name of the project is chosen not to claim otherwise, and that
@@ -322,6 +325,20 @@ payload, and the three board-context features from a window that ends at `t`.
 `docs/leakage_audit.md` gives a verdict for all 44 panel columns, and
 `src/features/preprocessing.py` **is** that document as data — a column with no
 verdict raises rather than being silently modelled or silently dropped.
+
+**Which rows get scored is a decision, and it is made** (`docs/design.md` §15).
+The product ranks a day's *whole* board — the postings already up when
+collection began and the ones that appeared since — so both are in the dataset
+and age is a feature. That is only legitimate if the label treats the two
+populations alike, which is what `python -m src.data.cohort_audit` checks:
+[`reports/cohort_audit.md`](reports/cohort_audit.md) separates incumbent stock
+from incident flow, cuts every rate by first-seen wave, board, and runs seen as
+of `t`, shows what `age_days` alone can rank on each slice, and scores the
+first-observation rows — a posting on the day it appears — on their own. On
+the label of 2026-09-09 to 09-11 that file's first verdict would have read
+*"the label is not indifferent to cohort"* in one sentence; it was a bug
+(`DEBUGGING.md`, 2026-09-11), and the audit exists so the next one is a table
+rather than a week.
 
 ---
 
@@ -765,6 +782,7 @@ python -m src.data.snapshot                    # pin a dated, hashed copy
 python -m src.features.assemble                # rebuild the job-day panel from it
 python -m src.data.profile                     # regenerate the data profile
 python -m src.data.label_audit                 # does "disappeared" mean what the label needs?
+python -m src.data.cohort_audit                # does the label treat stock and flow alike?
 
 python -m src.models.train_baseline            # the ladder: rules, then fits
 python -m src.models.train                     # ablations, incl. the §12 board-context folds
