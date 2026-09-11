@@ -586,6 +586,23 @@ def test_the_cold_start_script_produces_every_row_of_the_protocol() -> None:
     assert not missing, f"cold_start.sh reads {sorted(missing)} which /health does not return"
 
 
+def test_the_cold_start_script_knows_when_a_cycle_never_went_cold() -> None:
+    """A warm request wearing a cold label is worse than no measurement.
+
+    The first cycle after a deploy on 2026-09-11 timed `/health` at 0.34 s —
+    the service had not spun down during the wait. `ready_after_seconds` is
+    fixed for a process's lifetime, so an unchanged value across the wait
+    means the same process answered and nothing was cold. Such cycles are
+    marked in the report and excluded from the verdict; a run with none left
+    exits 2 rather than reporting a number.
+    """
+    script = (ROOT / "scripts" / "cold_start.sh").read_text()
+    assert "PREVIOUS_PROCESS=$(health_field" in script
+    assert '"${ready}" = "${PREVIOUS_PROCESS}"' in script, "no same-process check"
+    assert "not cold" in script and "excluded" in script
+    assert "if not cold_rows:" in script and "sys.exit(2)" in script
+
+
 def _artifact_cost_script() -> str:
     return (ROOT / "scripts" / "artifact_cost.sh").read_text()
 

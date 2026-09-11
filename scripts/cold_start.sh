@@ -134,6 +134,15 @@ curl -fsS --max-time 180 "${BASE_URL}/health" > "${WORK}/kind.json"
 MODEL_LOADED=$(curl -fsS --max-time 180 "${BASE_URL}/health" \
   | python3 -c 'import json,sys; print("yes" if json.load(sys.stdin).get("model_loaded") else "no")')
 DATASET=$(health_field "${WORK}/kind.json" dataset)
+# The process that is answering now. A cold cycle is one answered by a
+# *different* process — the platform started a new container — and
+# `ready_after_seconds` is fixed for the life of a process, so a cycle whose
+# value matches the previous one never went cold: something kept the service
+# awake through the wait (a fresh deploy, a browser tab, another poller) and
+# the number it produced is a warm request wearing a cold label. Measured
+# 2026-09-11: 0.34 s "cold" right after a rebuild. Such cycles are kept in the
+# report, marked, and excluded from the verdict.
+PREVIOUS_PROCESS=$(health_field "${WORK}/kind.json" ready_after_seconds)
 if [ "${MODEL_LOADED}" != "yes" ]; then KIND="BASELINE"
 elif [ "${DATASET}" != "real" ]; then KIND="REHEARSAL"
 else KIND="DEFINITIVE"; fi
@@ -181,20 +190,28 @@ for cycle in $(seq 1 "${REPEATS}"); do
   ready=$(health_field "${WORK}/health.json" ready_after_seconds)
   load=$(health_field "${WORK}/health.json" load_seconds)
   rss=$(health_field "${WORK}/health.json" rss_mb)
+  went_cold=yes
+  if [ -n "${ready}" ] && [ "${ready}" = "${PREVIOUS_PROCESS}" ]; then
+    went_cold=no
+    echo "  NOT COLD: the same process answered as before the wait — the service never spun down." >&2
+    echo "  Something kept it awake (a deploy just landed? a tab open on the UI?). Cycle excluded." >&2
+  fi
+  PREVIOUS_PROCESS="${ready}"
   printf '  %-28s ready after %.2f s, of which unpickle %.2f s; peak RSS %.0f MB\n' \
     "inside the process:" "${ready:-0}" "${load:-0}" "${rss:-0}"
 
   python3 - "${CYCLES}" "${cycle}" "${cold}" "${predict_first}" "${predict_warm}" \
-      "${rank_first}" "${rank_warm}" "${ready}" "${load}" "${rss}" "${WORK}/health.json" <<'PY'
+      "${rank_first}" "${rank_warm}" "${ready}" "${load}" "${rss}" "${WORK}/health.json" "${went_cold}" <<'PY'
 import json, sys
-path, cycle, cold, pf, pw, rf, rw, ready, load, rss, health = sys.argv[1:]
+path, cycle, cold, pf, pw, rf, rw, ready, load, rss, health, went_cold = sys.argv[1:]
 f = lambda v: float(v) if v else None
 h = json.load(open(health))
 row = {"cycle": int(cycle), "cold_health": f(cold), "predict_first": f(pf),
        "predict_warm": f(pw), "rank_first": f(rf), "rank_warm": f(rw),
        "ready_after": f(ready), "load": f(load), "rss_mb": f(rss),
        "artifact_tag": h.get("artifact_tag"), "model": h.get("model"),
-       "dataset": h.get("dataset"), "model_loaded": bool(h.get("model_loaded"))}
+       "dataset": h.get("dataset"), "model_loaded": bool(h.get("model_loaded")),
+       "cold": went_cold == "yes"}
 open(path, "a").write(json.dumps(row) + "\n")
 PY
 done
@@ -221,12 +238,17 @@ from datetime import date
 cycles_path, out, kind, url, idle, stop, sha, state = sys.argv[1:]
 stop = float(stop)
 rows = [json.loads(line) for line in open(cycles_path) if line.strip()]
+cold_rows = [r for r in rows if r.get("cold", True)]
+if not cold_rows:
+    print("NO COLD CYCLE: the service never spun down during any wait; nothing here is a cold start",
+          file=sys.stderr)
+    sys.exit(2)
 
 def worst_of(row):
     return max(v for v in (row["cold_health"], row["predict_first"], row["rank_first"]) if v is not None)
 
-worst = max(worst_of(r) for r in rows)
-median_cold = statistics.median(r["cold_health"] for r in rows)
+worst = max(worst_of(r) for r in cold_rows)
+median_cold = statistics.median(r["cold_health"] for r in cold_rows)
 first = rows[0]
 
 def cell(v, unit=" s"):
@@ -242,7 +264,8 @@ lines = [
     f" · model `{first['model'] or '—'}` on the `{first['dataset'] or '—'}` panel |",
     f"| Code | `{sha}` ({state}) — the checkout that measured, not the image measured |",
     f"| Measured on | {date.today().isoformat()} |",
-    f"| Cycles | {len(rows)}, each after {idle} idle minutes, nothing else touching the service |",
+    f"| Cycles | {len(rows)}, each after {idle} idle minutes; {len(cold_rows)} went cold"
+    f"{'' if len(cold_rows) == len(rows) else ' — the rest are marked and excluded'} |",
     f"| Criterion | {stop:.0f} s, applied to the slowest request of the slowest cycle |",
     "",
     "_Regenerate rather than edit._",
@@ -282,8 +305,9 @@ lines += [
     "|---|---|---|---|---|---|---|---|---|",
 ]
 for r in rows:
+    label = str(r["cycle"]) if r.get("cold", True) else f"{r['cycle']} — **not cold**, excluded"
     lines.append(
-        f"| {r['cycle']} | {cell(r['cold_health'])} | {cell(r['predict_first'])} | "
+        f"| {label} | {cell(r['cold_health'])} | {cell(r['predict_first'])} | "
         f"{cell(r['predict_warm'])} | {cell(r['rank_first'])} | {cell(r['rank_warm'])} | "
         f"{cell(r['ready_after'])} | {cell(r['load'])} | {cell(r['rss_mb'], ' MB')} |"
     )
@@ -292,8 +316,13 @@ lines += [
     "## Verdict",
     "",
     f"- Worst request, worst cycle: **{worst:.2f} s** against {stop:.0f} s",
-    f"- Median cold `/health`: {median_cold:.2f} s over {len(rows)} cycle(s)",
+    f"- Median cold `/health`: {median_cold:.2f} s over {len(cold_rows)} cold cycle(s)",
 ]
+if len(cold_rows) < len(rows):
+    lines.append(
+        f"- {len(rows) - len(cold_rows)} cycle(s) never went cold — the same process answered "
+        "before and after the wait — and are not counted. A cold start is a new process."
+    )
 if worst > stop:
     lines.append(f"- **STOP** — over the criterion. §7e: reassess the architecture, do not raise the timeout.")
 elif kind == "BASELINE":
@@ -304,10 +333,14 @@ else:
     lines.append("- **ACCEPTED** — within the criterion with a real artifact, loaded and used, repeatedly.")
 lines.append("")
 open(out, "w").write("\n".join(lines))
-print(f"{worst:.2f} {median_cold:.2f} {stop:.0f} {len(rows)}")
+print(f"{worst:.2f} {median_cold:.2f} {stop:.0f} {len(cold_rows)}")
 sys.exit(1 if worst > stop else 0)
 PY
-) && within=0 || within=1
+) && within=0 || within=$?
+if [ "${within}" -eq 2 ]; then
+  echo "no cycle went cold: the service was kept awake through every wait. Nothing measured." >&2
+  exit 2
+fi
 set -- ${verdict}
 worst_s="$1"; median_s="$2"; stop_s="$3"; n="$4"
 

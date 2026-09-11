@@ -792,7 +792,7 @@ added; the acceptance is one measurement of the right thing on the right one.
 | first successful `/predict` | timed, first and warm, every cycle | the report |
 | first successful `/rank` | timed, first and warm, every cycle, on a three-posting batch — the shape the operating point was designed for (§15) | the report |
 | memory under the actual model | `/health` reports peak RSS (`rss_mb`) from inside the process, against the instance's 512 MB | the report |
-| repeat measurements | `REPEATS` cycles, default three, each after the full idle window; the criterion is applied to the worst request of the worst cycle, because the stranger who gets the slow one does not experience the median | one row per cycle |
+| repeat measurements | `REPEATS` cycles, default three, each after the full idle window; the criterion is applied to the worst request of the worst cycle, because the stranger who gets the slow one does not experience the median. A cycle answered by the *same process* as before its wait never went cold — `ready_after_seconds` is fixed for a process's life — and is marked and excluded (found 2026-09-11: a 0.34 s "cold start" right after a deploy) | one row per cycle |
 | the ≤ 90 s criterion | enforced by the script's exit code, on the definitive kind only | the report's verdict line |
 
 **What is settled now, and what is not.** The protocol and the machinery are:
