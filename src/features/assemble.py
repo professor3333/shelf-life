@@ -34,7 +34,17 @@ from src.data.archive import load_archive
 from src.data.clean import parse_salary
 from src.data.load import load_snapshot
 
-DEFAULT_SNAPSHOT_CSV_DIR = Path.home() / "code" / "job-listing-scraper" / "snapshots"
+#: The per-run CSV log is read from the scraper's *collector* checkout, not its
+#: development checkout. Since 2026-09-10 the scheduled crawl runs from
+#: `data/collector/` — its own clone, sharing `data/jobs.db` through a symlink —
+#: so that the branch a person happens to have checked out for development
+#: cannot affect what gets collected. The corollary is that the development
+#: checkout's `snapshots/` is whatever its branch last pulled, which on 09-11
+#: was three waves behind the database. This module read that directory, the
+#: inner join below discarded every run that had no rows, and the panel reported
+#: a stalled collector that was in fact running. `DEBUGGING.md`, 2026-09-11.
+SCRAPER_ROOT = Path.home() / "code" / "job-listing-scraper"
+DEFAULT_SNAPSHOT_CSV_DIR = SCRAPER_ROOT / "data" / "collector" / "snapshots"
 OUTPUT_ROOT = Path("data/processed/features")
 
 #: Tolerance for matching an archived fetch to the run that produced it. The two
@@ -76,6 +86,36 @@ def load_snapshot_rows(csv_dir: Path = DEFAULT_SNAPSHOT_CSV_DIR) -> pd.DataFrame
     rows["observed_at"] = pd.to_datetime(rows["observed_at"], utc=True, format="ISO8601")
     rows["source_id"] = rows["source_id"].astype("string")
     return rows.sort_values(["observed_at", "source", "source_id"], kind="stable")
+
+
+class SnapshotLogBehind(RuntimeError):
+    """Complete runs exist in the database that the CSV log never recorded.
+
+    The join in `build_observations` is inner, so such a run does not error — it
+    vanishes, and with it every observation of every posting that day. The panel
+    then reports fewer waves than were crawled, and everything downstream
+    (`minimum_waves`, `projected_clear`, `accrual_status`) reasons correctly about
+    a panel that is wrong. Raised at the one step that can see both sides.
+    """
+
+
+def unrecorded_runs(snapshot_rows: pd.DataFrame, runs_complete: pd.DataFrame) -> pd.DataFrame:
+    """Complete runs with no row in the snapshot log, oldest first.
+
+    A complete run has `status == 'ok'` and, on every board this crawl has ever
+    seen, at least one posting; a run that observed a board and logged nothing
+    is a run whose log did not arrive, not an empty board.
+    """
+    seen = snapshot_rows[["source", "observed_at"]].drop_duplicates()
+    matched = runs_complete.merge(
+        seen, left_on=["source", "t"], right_on=["source", "observed_at"], how="left"
+    )
+    return (
+        matched[matched["observed_at"].isna()]
+        .drop(columns=["observed_at"])
+        .sort_values(["t", "source"], kind="stable")
+        .reset_index(drop=True)
+    )
 
 
 def build_observations(snapshot_rows: pd.DataFrame, runs_complete: pd.DataFrame) -> pd.DataFrame:
@@ -342,6 +382,21 @@ def assemble(
     frames = load_snapshot(snapshot_dir)
     runs_complete = complete_runs(frames["runs"])
     rows = load_snapshot_rows(csv_dir)
+
+    # Refuse, rather than assemble a panel with holes in it. This is the only
+    # step that holds both the database's account of what was crawled and the
+    # log's account of what was recorded; past it the missing waves are simply
+    # not there, and nothing downstream can tell a wave that was never crawled
+    # from one that was crawled and lost.
+    missing = unrecorded_runs(rows, runs_complete)
+    if len(missing):
+        days = sorted({t.strftime("%Y-%m-%d") for t in missing["t"]})
+        raise SnapshotLogBehind(
+            f"{len(missing)} complete run(s) on {', '.join(days)} have no rows in the "
+            f"snapshot log under {csv_dir} — the database is ahead of the CSVs. The "
+            "collector writes its log next to its own checkout; check that this is the "
+            "directory it writes to, not a copy that has stopped being pulled."
+        )
 
     panel = build_observations(rows, runs_complete)
     panel = compute_labels(panel, runs_complete, horizon_days, basis=basis)

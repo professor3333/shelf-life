@@ -19,6 +19,7 @@ from src.features.assemble import (
     build_observations,
     complete_runs,
     compute_labels,
+    unrecorded_runs,
 )
 
 DAY = pd.Timedelta(days=1)
@@ -389,3 +390,46 @@ def test_the_scripts_pass_the_panel_to_every_step_they_run():
     ):
         line = next(one for one in script.splitlines() if f"-m {module}" in one)
         assert '--panel "${PANEL}"' in line, f"{module} is run without --panel"
+
+
+# --- the database is ahead of the log ----------------------------------------
+
+
+def test_a_complete_run_the_log_never_recorded_is_named_not_dropped():
+    """The join is inner, so a crawled run with no CSV rows does not error — it
+    vanishes, and the panel reports fewer waves than were crawled. On 2026-09-11
+    the collector had moved to its own checkout and this module was still
+    reading the development checkout's copy of the log, three waves behind."""
+    runs = _runs(5)
+    rc = complete_runs(runs)
+    rows = _snapshot_rows({"a": [0, 1, 2], "b": [0, 1, 2]}, runs)  # runs 3, 4 never logged
+
+    missing = unrecorded_runs(rows, rc)
+    assert missing["run_index"].tolist() == [3, 4]
+    assert missing["t"].tolist() == [T0 + 3 * DAY, T0 + 4 * DAY]
+
+    # The silent path, for contrast: the same input simply loses the two runs.
+    assert set(build_observations(rows, rc)["run_index"]) == {0, 1, 2}
+
+
+def test_a_fully_recorded_log_has_nothing_unrecorded():
+    runs = _runs(4)
+    rows = _snapshot_rows({"a": [0, 1, 2, 3], "b": [1, 2]}, runs)
+    assert unrecorded_runs(rows, complete_runs(runs)).empty
+
+
+def test_assemble_refuses_a_log_that_is_behind_the_database(tmp_path, monkeypatch):
+    """`assemble` is the only step that holds both accounts — what the database
+    says was crawled and what the log says was recorded — so it is where the
+    refusal has to live. Past it the missing waves are simply not there."""
+    from src.features import assemble as mod
+
+    runs = _runs(4)
+    rows = _snapshot_rows({"a": [0, 1, 2]}, runs)  # run 3 crawled, never logged
+    csv_dir = tmp_path / "snapshots"
+    csv_dir.mkdir()
+    rows.to_csv(csv_dir / "log.csv", index=False)
+
+    monkeypatch.setattr(mod, "load_snapshot", lambda _dir: {"runs": runs})
+    with pytest.raises(mod.SnapshotLogBehind, match=r"1 complete run\(s\) on 2026-09-04"):
+        mod.assemble(horizon_days=1, csv_dir=csv_dir, archive=pd.DataFrame())

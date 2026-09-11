@@ -4,6 +4,36 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-11 — the panel reported a stalled collector that was running
+
+- **Problem:** no crash. The first `reports/readiness.md` said the panel was
+  not accruing — newest crawl 2026-09-08, three days old — while the scraper's
+  database held complete runs for 09-10 and 09-11 and the launchd job had
+  finished that morning. The panel had 2 labelled waves; the database had 5.
+- **Root cause:** two things, and either alone would have been harmless. On
+  09-10 the scraper moved its scheduled crawl into its own checkout
+  (`job-listing-scraper/data/collector/`) so development branches could not
+  affect collection; it shares `data/jobs.db` by symlink but writes its per-run
+  CSV log beside its own checkout. `src.features.assemble` still read the
+  development checkout's `snapshots/`, which is whatever that branch last
+  pulled — frozen at 09-08. And `build_observations` joins CSV rows to complete
+  runs with an inner merge, so a run with no rows did not error; it vanished.
+  Every step downstream then reasoned correctly about a panel that was wrong.
+- **Solution:** `DEFAULT_SNAPSHOT_CSV_DIR` now points at the collector
+  checkout's log, and `assemble` raises `SnapshotLogBehind` when a complete run
+  in the database has no rows in the log (`unrecorded_runs`), naming the days
+  and the directory. Tests in `tests/test_assemble.py`. The stall advice in
+  `watch_depth.sh`, `depth_report` and the readiness report now names the path
+  from the collector as well as the collector.
+- **Lesson:** an inner join at a boundary between two systems is a silent
+  filter, and the thing it filters is exactly the disagreement between them.
+  Wherever both accounts are in scope at once — here, the database's runs and
+  the log's rows — compare them and refuse on a difference, because one step
+  later only one account survives. And a monitor's advice is part of its
+  output: "check the collector" was wrong here and would have cost a day.
+
+---
+
 ## 2026-09-10 — 94% of the closures are postings the crawl barely held
 
 - **Problem:** no crash. The H=1 rehearsal produced `age_only` — a logistic
