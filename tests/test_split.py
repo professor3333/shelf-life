@@ -453,7 +453,15 @@ def test_projected_clear_dates_the_two_gates_separately():
     gets `None` rather than today's date — "already open" and "opens now" read
     the same in a log and mean different things.
     """
-    eight = projected_clear(_structural(8))
+
+    # `now` is pinned just after each fixture's newest crawl: these panels are
+    # months old by the wall clock, and a stalled panel is deliberately given no
+    # date at all, which would otherwise make this a test of the fixture's age.
+    def _ahead(waves: int):
+        panel = _structural(waves)
+        return projected_clear(panel, now=crawl_waves(panel).max() + pd.Timedelta(hours=1))
+
+    eight = _ahead(8)
     assert eight["split_clears"] is None, "the legal split is already possible at 8"
     assert eight["folds_clear"] is not None
 
@@ -462,7 +470,7 @@ def test_projected_clear_dates_the_two_gates_separately():
     # 13 needed, 8 present: five more waves at the observed spacing.
     assert eight["folds_clear"] == newest + 5 * spacing
 
-    both_open = projected_clear(_structural(13))
+    both_open = _ahead(13)
     assert both_open["split_clears"] is None
     assert both_open["folds_clear"] is None
     assert both_open["folds_available"] == 3
@@ -475,7 +483,11 @@ def test_projected_clear_never_dates_a_gate_earlier_than_the_shortfall_allows():
     for waves in range(2, 14):
         panel = _structural(waves)
         depth = minimum_waves(panel)
-        ahead = projected_clear(panel)
+        # Pinned to just after the panel's own newest crawl. Left to the wall
+        # clock these fixtures are months stale, and `projected_clear` now
+        # declines to date a panel that has stopped accruing — correctly, but it
+        # would make this a test of the fixture's age.
+        ahead = projected_clear(panel, now=crawl_waves(panel).max() + pd.Timedelta(hours=1))
         if depth["folds_shortfall"] == 0:
             assert ahead["folds_clear"] is None
         else:
@@ -578,3 +590,82 @@ def test_a_single_late_crawl_widens_the_embargo_for_the_whole_panel():
     late = minimum_waves(_panel({"board": [ids] * 9, "erratic": skipped}))
     assert late["embargo"] > even["embargo"]
     assert late["needed"] > even["needed"]
+
+
+# --- is the wait running down, or has the collector stopped? ----------------
+
+
+def test_a_panel_whose_newest_crawl_is_stale_is_called_stalled():
+    """The failure this ends: a daily watch that prints the same line either way.
+
+    `waves=2` on Tuesday and `waves=2` on Thursday reads as patience and is
+    actually an outage. Nothing in the depth arithmetic can tell them apart,
+    because it only ever looks at how many waves there are.
+    """
+    from src.data.split import accrual_status, crawl_waves
+
+    panel = _structural(9)
+    newest = crawl_waves(panel).max()
+
+    fresh = accrual_status(panel, now=newest + pd.Timedelta(hours=6))
+    assert fresh["stalled"] is False
+
+    stalled = accrual_status(panel, now=newest + pd.Timedelta(days=3))
+    assert stalled["stalled"] is True
+    assert stalled["waves_missed"] == 3
+
+
+def test_one_late_crawl_is_a_hiccup_and_two_are_a_stopped_input():
+    """The tolerance is two waves of slack, deliberately. A watch that cried stall
+    on every late crawl would be muted within a week."""
+    from src.data.split import accrual_status, crawl_waves
+
+    panel = _structural(9)
+    newest = crawl_waves(panel).max()
+    assert accrual_status(panel, now=newest + pd.Timedelta(days=1, hours=12))["stalled"] is False
+    assert accrual_status(panel, now=newest + pd.Timedelta(days=2, hours=12))["stalled"] is True
+
+
+def test_no_date_is_projected_through_a_stall():
+    """`newest + shortfall x spacing` is arithmetic on an assumption that stopped
+    holding, and its answer would be the most confident-looking line in the report."""
+    from src.data.split import crawl_waves
+
+    panel = _structural(9)
+    newest = crawl_waves(panel).max()
+
+    running = projected_clear(panel, now=newest + pd.Timedelta(hours=6))
+    assert running["stalled"] is False
+    assert running["folds_clear"] is not None, "a healthy shallow panel still gets a date"
+
+    stopped = projected_clear(panel, now=newest + pd.Timedelta(days=5))
+    assert stopped["stalled"] is True
+    assert stopped["split_clears"] is None and stopped["folds_clear"] is None
+
+
+def test_the_depth_report_says_the_distance_is_not_closing():
+    from src.data.split import crawl_waves, depth_report
+
+    panel = _structural(9)
+    newest = crawl_waves(panel).max()
+
+    assert "NOT ACCRUING" not in depth_report(panel, now=newest + pd.Timedelta(hours=6))
+    stalled = depth_report(panel, now=newest + pd.Timedelta(days=4))
+    assert "NOT ACCRUING" in stalled
+    assert "not closing" in stalled
+
+
+def test_the_watch_never_prints_open_for_a_stalled_panel():
+    """`folds_clear` is None both when the gate is open and when nothing is
+    arriving. Collapsing those would print the most reassuring word available on
+    the day the collector died."""
+    from pathlib import Path
+
+    script = (Path(__file__).resolve().parents[1] / "scripts" / "watch_depth.sh").read_text()
+    assert 'clears = "stalled"' in script, "the watch cannot distinguish stalled from open"
+    stalled_branch = script.index('clears = "stalled"')
+    open_branch = script.index('clears = "open"')
+    assert stalled_branch < open_branch, (
+        "the open branch is reachable before the stalled one, so a stalled panel logs clears=open"
+    )
+    assert "exit 5" in script, "a stall does not get its own exit code"
