@@ -39,6 +39,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from src.data import cohort_audit
 from src.data.split import (
     Cuts,
     SplitResult,
@@ -944,6 +945,7 @@ def write_report(
     generalisation: tuple | None = None,
     figures: list[Path] | None = None,
     prov: provenance.Provenance | None = None,
+    by_first_observation: pd.DataFrame | None = None,
 ) -> None:
     reference = analytic_reference(frame)
     lines = [
@@ -1122,10 +1124,43 @@ def write_report(
                 by_carryover, ["seen_in_train", "n", "positives", "base_rate", "pr_auc", "brier"]
             ),
             "",
+            *_first_observation_section(by_first_observation),
         ]
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n")
+
+
+def _first_observation_section(table: pd.DataFrame | None) -> list[str]:
+    """The narrower product promise, scored on its own rows.
+
+    `design.md` §15: the product ranks a day's whole board, and a posting scored
+    on the day it first appears is a case the same model must handle — reported
+    separately so a model that only works on the incumbent stock cannot hide
+    inside the board-wide number. Absent when the block holds no such rows,
+    which the section says rather than leaving a gap.
+    """
+    lines = [
+        "## The day a posting first appears",
+        "",
+        "Rows that are an incident posting's first sighting, against the rest of the",
+        "block. `design.md` §15 makes the board ranking the product and this the slice",
+        "it must not fail on.",
+        "",
+    ]
+    if table is None or table.empty or not bool(table["first_observation"].any()):
+        return [
+            *lines,
+            "_The validation block holds no first observations at this cut — no posting",
+            "first appeared inside it after the embargo. `reports/cohort_audit.md` §7 shows",
+            "which cuts do._",
+            "",
+        ]
+    return [
+        *lines,
+        _table(table, ["first_observation", "n", "positives", "base_rate", "pr_auc", "brier"]),
+        "",
+    ]
 
 
 def _draw(val_scores, split, panel_path: Path, n_rows: int) -> list[Path]:
@@ -1167,7 +1202,7 @@ def main() -> None:
     figures: list[Path] = []
     summary = per_fold = verdict = thresholds = calibration = None
     generalisation = None
-    by_source = by_carryover = blocker = None
+    by_source = by_carryover = by_first_observation = blocker = None
     try:
         split = temporal_split(frame, best_cuts(frame))
         summary, per_fold, val_scores = compare_models(split, args.budget)
@@ -1193,6 +1228,16 @@ def main() -> None:
             by_source = evaluate_by(split.val, scores, "source", n_days=prediction_days(split.val))
             by_carryover = evaluate_by(
                 split.val, scores, "seen_in_train", n_days=prediction_days(split.val)
+            )
+            # The cohort columns are as-of-`t` and derived from the whole panel,
+            # so the block is annotated from the frame rather than from itself —
+            # and joined on keys, not index: `temporal_split` renumbers its
+            # blocks, and `.loc` on the frame's index would pick other rows.
+            by_first_observation = evaluate_by(
+                cohort_audit.attach_first_observation(split.val, frame),
+                scores,
+                "first_observation",
+                n_days=prediction_days(split.val),
             )
             # Refits per board, so it is a modelling activity and stays on the
             # validation block.
@@ -1241,6 +1286,7 @@ def main() -> None:
         generalisation,
         figures=figures,
         prov=provenance.collect(args.panel, len(frame), provenance.REAL),
+        by_first_observation=by_first_observation,
     )
     print(f"wrote -> {args.out}")
 

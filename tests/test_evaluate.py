@@ -743,3 +743,43 @@ def test_a_target_spread_across_lifespans_is_not_flagged():
     panel = make_panel(n_waves=8).copy()
     panel["label_observable"] = True
     assert _lifespan_caveat(panel) == []
+
+
+# --- the day a posting first appears (design.md §15) --------------------------
+
+
+def test_the_first_observation_slice_is_reported_or_its_absence_is_said():
+    """`design.md` §15: the board ranking is the product and the first-sighting
+    rows are the slice it must not fail on. A block with none of them says so
+    rather than leaving a gap a reader would fill with the board-wide number."""
+    from src.models.evaluate import _first_observation_section
+
+    absent = "\n".join(_first_observation_section(None))
+    assert "## The day a posting first appears" in absent
+    assert "holds no first observations" in absent
+
+    empty = pd.DataFrame(
+        {
+            "first_observation": [False],
+            "n": [10],
+            "positives": [1],
+            "base_rate": [0.1],
+            "pr_auc": [0.2],
+            "brier": [0.1],
+        }
+    )
+    assert "holds no first observations" in "\n".join(_first_observation_section(empty))
+
+    present = pd.DataFrame(
+        {
+            "first_observation": [False, True],
+            "n": [90, 10],
+            "positives": [5, 2],
+            "base_rate": [0.056, 0.2],
+            "pr_auc": [0.1, 0.3],
+            "brier": [0.05, 0.15],
+        }
+    )
+    text = "\n".join(_first_observation_section(present))
+    assert "holds no first observations" not in text
+    assert "| True |" in text and "| False |" in text

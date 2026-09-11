@@ -1415,3 +1415,62 @@ Nothing here opens the test block. Selection happens on folds inside the trainin
 window. `src/models/freeze.py` remains the only module that reads test, still
 refuses on `SplitTooShallow` and `NoFoldEvidence`, and the freeze itself stays a
 deliberate act with a `--run` argument naming the chosen model.
+
+---
+
+## 15. What the product scores — **DECIDED 2026-09-11: a day's whole board, with the first-observation slice reported**
+
+Two prediction problems have been living in this repository under one name.
+The README's opening promised a posting could be "scored at the moment it
+first appears"; the dataset is job-day, `/rank` scores a whole board, and the
+operating point (§5) is an alert budget *per day over the board*. Those are
+related and different, and which one the model is evaluated on decides whether
+`age_days` is a legitimate input or an artefact of when collection began.
+
+**The product is: for today's entire board, rank which postings are most
+likely to be gone within seven days.** Incumbent stock and newly appearing
+postings both belong in the dataset, both are scored, and age is a feature —
+the discrete-time hazard formulation §3 already chose.
+
+Why this one and not the other:
+
+- **It is what the operating point means.** The alert budget is "inspect the
+  top twenty on the board today", and a rank statistic over a day's board is
+  undefined for a stream of first sightings.
+- **It is what the user does.** The cost asymmetry in §5 — a job never applied
+  to is unrecoverable — belongs to someone scanning today's board, most of
+  which is not new. A first-appearance model tells them nothing about the
+  forty postings they saw last week and are still deciding on.
+- **The narrower problem is not evaluable here.** Postings first seen after
+  collection began are 254 labelled job-days at H=7 on the 2026-09-11 panel,
+  and the deepest legal H=1 cut leaves a validation block with **no** first
+  observations at all (`reports/cohort_audit_h1.md` §6). A primary evaluation
+  on that slice would be a primary evaluation on nothing.
+- **It is honest about left truncation rather than sidestepping it.** A
+  first-appearance product avoids the incumbent stock by construction, and so
+  never has to show that the label treats the two populations alike. This one
+  does have to, every time — which is what `src/data/cohort_audit.py` is for.
+
+**What the narrower promise becomes: a mandatory reported slice, not the
+headline.** `reports/cohort_audit.md` scores the first-observation rows on
+their own; when a validation block contains any, the age ranker and every
+cohort table are shown for them separately, so a model that only works on the
+stock cannot hide inside the board-wide number. The README's opening no longer
+says "at the moment it first appears"; the API still accepts a posting on its
+first day, and that is the case this slice measures.
+
+**The condition the decision rests on, and the check that enforces it.** Job-
+day scoring makes age a feature only if the label is indifferent to which
+population a row came from. On the corrected label it is: incident rows close
+at 9.8% against 7.6% for the stock at H=7, 0.7% against 1.1% at H=1, and
+`age_days` as a bare ranker scores 0.013 against a base rate of 0.005 on the
+H=1 validation block. On the label of 2026-09-09 to 2026-09-11 it was not —
+every incident row was positive and no incumbent row was — and that is the
+signature the audit's first verdict now names in one sentence.
+
+**Would change my mind:** an incident cohort large enough to evaluate on its
+own *and* a persistent gap between its rate and the stock's after the label is
+known to be sound. That would mean arrival itself carries hazard, and the
+product should then say so as a feature (`runs_seen`, already as-of-`t`)
+rather than as a separate problem. Or a user whose decision genuinely happens
+only on a posting's first day — none has been named.
