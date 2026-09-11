@@ -6,7 +6,7 @@
 | Horizon | H=7 (calendar basis) |
 | Data | **real** · snapshot `2026-09-11` · `data/processed/features/job_days_h7_calendar.parquet` |
 | Panel | 12,675 rows · sha256 `5b476a7989aa…` |
-| Code | `24412e7c9` on `fix/a-posting-cannot-close-before-it-is-first-seen` (dirty tree) |
+| Code | `8a2874b2c` on `reports/rerun-the-rehearsal-on-the-honest-label` (dirty tree) |
 
 _Regenerate rather than edit._
 
