@@ -1114,6 +1114,16 @@ it does afterwards.** The `index > last_present` clause is removed from
 change moves 174 positives to 175 and the H=7 base rate from 7.76% to 7.81%.
 Nothing else moves.
 
+> **Corrected 2026-09-11.** The clause removed above was doing a second job
+> nobody had named: it was the only thing excluding the runs *before a posting
+> was first listed* from the scan for two consecutive absences. Without it,
+> every posting first seen at run 2 or later was dated gone at run 0 and was
+> positive on every row it ever had. "Nothing else moves" was true on the
+> 2026-09-09 panel, where almost every labelled posting was in the initial
+> stock; the footprint grew with every wave of arrivals, to 671 of 785 H=1
+> positives by 2026-09-11. The decision stands — K = 2, final at corroboration —
+> and the scan now starts at first sight. `DEBUGGING.md`, 2026-09-11.
+
 **What it buys is the embargo's correctness, not convenience.** The embargo has
 always been computed as the horizon plus one run's reach. Under an unbounded
 clause that arithmetic was false — the reach was the whole remaining panel, so

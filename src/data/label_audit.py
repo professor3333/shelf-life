@@ -190,10 +190,12 @@ def closure_dispersion(panel: pd.DataFrame) -> pd.DataFrame:
     return table.reset_index()
 
 
-#: How many complete crawls a posting has to be seen in before its disappearance
-#: is treated as evidence about hiring rather than about the crawl. Six is the
-#: first bucket at which the H=1 closure rate collapses to the panel's background
-#: level; below it the rate is an order of magnitude higher.
+#: How many complete crawls a posting has to have been seen in, *as of the row's
+#: own `t`*, before its disappearance is read as evidence about hiring rather
+#: than about the crawl. Six was chosen on 2026-09-10 as the bucket at which the
+#: H=1 closure rate collapsed to background — a measurement since traced to a
+#: label bug (`DEBUGGING.md`, 2026-09-11); on the corrected panel the rate is
+#: flat across every bucket. The threshold is kept so the check keeps asking.
 SETTLED_OBSERVATIONS = 6
 
 
@@ -213,13 +215,24 @@ def lifespan_concentration(panel: pd.DataFrame) -> pd.DataFrame:
     collection process, and any feature correlated with how long a posting has
     been around — `age_days` above all — will predict it beautifully and mean
     nothing.
+
+    **"Seen in" is counted as of the row's own `t`**, not over the posting's
+    whole life in the panel. Until 2026-09-11 it was the lifetime count, and at
+    the panel's depth that made the table a tautology rather than a measurement:
+    a labelled row whose posting has fewer than six rows *ever* is either gone
+    (so every row is a closure) or arrived too late for its horizon to settle
+    (so it is not labelled at all). "Short-lived and labelled" implied "closed"
+    by construction, and the 100% rate in every short bucket was the label
+    definition reflected back, not a property of the boards. Counting only the
+    runs up to `t` asks the question a model could actually act on: do postings
+    close right after they first appear?
     """
     labelled = panel[panel["label_observable"]].copy()
     if labelled.empty:
         return pd.DataFrame()
 
-    observations = panel.groupby(["source", "source_id"]).size().rename("n_obs")
-    labelled = labelled.join(observations, on=["source", "source_id"])
+    first_seen = panel.groupby(["source", "source_id"])["run_index"].transform("min")
+    labelled["n_obs"] = labelled["run_index"] - first_seen.loc[labelled.index] + 1
     labelled["seen in"] = pd.cut(
         labelled["n_obs"],
         [0, 1, 2, 3, 5, float("inf")],
@@ -240,8 +253,8 @@ def lifespan_verdict(panel: pd.DataFrame) -> str:
     if labelled.empty or labelled["y"].sum() == 0:
         return "_No closures yet._"
 
-    observations = panel.groupby(["source", "source_id"]).size().rename("n_obs")
-    labelled = labelled.join(observations, on=["source", "source_id"])
+    first_seen = panel.groupby(["source", "source_id"])["run_index"].transform("min")
+    labelled["n_obs"] = labelled["run_index"] - first_seen.loc[labelled.index] + 1
     brief = labelled[labelled["n_obs"] < SETTLED_OBSERVATIONS]
     settled = labelled[labelled["n_obs"] >= SETTLED_OBSERVATIONS]
     if brief.empty or settled.empty:

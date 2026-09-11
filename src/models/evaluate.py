@@ -820,6 +820,13 @@ def _lifespan_caveat(panel: pd.DataFrame) -> list[str]:
     driven by how long a posting has been observed will look exactly like a model
     working. The two files being separate is how a reader ends up believing the
     optimistic one.
+
+    Fires on the *rate ratio* between short-history and settled rows, the same
+    test `lifespan_verdict` applies — not on the share of closures that fall in
+    the short buckets. "Seen in" is counted as of each row's own `t`, so the
+    short buckets hold most of every panel's rows and most of its closures
+    whether or not anything is wrong; share fired on every panel. What is
+    diagnostic is whether closures land on those rows at a *higher rate*.
     """
     from src.data.label_audit import SETTLED_OBSERVATIONS, lifespan_concentration
 
@@ -827,30 +834,30 @@ def _lifespan_caveat(panel: pd.DataFrame) -> list[str]:
     if census.empty:
         return []
 
-    brief = census[census["seen in"] != f"{SETTLED_OBSERVATIONS}+ runs"]
-    total = float(census["closures"].sum())
-    if not total:
+    settled_bucket = census["seen in"] == f"{SETTLED_OBSERVATIONS}+ runs"
+    brief, settled = census[~settled_bucket], census[settled_bucket]
+    if not brief["rows"].sum() or not settled["rows"].sum():
         return []
-    share = float(brief["closures"].sum()) / total
-    if share < 0.5:
+    brief_rate = float(brief["closures"].sum()) / float(brief["rows"].sum())
+    settled_rate = float(settled["closures"].sum()) / float(settled["rows"].sum())
+    if brief_rate < 10 * settled_rate:
         return []
+    share = float(brief["closures"].sum()) / max(float(census["closures"].sum()), 1.0)
 
     return [
-        f"**Read all of the above against the label first.** {share:.0%} of the closures in "
-        f"this panel belong to postings seen in fewer than {SETTLED_OBSERVATIONS} complete "
-        "crawls — see [`label_validity.md`](label_validity.md). Any feature tracking how long "
-        "a posting has been around will separate those rows almost perfectly, so a lead built "
-        "on `age_days` is mostly a lead on *observed lifespan*.",
+        f"**Read all of the above against the label first.** Rows whose posting had been "
+        f"seen in fewer than {SETTLED_OBSERVATIONS} complete crawls as of their own `t` close "
+        f"at {brief_rate:.1%} against {settled_rate:.1%} for the rest, and carry {share:.0%} of "
+        "the closures — see [`label_validity.md`](label_validity.md). Any feature tracking how "
+        "long a posting has been around will separate those rows, so a lead built on "
+        "`age_days` is mostly a lead on *observed lifespan*.",
         "",
-        "**That concentration is not a scraping defect, and it was checked rather than "
-        "argued.** [`label_check.md`](label_check.md) sampled postings the label calls removed "
-        "and asked the boards: 59 of 60 are genuinely gone under their own id, against a "
-        "control drift of 3.3%. The short-lived postings really did leave. What the "
-        "concentration means is therefore narrower than it first looks — the model would be "
-        "learning that postings which appear and vanish quickly are the ones that get pulled, "
-        "which is true of these boards — and the caveat that survives is the one that was "
-        "always there: **removed is not filled**, and 12% of the verified removals had their "
-        "title relisted under a new id within days.",
+        "**Whether that is a scraping defect is a separate question, and it was checked rather "
+        "than argued.** [`label_check.md`](label_check.md) sampled postings the label calls "
+        "removed and asked the boards: 59 of 60 are genuinely gone under their own id, against "
+        "a control drift of 3.3%. What survives is the caveat that was always there: "
+        "**removed is not filled**, and 12% of the verified removals had their title relisted "
+        "under a new id within days.",
         "",
     ]
 

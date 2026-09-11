@@ -207,9 +207,20 @@ def compute_labels(
     # this branch. Exactly one returned after two, and none after three or more.
     # So the cost of a final label is one posting in 1,530 — 0.065%, measured —
     # against an unbounded reach, and it costs no panel depth at all.
+    #
+    # **The scan starts at first sight, not at run 0.** Before a posting is
+    # listed it is absent from every run, and two of those absences are not a
+    # closure — they are the posting not existing yet. Dropping the
+    # `index > last_present` clause above removed the only thing that had
+    # excluded them, and from 2026-09-09 every posting first seen at run 2 or
+    # later was dated gone at run 0: before its own first row, inside every
+    # horizon, positive on every row it ever had. Postings first seen at run 1
+    # escaped (run 0 absent, run 1 present), so the damage split exactly on
+    # first-seen index >= 2 and looked like a cohort effect. `DEBUGGING.md`,
+    # 2026-09-11: 671 of 785 positives at H=1 on the 2026-09-11 panel.
     for (source, source_id), present in seen.items():
         times = run_times[source]
-        for index in range(len(times) - 1):
+        for index in range(min(present), len(times) - 1):
             if index in present or index + 1 in present:
                 continue
             t_gone[(source, source_id)] = times[index]

@@ -4,6 +4,42 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-11 — every late-arriving posting was labelled closed before it existed
+
+- **Problem:** no crash. On the H=1 validation block, postings not seen in
+  training were 77 of 77 positive; `age_only` scored PR-AUC 0.777 against a
+  base rate of 0.085; the label audit found 94% of closures on postings seen in
+  fewer than six runs. Read together as a cohort effect. Traced by listing the
+  positives: a posting listed at every run through 2026-09-11 carried `y = 1` on
+  every row.
+- **Root cause:** `compute_labels` scans run pairs from index 0 for two
+  consecutive absences. A posting first seen at run 2 is "absent" at runs 0 and
+  1 — it did not exist yet — so `t_gone = times[0]`, before its first row, inside
+  every horizon. Postings first seen at run 1 escaped (run 0 absent, run 1
+  present), which is why the damage split exactly on first-seen index ≥ 2 and
+  wore the shape of a stock-versus-flow effect. The `index > last_present`
+  clause dropped on 2026-09-09 for bounded resurrection had been the only thing
+  excluding pre-first-sight absences, and its removal was priced on a panel in
+  which almost no labelled posting had arrived late: "174 positives to 175".
+  Two days of arrivals later it was 671 of 785 positives at H=1 and 144 of 564
+  at H=7.
+- **Solution:** the scan starts at `min(present)` (`compute_labels`, one
+  line). Regression test
+  `tests/test_assemble.py::test_absences_before_first_sight_are_not_a_closure`,
+  verified to fail against the bug with `[1, 1, 1] == [0, 0, 0]`. Honest rates:
+  H=1 **1.02%**, H=7 **7.71%**; the cohort split is 0 of 77; `-age_days` ranks
+  at 0.003 against a 0.0034 base rate. The lifespan audit is changed to count
+  runs seen *as of `t`*, because the lifetime count was a tautology at this
+  depth (a short-lived labelled row implied a closure by construction) and
+  would have kept reporting 100% after the fix.
+- **Lesson:** three. A clause can be load-bearing for a case it was not written
+  for — before removing one, enumerate what it excludes, not what it was
+  *meant* to exclude. The cost of a label change measured on today's panel is
+  a lower bound when the panel's composition is changing; "nothing else moves"
+  needs a date on it. And a diagnostic that conditions on a quantity computed
+  over the future (`n_obs` over the whole panel) is not a diagnostic; the
+  09-10 entry below built a finding on one.
+
 ## 2026-09-11 — the panel reported a stalled collector that was running
 
 - **Problem:** no crash. The first `reports/readiness.md` said the panel was
@@ -35,6 +71,15 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 ---
 
 ## 2026-09-10 — 94% of the closures are postings the crawl barely held
+
+> **Superseded 2026-09-11.** Two different errors, see the entry above. The
+> `age_only` score was the label bug. The concentration table was a tautology:
+> it bucketed rows by the posting's *lifetime* row count, computed over the
+> whole panel, and at this depth a labelled row on a short-lived posting implies
+> a closure by construction. `label_check.md` stands — it sampled the H=7 panel
+> of 2026-09-08, on which no late arrival was yet labelled, so the removals it
+> verified were genuine. Kept as written because the reasoning is the
+> instructive part, including where it went wrong.
 
 - **Problem:** no crash. The H=1 rehearsal produced `age_only` — a logistic
   regression on `age_days` alone — at **PR-AUC 0.777** against a base rate of

@@ -36,6 +36,7 @@ def _row(source_id, wave, *, y=0, observable=True, req=None, title="Engineer", c
         "source": "greenhouse:acme",
         "source_id": source_id,
         "t": WAVE0 + wave * DAY,
+        "run_index": wave,
         "y": y,
         "label_observable": observable,
         "requisition_id": req,
@@ -251,11 +252,32 @@ def test_closures_spread_across_lifespans_are_not_called_out():
 
 
 def test_the_lifespan_table_counts_rows_not_postings():
-    """The denominator is job-days, like every other rate in the report."""
+    """The denominator is job-days, like every other rate in the report — and a
+    row is bucketed by how many runs its posting had been seen in *as of that
+    row*, not by the posting's whole life."""
     from src.data.label_audit import lifespan_concentration
 
     rows = [_row("brief", 0, y=1)] + [_row("settled", wave) for wave in range(8)]
     table = lifespan_concentration(_panel(rows))
     by_bucket = dict(zip(table["seen in"], table["rows"], strict=True))
-    assert by_bucket["1 run"] == 1
-    assert by_bucket["6+ runs"] == 8
+    assert by_bucket["1 run"] == 2  # `brief` at wave 0, and `settled`'s own first row
+    assert by_bucket["6+ runs"] == 3  # `settled` at waves 5, 6, 7
+
+
+def test_lifetime_is_not_the_denominator():
+    """Why "seen in" is counted as of `t`. Counted over the whole panel, a
+    labelled row on a short-lived posting *implies* a closure — a survivor with
+    a short history is one whose horizon has not settled, and it is unlabelled.
+    The old table reported 100% in every short bucket on the real panel and
+    called it a property of the boards; it was the label definition reflected
+    back. Here every posting lives to the end and the only closure is late, so
+    an as-of-`t` count puts nothing in the short buckets' closure column."""
+    from src.data.label_audit import lifespan_concentration, lifespan_verdict
+
+    rows = []
+    for i in range(6):
+        rows += [_row(f"p{i}", wave, y=1 if (wave == 7 and i == 0) else 0) for wave in range(8)]
+    table = lifespan_concentration(_panel(rows)).set_index("seen in")
+    assert table.loc["1 run", "closures"] == 0
+    assert table.loc["6+ runs", "closures"] == 1
+    assert "Flat enough" in lifespan_verdict(_panel(rows))
