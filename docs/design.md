@@ -1552,3 +1552,60 @@ known to be sound. That would mean arrival itself carries hazard, and the
 product should then say so as a feature (`runs_seen`, already as-of-`t`)
 rather than as a separate problem. Or a user whose decision genuinely happens
 only on a posting's first day — none has been named.
+
+---
+
+## 16. Release discipline — **DECIDED 2026-09-11: a real freeze refuses a dirty tree**
+
+Every generated report records the commit it was written at and whether the
+tree was clean. For experiments that is the right trade: most runs happen
+mid-edit, and a driver that will not run until you commit is a driver you stop
+using. `dirty tree` on a report means *provisional*, and is read that way.
+
+It is not enough for the artifact. A frozen model ships, and the commit
+recorded on it is the claim that someone can reproduce the number it was
+frozen with. **A SHA cannot reproduce a result if uncommitted source changes
+affected the run**, and until 2026-09-11 nothing stopped that: several reports
+on `main` carried `(dirty tree)`, correctly, and the same path would have
+carried it onto an artifact.
+
+**So `python -m src.models.freeze` on a real panel refuses unless
+`git status --porcelain` is empty** — tracked and untracked alike, because a
+new module the run imported is as unreproducible as an edited one. The check is
+asked last, at the moment the held-out block would be opened, after both depth
+refusals: it is about the code rather than the data, so it must not mask a
+depth refusal, and it must not write a report, since writing one dirties the
+tree. Its own exit code, `4`, so a caller can tell *commit first* from *wait
+for depth*. Synthetic freezes are rehearsals, say `dataset=synthetic` on every
+response, and are exempt.
+
+The consequence for the day itself: `rehearse.sh` and `evaluate` regenerate
+reports, which dirties the tree, so **the evidence is committed before the
+block is opened** — the comparison a reader will check the result against is
+in history before the result exists. That is the right order and the refusal
+enforces it.
+
+*Considered and rejected:* capturing the diff and checksumming it. It works,
+and it is more machinery than a project with one author needs; a clean
+committed tree is simpler and stricter.
+
+### What the artifact is traceable to
+
+Everything below travels on the artifact's metadata and its JSON sidecar, and
+the test `test_the_artifact_names_everything_it_is_traceable_to` pins the list:
+
+| what | where |
+|---|---|
+| source | `provenance.git_sha`, with `git_dirty` necessarily `false` on a real freeze |
+| data | `provenance.panel_sha256`, `snapshot_date`, `panel_path` |
+| the scraper's parsing epoch | `rules_version` — runs are only comparable within one, so the panel carries the value it was built at |
+| horizon | `horizon_days`, `horizon_basis` |
+| dependencies | `lock_sha256` of `uv.lock`, plus library versions in `versions` |
+| training configuration | `run_name`, `params`, `features`, `fitted_on`, `threshold`, `budget_per_day`, `selection_folds` |
+| random seed | `seed` — the one random state every fitted rung shares |
+| the artifact itself | `artifact_sha256` in the sidecar (a file cannot contain its own hash), repeated by `SHA256SUMS` at release and verified on fetch |
+
+**Would change my mind:** a second contributor, at which point "commit
+everything" stops being one person's habit and a captured diff might be the
+cheaper enforcement. Or a run so long that committing between the comparison
+and the freeze is a real cost — it is seconds here.

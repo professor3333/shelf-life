@@ -37,15 +37,19 @@ Usage::
     python -m src.models.freeze --run 05-xgboost_engineered
     python -m src.models.freeze --run 05-xgboost_engineered --synthetic
 
-Exit codes: ``0`` the artifact was written · ``3`` declined, and
-``reports/test_results.md`` says which of the two waits it declined on.
+Exit codes: ``0`` the artifact was written · ``3`` declined on depth, and
+``reports/test_results.md`` says which of the two waits it declined on ·
+``4`` declined because the working tree is not clean; nothing is written.
 
-**Two refusals, not one.** ``SplitTooShallow`` asks whether a three-way cut is
+**Three refusals, not one.** ``SplitTooShallow`` asks whether a three-way cut is
 legal; ``NoFoldEvidence`` asks whether anything could have *chosen* the model
 being tested. The second arrives later than the first — five days later on the
 real panel — and for most of that gap this step was the only one in the pipeline
 that would run, which put the single unrepeatable action behind the weakest
-check. Both are decisions, so both exit 3 rather than raising.
+check. Both are decisions, so both exit 3 rather than raising. ``DirtyWorktree``
+is the third and is about the code, not the data: on a real panel the tree
+must be clean, because the commit recorded on the artifact has to reproduce it
+(`design.md` §16). It exits 4 and writes no report.
 """
 
 from __future__ import annotations
@@ -83,7 +87,7 @@ from src.models.metrics import (
     reliability_curve,
     threshold_for_budget,
 )
-from src.models.train_baseline import DEFAULT_PANEL, _table, prediction_days
+from src.models.train_baseline import DEFAULT_PANEL, RANDOM_STATE, _table, prediction_days
 from src.models.uncertainty import bootstrap_block, format_table, fragility_note
 
 DEFAULT_REPORT = Path("reports/test_results.md")
@@ -265,6 +269,9 @@ def build_metadata(
         provenance=provenance.collect(panel_path, len(panel), dataset).as_tags(),
         dataset=dataset,
         selection_folds=selection_folds,
+        rules_version=int(panel["rules_version"].iloc[0]) if "rules_version" in panel else -1,
+        lock_sha256=provenance.lock_sha256(),
+        seed=RANDOM_STATE,
     )
 
 
@@ -351,6 +358,16 @@ the day it clears. Pass `--accept-no-folds` to override this, which spends the
 held-out block on a model nothing selected; the report and the artifact both
 record that it was used.
 """
+
+
+class DirtyWorktree(RuntimeError):
+    """The tree has uncommitted changes, so the SHA would not describe the run.
+
+    A report from a dirty tree says so and is understood as provisional. An
+    artifact from one is not provisional — it ships — and a SHA that does not
+    reproduce it is a SHA that names nothing. Real panels only: a synthetic
+    freeze is a rehearsal and says `dataset=synthetic` on every response.
+    """
 
 
 class NoFoldEvidence(RuntimeError):
@@ -608,6 +625,14 @@ def main() -> None:
                 "selected a model to test."
             )
 
+        # The last check before the irreversible step, and the one that is
+        # about the code rather than the data (`design.md` §16).
+        if dataset == provenance.REAL and not provenance.worktree_is_clean():
+            raise DirtyWorktree(
+                "the working tree has uncommitted changes, so the commit recorded on "
+                "the artifact would not reproduce it. Commit (or stash) everything — "
+                "the regenerated reports included — and run freeze again."
+            )
         frozen = freeze(split, args.run, args.budget, args.fit)
         metadata = build_metadata(
             frozen, args.run, panel, panel_path, dataset, args.budget, n_folds
@@ -644,6 +669,12 @@ def main() -> None:
         blocker = NO_FOLDS.format(refusal=str(error), depth=depth_report(panel))
         print(f"not run: {error}")
         print("`--accept-no-folds` overrides this and spends the held-out block.")
+    except DirtyWorktree as error:
+        # No report: writing one would dirty the tree further, and this is not
+        # a finding about the data. Its own exit code, so a caller can tell
+        # "commit first" from "wait for depth".
+        print(f"not run: {error}")
+        raise SystemExit(4) from None
 
     write_report(
         args.out,
