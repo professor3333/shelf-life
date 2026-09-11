@@ -19,8 +19,10 @@ Will a posting be removed from the board within 7 days of an observation of it.
 
 Full statement in [`problem_definition.md`](problem_definition.md) §1–§4. In
 brief: one row is a (posting, complete-run observation) pair; the label is
-absence from two consecutive complete runs with no later reappearance; rows
-whose horizon has not elapsed are dropped, never labelled 0.
+absence from two consecutive complete runs, final at that moment whatever the
+posting does afterwards (§11, 2026-09-09), scanning from the posting's first
+sighting (2026-09-11); rows whose horizon has not elapsed are dropped, never
+labelled 0.
 
 *Rejected:* total lifetime regression — the panel observes neither end of a life
 for 1,135 of 1,240 postings. Salary-band prediction — trains on a non-random 25%
