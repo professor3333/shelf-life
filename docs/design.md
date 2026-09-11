@@ -267,6 +267,82 @@ standing alone.
 
 ---
 
+## 4a. Board *availability* patterns — **DECIDED 2026-09-11: allowed, with transfer as the criterion**
+
+§4 removed the columns that name the board. It did not, and could not, remove
+the information — and until 2026-09-11 nothing had measured how much stayed.
+`python -m src.models.board_fingerprint` does: the production `Pipeline`, fitted
+on the training block only, with its estimator's target swapped for `source`.
+[`reports/board_fingerprint.md`](../reports/board_fingerprint.md).
+
+**The board is recoverable from the production features at 100.0% accuracy**
+(macro-F1 1.000, against 51.0% for guessing anthropic). Every one of the seven
+boards, every validation row.
+
+Where it lives is not where the missing-value policy suggested. The concern
+that motivated the "deliberately not indicated" notes in `preprocessing.py` —
+that `departments == __missing__` *means* python_org, and a sentinel is a
+board id — is real for python_org and small overall: **missingness alone
+scores 19.2%**, below the majority guess. The identity is in the *values*:
+
+| feature alone | accuracy |
+|---|---|
+| `board_size_at_t` | **1.000** |
+| `location` | 0.671 |
+| `n_metadata` | 0.642 |
+| `content_chars` | 0.544 |
+| `departments` | 0.299 (python_org perfectly, nothing else) |
+
+`board_size_at_t` is a board's name in integer form — anthropic ~600, gitlab
+~230, figma ~160, duolingo ~85, discord ~45, python_org 30, airtable 16 — and
+it is redundant: with it removed the rest still scores 99.3%, and with all
+four board-context columns removed (§12's "absent" set, the nearest thing this
+design has to a board-independent feature set) **97.6%**. `location` is each
+employer's office cities; `n_metadata` and `content_chars` are each employer's
+posting template. Remove those and what is left is not a posting.
+
+### The decision
+
+**Board-availability patterns and template-derived features are allowed,
+explicitly.** They are as-of-`t`, they are what a posting *is*, and at serve
+time a python_org posting genuinely has no `departments` and a posting from a
+new board genuinely has its own location and template. None of it is leakage.
+
+**Matrix neutrality was the wrong criterion and is dropped.** On seven boards
+any representation rich enough to describe a posting identifies its employer;
+a feature set that cannot is a feature set with nothing in it. The two options
+were to say so or to test a board-independent set, and the second has now been
+tested: it does not exist here.
+
+**Transfer is the criterion, and it is measured on the model rather than
+argued from the matrix.** What a fingerprint can cost is that the model learns
+*this is gitlab* as a proxy for hazard and has nothing to say about a board it
+has not seen. `generalisation.leave_one_board_out` removes a board from the fit
+and scores it cold; `model_comparison.md` already reports it. From this
+decision it is an **acceptance check at the freeze**: the chosen candidate's
+leave-one-board-out table is read before `freeze --run`, and a held-out board
+whose PR-AUC collapses to its base rate while the fitted-on score does not says
+the model spent the fingerprint. That is a reason not to freeze that candidate,
+not a number to note.
+
+**`board_size_at_t` is named because it is the sharpest case.** §12 keeps board
+context on a measured 0.0019 cost of removal, with serve-time imputation for a
+board the batch cannot describe. This section adds what §12 did not know: the
+imputed value is the *median board's identity*, so a new-board posting is scored
+as if from a board of ~160 postings. That is acceptable only while the
+leave-one-board-out check above passes with board context imputed the way the
+service imputes it — `train.serve_time_regime` — and §12's decision is
+conditional on that from now on.
+
+**Would change my mind:** a leave-one-board-out gap that is large once there
+are enough positives per board to measure one, which would say the model is
+spending the fingerprint and the §12 columns are the first to remove. Or an
+eighth board whose posting template resembles none of the seven, scored live
+through the API and returning probabilities that sit on the base rate — the
+product's claim, tested on the product.
+
+---
+
 ## 5. The metric and the cost asymmetry — **DECIDED 2026-09-04**
 
 **PR-AUC (average precision) primary; Brier score and a reliability curve

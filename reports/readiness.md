@@ -6,7 +6,7 @@
 | Horizon | H=7 (calendar basis) |
 | Data | **real** · snapshot `2026-09-11` · `data/processed/features/job_days_h7_calendar.parquet` |
 | Panel | 12,675 rows · sha256 `5b476a7989aa…` |
-| Code | `24412e7c9` on `fix/a-posting-cannot-close-before-it-is-first-seen` (dirty tree) |
+| Code | `9a8023468` on `feature/board-fingerprint` (dirty tree) |
 
 _Regenerate rather than edit._
 
@@ -14,7 +14,7 @@ _Regenerate rather than edit._
 
 ## Is the panel still accruing?
 
-Yes. The newest crawl is `2026-09-11 04:23Z`, 0 days 07:30:33.907754 old against a cadence of 1 days 00:00:03.564294 — within tolerance, so the projections below are meaningful.
+Yes. The newest crawl is `2026-09-11 04:23Z`, 0 days 08:16:49.408779 old against a cadence of 1 days 00:00:03.564294 — within tolerance, so the projections below are meaningful.
 
 ## The two gates
 
@@ -46,8 +46,11 @@ against the synthetic panel now:
    pre-registered rule in `docs/design.md` §14 applied, the operating threshold
    chosen against an alert budget, calibration, per-source and seen/unseen
    breakdowns, and the leave-one-board-out transfer measurement.
-3. Read the verdict. **The model choice is a person's decision**, which is why the
-   watch stops here rather than continuing.
+3. Read the verdict — and the leave-one-board-out table beneath it. `design.md`
+   §4a: the production features name the board at 100% (`board_fingerprint.md`),
+   so a held-out board whose score collapses to its base rate says the candidate
+   spent that fingerprint, and is a reason not to freeze it. **The model choice is
+   a person's decision**, which is why the watch stops here rather than continuing.
 4. `python -m src.models.freeze --run <spec>` — fits, fixes the threshold on
    validation, then opens the held-out block **once** and reports the score with
    posting-clustered bootstrap intervals.
