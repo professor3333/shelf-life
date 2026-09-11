@@ -39,6 +39,7 @@ RENDER = ROOT / "render.yaml"
 RUNBOOK = ROOT / "docs" / "deploy.md"
 README = ROOT / "README.md"
 REHEARSE = ROOT / "scripts" / "rehearse.sh"
+RELEASE = ROOT / "scripts" / "release.sh"
 REQUIREMENTS = ROOT / "requirements.txt"
 LOCK = ROOT / "uv.lock"
 CI = ROOT / ".github" / "workflows" / "ci.yml"
@@ -163,7 +164,7 @@ def test_the_dev_container_runs_the_python_the_image_serves() -> None:
 def test_one_python_is_named_everywhere_a_python_is_named() -> None:
     """`requires-python`, `.python-version`, the lock and the image agree.
 
-    Until 2026-09-12 the package advertised `>=3.11` while every environment
+    Until 2026-09-11 the package advertised `>=3.11` while every environment
     that ever ran the suite or froze a model was 3.12 — a supported version
     nothing tested. One minor version, declared as a range of one, so that a
     reader of any of these files learns the same thing and the lock resolves
@@ -203,7 +204,7 @@ def test_the_lock_is_committed_and_nothing_ignores_it() -> None:
 
     The artifact carries `lock_sha256`; that hash is only evidence if the file
     it names is in the repository at the SHA beside it. `uv.lock` was
-    gitignored until 2026-09-12 — the `.gitignore` entry argued that a lock
+    gitignored until 2026-09-11 — the `.gitignore` entry argued that a lock
     "validated by nothing" would drift, which was true, and the fix was to make
     everything install from it rather than to keep it out.
     """
@@ -392,6 +393,32 @@ def _stop_rule_seconds() -> float:
     match = re.search(r'STOP_RULE_SECONDS="\$\{STOP_RULE_SECONDS:-(\d+(?:\.\d+)?)\}"', script)
     assert match, "scripts/cold_start.sh no longer declares a STOP_RULE_SECONDS default"
     return float(match.group(1))
+
+
+def test_the_smoke_test_asks_for_fields_the_api_actually_returns() -> None:
+    """The last link in the release chain is a field-name check in a shell script.
+
+    `smoke.sh` refuses a `/predict` body missing any of a fixed list of fields.
+    That list is not imported from the schema — it is typed into a heredoc —
+    so a rename in `api/schemas.py` leaves it asserting a name nothing returns.
+    That happened: the API renamed `closing_soon` to `removal_flagged` on
+    2026-09-11 and the smoke test kept asking for the old name. Nothing ran the
+    chain, so nothing noticed. This does.
+    """
+    from api.schemas import PredictionResponse
+
+    smoke = (ROOT / "scripts" / "smoke.sh").read_text()
+    listed = re.search(r"for field in \(([^)]*)\):", smoke, re.DOTALL)
+    assert listed, "smoke.sh no longer checks a list of response fields"
+    required = set(re.findall(r'"(\w+)"', listed.group(1)))
+    assert required, "the field list is empty"
+    missing = required - set(PredictionResponse.model_fields)
+    assert not missing, (
+        f"smoke.sh requires {sorted(missing)}, which PredictionResponse does not return — "
+        "a release would fail its own smoke test on a field name"
+    )
+    # The decision and the caveat are the two that make a score an answer.
+    assert {"removal_flagged", "predicts", "threshold"} <= required
 
 
 def test_the_ui_timeout_never_exceeds_the_cold_start_stop_rule() -> None:
@@ -677,6 +704,75 @@ def test_the_rehearsal_declines_rather_than_fails_when_shallow() -> None:
     text = REHEARSE.read_text()
     assert "exit 3" in text
     assert 'GATE}" -eq 3' in text
+
+
+# --- the release chain, and where it stops --------------------------------------
+
+
+def test_the_release_chain_runs_only_modules_that_exist() -> None:
+    for module in sorted(_invoked_modules(RELEASE.read_text())):
+        assert importlib.util.find_spec(module) is not None, (
+            f"scripts/release.sh runs `python -m {module}`, which does not exist"
+        )
+
+
+def _executable_lines(script: str) -> list[str]:
+    """The lines a shell would run: no comments, and nothing inside a printed heredoc."""
+    lines, printing = [], False
+    for line in script.splitlines():
+        stripped = line.strip()
+        if printing:
+            printing = stripped != "MSG"
+            continue
+        if stripped.startswith("#") or not stripped:
+            continue
+        if stripped.startswith("cat <<MSG"):
+            printing = True
+            continue
+        lines.append(line)
+    return lines
+
+
+def test_the_release_chain_never_commits_the_deploy() -> None:
+    """Deploying is a commit, and it is made by a person, not by the script.
+
+    `release.sh` runs every link — freeze, checksums, release, image, container,
+    await, smoke — and *prints* the `MODEL_TAG` commands rather than running
+    them. A script that got as far as a green smoke test and then pointed the
+    public URL at the artifact would make the one irreversible, outward-facing
+    step the least examined one.
+    """
+    text = RELEASE.read_text()
+    runs = "\n".join(_executable_lines(text))
+    assert not re.search(r"\bgit (add|commit|push)\b", runs), "release.sh must not commit or push"
+    assert not re.search(r">\s*MODEL_TAG\b", runs), "release.sh must not write MODEL_TAG"
+    assert "git add MODEL_TAG" in text and "cat <<MSG" in text, (
+        "the deploy commands must be printed for the person to run"
+    )
+
+
+def test_the_release_chain_rehearses_the_same_links_as_it_ships() -> None:
+    """The rehearsal is worth exactly what it shares with the real run.
+
+    Both modes go through the same freeze, checksum, release, build, await and
+    smoke commands, differing in the artifact directory, the tag, the
+    prerelease flag and `ALLOW_SYNTHETIC`. If the rehearsal skipped a link the
+    real run takes, the first execution of that link would be the real one —
+    which is how the smoke test came to ask for a renamed field for two days.
+    """
+    text = RELEASE.read_text()
+    runs = _executable_lines(text)
+    for link in (
+        r'"\$\{PYTHON\}" -m src\.models\.freeze --run',
+        r'"\$\{PYTHON\}" -m src\.inference\.fetch --checksums',
+        r"^\s*gh release create",
+        r"^\s*docker build --build-arg ARTIFACT_TAG=",
+        r"^\s*\./scripts/await_release\.sh",
+        r"\./scripts/smoke\.sh",
+    ):
+        hits = [line for line in runs if re.search(link, line)]
+        assert len(hits) == 1, f"{link!r} should be run exactly once, by both modes: {hits}"
+    assert "--prerelease" in text and "ALLOW_SYNTHETIC=1" in text and "--synthetic" in text
 
 
 # --- the one about documentation that has rotted -----------------------------

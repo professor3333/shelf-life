@@ -147,7 +147,7 @@ def _snapshot_date(raw_root: Path = Path("data/raw")) -> str | None:
 #: The dependency lock whose hash travels on the artifact. A SHA pins the
 #: source; this pins what the source ran against — every package, hashed, as
 #: `uv sync --locked` installs it locally, in CI and in the serving image. It
-#: is committed, which is what makes the hash mean something: until 2026-09-12
+#: is committed, which is what makes the hash mean something: until 2026-09-11
 #: the file was gitignored, so the hash named a resolution nobody else could
 #: fetch, and the artifact's "dependencies" line was a promise with no object
 #: behind it. Anchored to the repository root rather than the working

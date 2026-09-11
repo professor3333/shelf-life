@@ -1197,10 +1197,23 @@ docker run --rm -p 8000:8000 -v "$PWD/models:/app/models:ro" shelf-life
 
 ```bash
 python -m src.inference.fetch --checksums models          # SHA256SUMS, beside the artifact
-gh release create artifact-2026-09-07 models/shelf_life.joblib \
+gh release create artifact-<date> models/shelf_life.joblib \
     models/shelf_life.json models/SHA256SUMS
-docker build --build-arg ARTIFACT_TAG=artifact-2026-09-07 -t shelf-life .
+docker build --build-arg ARTIFACT_TAG=artifact-<date> -t shelf-life .
 ```
+
+Or all of it, in order, with the container smoke-tested at the end:
+`./scripts/release.sh --run <spec>` — and `./scripts/release.sh --rehearse` for
+the same chain on the synthetic panel. One rehearsal release exists and anyone
+can build from it without a model of their own:
+
+```bash
+docker build --build-arg ARTIFACT_TAG=artifact-rehearsal-2026-09-11 -t shelf-life .
+```
+
+It is a prerelease of a synthetic model; the image builds, the container answers,
+and `scripts/smoke.sh` refuses it unless told `ALLOW_SYNTHETIC=1`, which is the
+correct reception for a number that means nothing.
 
 The build then verifies twice, and the two checks prove different things. The
 downloaded bytes are checked against the checksums published with the release —
@@ -1401,15 +1414,35 @@ is why the deploy verification refuses any build whose loaded model was fitted o
 that fixture.
 
 **So the Stage 1 criterion — "the model is deployed and returns predictions over
-HTTP from a URL you can share" — is not met, and it is worth being exact about
-which part is missing.** Not the URL: it exists, it is public, it is the one this
-project will serve from, and the links above can be checked by anyone. What is
-missing is the model, and therefore the predictions. Nothing about the deployment
-is outstanding work; the artifact is, and freezing one needs a legal three-way
-split, which on 2026-09-10 the panel cannot give: it holds **2 labelled crawl
-waves against a minimum of 20**. That shortfall is not an
-outstanding task — it is the wait that the rest of this section is arranged
-around, and `./scripts/watch_depth.sh` is what ends it.
+HTTP from a URL you can share" — is not met, and the deployment is not finished.**
+URLs existing is not the criterion; the URLs serving the frozen H=7 artifact is.
+The chain between the two, link by link, with what has actually executed:
+
+| link | status | proven by |
+|---|---|---|
+| selected run | **not done** — waits for the fold gate ([`reports/readiness.md`](reports/readiness.md)) | — |
+| frozen artifact | machinery run on the synthetic panel; on the real panel `freeze` refuses, correctly | `reports/test_results.md`, [`reports/depth_ledger.md`](reports/depth_ledger.md) |
+| `SHA256SUMS` beside it | run | rehearsal, 2026-09-11 |
+| GitHub release with the three assets | run — [`artifact-rehearsal-2026-09-11`](https://github.com/professor3333/shelf-life/releases/tag/artifact-rehearsal-2026-09-11), a prerelease marked synthetic | rehearsal |
+| image built *from that release*: fetch, checksum verify, strict load under the lock | run, locally, against GitHub — first time any release was fetched for real | rehearsal |
+| container: `await_release.sh` then `smoke.sh` | run, locally, with `ALLOW_SYNTHETIC=1` | rehearsal |
+| `MODEL_TAG` commit → Render rebuild → CI verification against the public URL | **never executed** — every `Verify deployment` run so far has exited in seconds with "no release to verify" | `gh run list --workflow=verify-deployment.yml` |
+| the public URL answering from the H=7 artifact | **not done** | — |
+
+Everything above the bracket is one command, `./scripts/release.sh --rehearse`,
+and the same script with `--run <spec>` is the real thing: it stops before
+`MODEL_TAG` and prints the commit, because pointing the public URL at a model is
+a decision a person makes reading the smoke output, not a step a script reaches.
+The rehearsal found what an unexecuted chain hides: `smoke.sh` was asserting a
+response field the API had renamed two days earlier, and the first real release
+would have failed at the last link on a field name (`DEBUGGING.md`, 2026-09-11).
+A test now holds the smoke test's field list to `PredictionResponse`.
+
+What has not run, and cannot from a laptop, is Render's own build and the
+verification against the public URL — the same Dockerfile, the same fetch, the
+same release mechanism, on the platform's machine. That is the day the gate
+clears, and until then `MODEL_TAG` stays empty on purpose: a synthetic model on
+the public URL would make the link look more finished and mean strictly less.
 
 **Where it goes, revised 2026-09-06:** the API on a **Render free web service**,
 the Streamlit UI on **Streamlit Community Cloud**, and the frozen model shipped

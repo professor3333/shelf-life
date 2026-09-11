@@ -111,14 +111,19 @@ if not isinstance(p, (int, float)) or not 0.0 <= p <= 1.0:
 
 # A bare score is not an answer, so the fields that turn it into one are part of
 # the contract and are checked as such: the operating point it was compared
-# against, what "closing" means, which side of the threshold it fell, whether
-# the board features carried information, and which panel the model saw.
-for field in ("threshold", "horizon_days", "closing_soon", "board_context_supplied",
-              "model", "dataset"):
+# against, the horizon, which side of the threshold it fell, what the number
+# predicts in words, whether the board features carried information, and which
+# panel the model saw. These names are the API's (`api/schemas.py`
+# `PredictionResponse`) and `tests/test_deploy.py` asserts they stay so — this
+# list said `closing_soon` for two days after the API renamed it, and the first
+# real release would have failed here, at the last link, on a field name.
+for field in ("threshold", "horizon_days", "removal_flagged", "predicts",
+              "board_context_supplied", "model", "dataset"):
     if body.get(field) is None:
         sys.exit(f"response has no {field}: a score without its context is not a decision")
-verdict = "closing soon" if body["closing_soon"] else "not closing soon"
+verdict = "flagged for removal" if body["removal_flagged"] else "not flagged"
 print(f"  probability {p:.4f} vs threshold {body['threshold']:.4f} -> {verdict}")
+print(f"  predicts: {body['predicts']}")
 print(f"  board context supplied: {body['board_context_supplied']}")
 PY
 echo "ok  /predict"
