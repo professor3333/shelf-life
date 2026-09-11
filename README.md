@@ -452,6 +452,22 @@ With five crawl waves, day-of-week nearly identifies the wave; `source_id` is
 monotonic in creation order (ρ = 0.917 against `first_published`); the
 observation count is constant at serve time and encodes left truncation.
 
+**Board identity, which was excluded and is still there.** `source` and
+`company` are out so a posting from a board never scraped can be scored. A
+classifier fitted on the production feature matrix — same `Pipeline`, target
+swapped for `source` — **names the board for 100% of validation rows**
+([`reports/board_fingerprint.md`](reports/board_fingerprint.md)). Not through
+missingness, which alone scores 19%, but through values: `board_size_at_t` is a
+board's name in integer form (100% on its own), and each employer's office
+cities and posting template carry it redundantly (97.6% with every
+board-context column removed). On seven boards, any feature set rich enough to
+describe a posting identifies its employer, so matrix neutrality was the wrong
+criterion. `docs/design.md` §4a allows availability patterns and template
+features explicitly and makes **transfer** the criterion instead: the
+leave-one-board-out table in `model_comparison.md` is read before any freeze,
+and a held-out board whose score collapses to its base rate is a candidate not
+to freeze.
+
 ---
 
 ## Method
@@ -783,6 +799,7 @@ python -m src.features.assemble                # rebuild the job-day panel from 
 python -m src.data.profile                     # regenerate the data profile
 python -m src.data.label_audit                 # does "disappeared" mean what the label needs?
 python -m src.data.cohort_audit                # does the label treat stock and flow alike?
+python -m src.models.board_fingerprint         # can the features name the board without `source`?
 
 python -m src.models.train_baseline            # the ladder: rules, then fits
 python -m src.models.train                     # ablations, incl. the §12 board-context folds
