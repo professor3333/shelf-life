@@ -1589,7 +1589,7 @@ enforces it.
 and it is more machinery than a project with one author needs; a clean
 committed tree is simpler and stricter.
 
-### The environment is the lock — **DECIDED 2026-09-12**
+### The environment is the lock — **DECIDED 2026-09-11**
 
 The traceability table below names `lock_sha256` of `uv.lock`. On 2026-09-11,
 when that row was written, the file was **gitignored** — the entry argued that a

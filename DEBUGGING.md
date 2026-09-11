@@ -4,7 +4,34 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
-## 2026-09-12 — the artifact's dependency hash named a file that was not in the repository
+## 2026-09-11 — the smoke test asked for a response field the API had renamed
+
+- **Problem:** no crash, and no failing test. `scripts/smoke.sh` required
+  `closing_soon` in the `/predict` body; #69 had renamed it `removal_flagged`
+  two days earlier. The first real deploy would have passed the build, served
+  the model, and then failed its own verification at the last link with
+  "response has no closing_soon". Found by running the release chain in
+  rehearsal for the first time (`./scripts/release.sh --rehearse`).
+- **Root cause:** the field list is typed into a heredoc in a shell script,
+  not read from `api/schemas.py`, and nothing between the schema and the
+  script had ever executed — no release had been created, so `fetch`, the
+  build-time load, `await_release.sh` and `smoke.sh` had only ever met test
+  doubles. The rename's tests covered the API, the client and the UI; the
+  shell script is outside `pytest`'s reach unless a test reads it.
+- **Solution:** `removal_flagged` and `predicts` in `scripts/smoke.sh`;
+  `test_the_smoke_test_asks_for_fields_the_api_actually_returns` parses the
+  script's field list and checks it against `PredictionResponse.model_fields`;
+  the chain is now one script, run end to end against a real GitHub
+  prerelease and the real Dockerfile, stopping before `MODEL_TAG`.
+- **Lesson:** a chain that has never executed is a chain whose last links are
+  untested, however good each link's unit tests are. Rehearse the whole path
+  with a harmless payload as soon as it exists — and when a contract is
+  restated in a language the test suite does not import (shell, YAML), write
+  the test that reads the restatement.
+
+---
+
+## 2026-09-11 — the artifact's dependency hash named a file that was not in the repository
 
 - **Problem:** no crash. `freeze` recorded `lock_sha256` of `uv.lock` as the
   artifact's "dependencies" line, and the traceability test accepted it. But

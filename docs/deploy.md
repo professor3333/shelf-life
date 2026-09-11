@@ -121,6 +121,16 @@ Write the checksums **immediately after** freezing and before uploading, so they
 describe the file that is actually published rather than one regenerated later
 from a panel that has since grown.
 
+`./scripts/release.sh --run <spec>` runs this section and the local half of the
+next one as a single command — freeze, checksums, release, then an image built
+*from that release* (fetch, checksum verification, strict load), a container,
+`await_release.sh` and `smoke.sh` against it — and stops before `MODEL_TAG`,
+printing the commit below for you to make. `--rehearse` runs the identical
+chain on the synthetic panel and publishes a prerelease, which is how the chain
+was first executed for real on 2026-09-11 (`artifact-rehearsal-2026-09-11`).
+Rehearse it again before the day: it is the only way the last links get run
+before they matter.
+
 ---
 
 ## 3. Deploy
