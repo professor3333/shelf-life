@@ -255,6 +255,8 @@ EXCLUDED: dict[str, str] = {
     "currency": "dead — superseded by salary_currency_clean",
     "posted_at": "dead — a string date truncated to midnight; first_published is precise",
     "salary_raw": "excluded as text — high cardinality, and its shape fingerprints the board",
+    "job_type_raw": "dead — arbeitnow-only; null on every labelled board (upstream, 2026-09-08)",
+    "tags_raw": "dead — arbeitnow-only; null on every labelled board (upstream, 2026-09-08)",
 }
 
 

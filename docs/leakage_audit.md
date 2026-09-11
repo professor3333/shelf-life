@@ -151,6 +151,7 @@ gated with `source` and `company` rather than shipped as an ordinary feature.
 | `salary_min`, `salary_max`, `currency` | **dead (superseded)** | the upstream parse. Agrees with the re-derived version on all 4,114 rows where both are present, has strictly worse coverage (28.0% null against 26.9%), and holds the £100/month value stored as 1,200,000,000 recorded in `DEBUGGING.md` |
 | `posted_at` | **dead (superseded)** | a string date truncated to midnight. `first_published` is the same fact at full precision |
 | `salary_raw` | **leak-adjacent, excluded as text** | the value is as-of-`t`, but as a feature it is high-cardinality free text whose *shape* fingerprints the board. Its information is already carried by `salary_stated` and the clean amounts |
+| `job_type_raw`, `tags_raw` | **dead** | added to the scraper's snapshot log on 2026-09-08; as-of-`t` in principle, but populated only by arbeitnow, which carries no valid label, so both are null on 100% of labelled rows across every board (measured 2026-09-11). A column null for every training row can only act as a board fingerprint at serve time. Revisit if a labelled board ever states them |
 
 ### The two that Decision 4 owns — **settled 2026-09-09: excluded**
 
