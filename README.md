@@ -614,7 +614,10 @@ legality arrived five days before evaluability and for that whole gap only the
 first of them would have fired. `SplitTooShallow` asks whether a three-way cut
 is legal. `NoFoldEvidence` asks whether anything could have *chosen* the model
 being tested. Both exit 3 and write the reason into `reports/test_results.md`
-instead of a number.
+instead of a number. A third, `DirtyWorktree`, is asked last and is about the
+code: a real freeze from a tree with uncommitted changes exits 4 and writes
+nothing, because the commit it would record could not reproduce the result
+([Freezing a model](#freezing-a-model)).
 
 The second check is the one that matters right now, and it was added on
 2026-09-09 after the first opened. Between those two dates
@@ -1081,6 +1084,25 @@ buys a check on a model validation already selected, and with no spread on any
 comparison nothing selected one. `--accept-no-folds` overrides it and spends the
 block anyway; the fold count is then written onto the artifact as
 `selection_folds`, where `0` means no comparison stood behind the choice.
+
+**And a third check, about the code rather than the data: on a real panel the
+working tree must be clean.** `git status --porcelain` empty, untracked files
+included, or `freeze` exits **4** and writes nothing (`docs/design.md` §16,
+decided 2026-09-11). A report from a dirty tree says so and is read as
+provisional; an artifact ships, and a commit that does not reproduce it names
+nothing. In practice this fixes the order of the day: `rehearse.sh` and
+`evaluate` regenerate reports, those are committed, and only then is the block
+opened — the evidence a reader checks the result against is in history before
+the result exists. `--synthetic` freezes are rehearsals and are exempt.
+
+**What the artifact is traceable to.** Its metadata and JSON sidecar carry the
+git SHA (necessarily clean), the panel's sha256 and snapshot date, the
+scraper's `rules_version` the panel was built at, the horizon, the sha256 of
+`uv.lock` and the library versions, the run name, parameters, feature list,
+fitted-on block, threshold, budget and fold count, the random seed, and — in
+the sidecar, since a file cannot contain its own hash — the artifact's sha256,
+which `SHA256SUMS` repeats at release and the service verifies on fetch. The
+list is pinned by a test.
 
 ### The service
 

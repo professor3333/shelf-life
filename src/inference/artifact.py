@@ -29,6 +29,7 @@ that moved.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import warnings
 from dataclasses import asdict, dataclass, field
@@ -77,6 +78,14 @@ class Metadata:
     #: model was picked by nothing should be able to say so at the endpoint.
     #: `-1` marks an artifact frozen before this was recorded.
     selection_folds: int = -1
+    #: The rest of what a result is traceable to (`design.md` §16). `rules_version`
+    #: is the scraper's parsing epoch the panel was built from — runs are only
+    #: comparable within one. `lock_sha256` pins the dependency lock the run
+    #: resolved against; `seed` is the random state every fitted rung shares.
+    #: `-1` / `None` mark an artifact frozen before these were recorded.
+    rules_version: int = -1
+    lock_sha256: str | None = None
+    seed: int | None = None
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
     versions: dict[str, str] = field(
         default_factory=lambda: {
@@ -123,11 +132,19 @@ def assert_is_full_pipeline(obj: object) -> Pipeline:
 
 
 def save(pipeline: Pipeline, metadata: Metadata, path: Path = DEFAULT_ARTIFACT) -> Path:
-    """Write the pipeline and its metadata, plus a readable JSON sidecar."""
+    """Write the pipeline and its metadata, plus a readable JSON sidecar.
+
+    The sidecar carries the joblib's own sha256 as `artifact_sha256`, so the
+    metadata names the exact bytes it describes. It cannot live inside the
+    joblib — a file cannot contain its own hash — which is why the sidecar is
+    the one that says it, and `SHA256SUMS` at release repeats it.
+    """
     assert_is_full_pipeline(pipeline)
     path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump({"pipeline": pipeline, "metadata": asdict(metadata)}, path)
-    path.with_suffix(".json").write_text(metadata.as_json() + "\n")
+    sidecar = json.loads(metadata.as_json())
+    sidecar["artifact_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    path.with_suffix(".json").write_text(json.dumps(sidecar, indent=2, sort_keys=True) + "\n")
     return path
 
 

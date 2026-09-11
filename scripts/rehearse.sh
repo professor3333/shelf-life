@@ -68,7 +68,16 @@ echo "== label validity audit"
 # it has an answer on a panel far too shallow to model. Whether "disappeared"
 # means what the label needs it to mean is worth knowing before any model is
 # fitted to it, not after.
-"${PYTHON}" -m src.data.label_audit --panel "${PANEL}"
+#
+# `reports/label_validity.md` describes the build's horizon. A rehearsal at any
+# other horizon writes beside it rather than over it — the H=1 smoke test
+# overwrote the H=7 audit twice on 2026-09-11 before this line existed.
+if [ "${HORIZON}" = "7" ] && [ "${BASIS}" = "calendar" ]; then
+  "${PYTHON}" -m src.data.label_audit --panel "${PANEL}"
+else
+  "${PYTHON}" -m src.data.label_audit --panel "${PANEL}" \
+    --out "reports/label_validity_h${HORIZON}_${BASIS}.md"
+fi
 
 echo
 echo "== depth gate"

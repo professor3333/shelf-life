@@ -52,7 +52,9 @@ def _panel_file(tmp_path: Path, n_waves: int) -> Path:
     return path
 
 
-def _run_freeze(tmp_path: Path, monkeypatch, n_waves: int, *extra: str) -> dict[str, object]:
+def _run_freeze(
+    tmp_path: Path, monkeypatch, n_waves: int, *extra: str, clean: bool = True
+) -> dict[str, object]:
     paths = {
         "panel": _panel_file(tmp_path, n_waves),
         "report": tmp_path / "test_results.md",
@@ -100,6 +102,9 @@ def _run_freeze(tmp_path: Path, monkeypatch, n_waves: int, *extra: str) -> dict[
         return captured["frozen"]
 
     monkeypatch.setattr(freeze_module, "freeze", recording)
+    # The harness runs on whatever tree the developer has; the clean-tree
+    # refusal is tested on its own below, not by every other test's luck.
+    monkeypatch.setattr(freeze_module.provenance, "worktree_is_clean", lambda: clean)
 
     with pytest.raises(SystemExit) as exit_info:
         freeze_module.main()
@@ -299,3 +304,59 @@ def test_a_model_no_better_than_the_board_reports_a_lift_of_one():
     assert reading["real_closures_caught_per_day"] == pytest.approx(
         reading["unaided_closures_caught_per_day"]
     )
+
+
+# --- release discipline: a clean tree, and everything the artifact is traceable to
+
+
+def test_a_real_freeze_refuses_a_dirty_worktree(tmp_path, monkeypatch, capsys):
+    """A SHA cannot reproduce a result if uncommitted changes affected the run.
+    Reports may say "dirty tree" and be read as provisional; the artifact ships,
+    so it may not (`design.md` §16). Its own exit code, and no report written —
+    this is not a finding about the data."""
+    paths = _run_freeze(tmp_path, monkeypatch, DEEP_ENOUGH_TO_CHOOSE, clean=False)
+
+    assert paths["exit_code"] == 4
+    assert not paths["artifact"].exists(), "the test block was spent from a dirty tree"
+    assert not paths["report"].exists(), "a refusal about the code is not a report about the data"
+    assert "uncommitted changes" in capsys.readouterr().out
+
+
+def test_the_clean_tree_check_comes_after_the_depth_checks(tmp_path, monkeypatch, capsys):
+    """Depth refusals are recorded in the report and are about the data; they
+    must not be masked by the code check, which is only asked at the moment the
+    block would actually be opened."""
+    paths = _run_freeze(tmp_path, monkeypatch, LEGAL_BUT_FOLDLESS, clean=False)
+    assert paths["exit_code"] == 3
+    assert paths["report"].exists()
+    assert "uncommitted" not in capsys.readouterr().out
+
+
+def test_a_synthetic_freeze_is_a_rehearsal_and_may_run_dirty(tmp_path, monkeypatch):
+    paths = _run_freeze(tmp_path, monkeypatch, DEEP_ENOUGH_TO_CHOOSE, "--synthetic", clean=False)
+    assert paths["exit_code"] == 0
+    assert paths["artifact"].exists()
+
+
+def test_the_artifact_names_everything_it_is_traceable_to(tmp_path, monkeypatch):
+    """Git SHA, panel hash, rules version, horizon, dependency lock, training
+    config, seed, and the artifact's own checksum — the list in `design.md` §16."""
+    import json
+
+    from src.inference import artifact as artifact_module
+
+    paths = _run_freeze(tmp_path, monkeypatch, DEEP_ENOUGH_TO_CHOOSE)
+    assert paths["exit_code"] == 0
+    loaded = artifact_module.load(paths["artifact"])
+    meta = loaded.metadata
+
+    assert meta.rules_version == 2
+    assert meta.seed is not None
+    assert meta.lock_sha256 is None or len(meta.lock_sha256) == 64
+    assert "git_sha" in meta.provenance and "panel_sha256" in meta.provenance
+    assert meta.horizon_days >= 1 and meta.params and meta.features
+
+    sidecar = json.loads(paths["artifact"].with_suffix(".json").read_text())
+    import hashlib
+
+    assert sidecar["artifact_sha256"] == hashlib.sha256(paths["artifact"].read_bytes()).hexdigest()

@@ -417,6 +417,10 @@ def assemble(
 
     panel["horizon_days"] = horizon_days
     panel["horizon_basis"] = basis
+    # The scraper's parsing epoch the panel was built from. `complete_runs`
+    # keeps only runs at the current one, so this is a single value — carried
+    # so the artifact can say which epoch it was fitted on (`design.md` §16).
+    panel["rules_version"] = int(frames["runs"]["rules_version"].max())
     return panel.sort_values(["t", "source", "source_id"], kind="stable").reset_index(drop=True)
 
 

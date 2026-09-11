@@ -237,6 +237,7 @@ EXCLUDED: dict[str, str] = {
     "requisition_id": "axis — 1,120 distinct over 1,240 postings; only the windowed count is used",
     "horizon_days": "axis — label-construction metadata",
     "horizon_basis": "axis — label-construction metadata",
+    "rules_version": "axis — the scraper's parsing epoch; constant within a panel",
     "y": "the target",
     "label_observable": "the censoring flag",
     "split": "assigned by src/data/split.py; describes the experiment",

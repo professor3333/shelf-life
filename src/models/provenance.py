@@ -8,10 +8,15 @@ so "PR-AUC 0.31" without a snapshot is a number about an unknown quantity of
 data. A metric with no commit is not reproducible — the pipeline that produced
 it has since been edited.
 
-**`dirty` is logged, not prevented.** Refusing to run on a dirty tree would be
-the wrong trade: most runs happen mid-edit, and a driver that will not run until
-you commit is a driver you stop using. Recording it means a run tagged
-`git_dirty=true` is understood as provisional, which is the honest status.
+**`dirty` is logged, not prevented — except at the freeze.** Refusing to run
+on a dirty tree would be the wrong trade for experiments: most runs happen
+mid-edit, and a driver that will not run until you commit is a driver you stop
+using. Recording it means a run tagged `git_dirty=true` is understood as
+provisional, which is the honest status. The one step where provisional is
+not acceptable is the one that opens the held-out block and writes the
+artifact that ships: a SHA cannot reproduce a result if uncommitted source
+changes affected the run, so `freeze` refuses on a real panel unless
+`worktree_is_clean()` (decided 2026-09-11, `design.md` §16).
 """
 
 from __future__ import annotations
@@ -137,6 +142,29 @@ def _snapshot_date(raw_root: Path = Path("data/raw")) -> str | None:
         return str(json.loads(manifests[-1].read_text())["snapshot_date"])
     except (OSError, ValueError, KeyError):  # pragma: no cover
         return None
+
+
+#: The dependency lock whose hash travels on the artifact. A SHA pins the
+#: source; this pins what the source ran against.
+LOCK_FILE = Path("uv.lock")
+
+
+def lock_sha256(path: Path = LOCK_FILE) -> str | None:
+    return sha256_of(path) if path.exists() else None
+
+
+def worktree_is_clean() -> bool:
+    """Is there anything uncommitted — tracked or untracked — in the tree?
+
+    `git status --porcelain` is empty exactly when the SHA describes what ran.
+    Untracked files count: a new module the run imported is as unreproducible
+    as an edited one. Outside a git checkout the answer is False, because
+    "no repository" is not "clean".
+    """
+    try:
+        return _git("status", "--porcelain") == "" and _git("rev-parse", "HEAD") != ""
+    except Exception:  # pragma: no cover - git absent
+        return False
 
 
 def collect(panel_path: Path, n_rows: int, dataset: str = REAL) -> Provenance:

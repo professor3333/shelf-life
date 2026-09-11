@@ -94,6 +94,7 @@ def make_panel(
                     "salary_currency_clean": "USD",
                     "horizon_days": 1,
                     "horizon_basis": "calendar",
+                    "rules_version": 2,
                 }
             )
     frame = pd.DataFrame(rows)
@@ -200,6 +201,7 @@ def make_closing_panel(
                     "salary_currency_clean": "USD",
                     "horizon_days": 1,
                     "horizon_basis": "calendar",
+                    "rules_version": 2,
                 }
             )
 
