@@ -870,7 +870,7 @@ and the answer to a failure is a rollback (`docs/deploy.md` §5, one commit) and
 reassessment, not a wider timeout: past 90 seconds the script exits non-zero and
 the rule is *reassess the architecture, do not raise the timeout*.
 
-The baseline is 32.65 s on the no-artifact image, and it is a floor rather than
+The baseline is in `reports/cold_start_baseline.md`, and it is a floor rather than
 an estimate — whatever unpickling the pipeline costs on 0.1 vCPU is exactly the
 part an image with no model could not measure. What the definitive run has to
 contain — real artifact, first `/predict` and `/rank`, the unpickle and memory
@@ -1512,12 +1512,18 @@ a forecast: the expensive part of a cold start is importing scikit-learn and
 XGBoost and unpickling the artifact, and that is pure CPU, of which this instance
 has a tenth.
 
-**The baseline is now measured: 32.65 s.** Taken on 2026-09-06 against the live
-free instance after 16 minutes of enforced idle, using the no-artifact image —
+**The baseline is measured, and the measurement lives in
+[`reports/cold_start_baseline.md`](reports/cold_start_baseline.md)** — three
+cycles against the live free instance after 16 idle minutes each, no artifact,
 so it covers the platform wake, the interpreter and the scikit-learn and XGBoost
-imports, and nothing else. It leaves **57 s of the 90 s budget** for everything a
-real model adds. The definitive figure is still owed and gets written here before
-the link is given to anyone.
+imports and nothing else. The first single sample, on 2026-09-06, was 32.65 s.
+The first three-cycle run, on 2026-09-11, was **62–72 s** — and the report's
+inside columns said why: the process took 38–46 s to become ready before any
+artifact, because the switch to `uv` had stopped compiling bytecode at install
+and every cold start was compiling four libraries from source on a tenth of a
+CPU. One line in the Dockerfile fixes it; `docs/design.md` §7e records the
+diagnosis and the re-measurement replaces the report. The definitive figure is
+still owed.
 
 **And the term the baseline is missing is now estimated: 25.18 s.** The baseline
 covers everything *except* the one thing the criterion exists to bound — reading

@@ -4,6 +4,30 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-11 — the cold start doubled, and the image was the only thing that had changed
+
+- **Problem:** the first three-cycle baseline against the live service
+  measured cold `/health` at 62.8, 72.4 and 64.4 s — twice the 32.65 s of
+  2026-09-06 — with the process reporting 38–46 s to become ready before any
+  artifact. The 58 s estimate for the definitive run became ~97 s, over the
+  criterion, and no test, build or workflow had noticed.
+- **Root cause:** #72 replaced `pip install` with `uv sync` in the Dockerfile.
+  pip compiles `.pyc` files at install time by default; uv does not. Every
+  cold start was compiling scikit-learn, XGBoost, pandas and FastAPI from
+  source, in memory, on 0.1 of a CPU, and discarding the result — the process
+  runs as a user that cannot write to site-packages. Confirmed locally under a
+  hard `--cpus 0.1` quota: 341 s of imports from source, 177 s from bytecode.
+- **Solution:** `UV_COMPILE_BYTECODE=1` in the Dockerfile, pinned by
+  `test_the_image_precompiles_bytecode`; baseline re-run after deploy.
+- **Lesson:** "same packages, same versions" is not "same image". An
+  installer swap changes what is on disk beyond the packages, and the only
+  thing that would have caught this is the measurement that did — which is
+  why the measurement runs after every image change, not once. And read the
+  decomposition before the total: 46 s *inside the process* before any
+  artifact is a sentence about imports, not about the platform.
+
+---
+
 ## 2026-09-11 — the public UI had been telling visitors it cannot reach the API
 
 - **Problem:** no crash, no failing test, no failing workflow. The first
