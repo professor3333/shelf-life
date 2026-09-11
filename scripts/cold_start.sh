@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # How long does the first request wait when nothing is running?
 #
-#     ./scripts/cold_start.sh https://shelf-life-xxxxx.europe-west1.run.app
+#     ./scripts/cold_start.sh https://shelf-life-xxxx.onrender.com          # 3 cycles
+#     REPEATS=1 ./scripts/cold_start.sh <url>                               # one, noisier
+#     ./scripts/cold_start.sh <url> 20                                      # 20 idle minutes
 #
 # `docs/design.md` §7e promises this number and says why: a cold start nobody has
 # timed is a surprise being saved up for whoever is being shown the link. CI
@@ -16,6 +18,23 @@
 # afterwards is printed beside it because the *difference* is the cold-start
 # cost; the absolute number alone hides how much of it is just scoring a row.
 #
+# **Repeated, because one sample is an anecdote.** Each cycle waits the full
+# idle period, so three cycles cost about fifty minutes — and that is the
+# price of a number with a spread. The criterion is applied to the WORST
+# request of the WORST cycle, not the median: the stranger who gets the slow
+# one does not experience the median.
+#
+# **Decomposed, because a number without a cause cannot be acted on.** Beside
+# the outside timing the script prints what `/health` says the process cost
+# itself: `ready_after_seconds` (process start to model ready), `load_seconds`
+# (the unpickle alone) and `rss_mb` (peak memory, against the instance's
+# 512 MB). Platform wake is the remainder. `api/runtime.py`.
+#
+# **Recorded, not remembered.** Every cycle is written to a report — the
+# definitive run to `reports/cold_start.md`, a baseline to
+# `reports/cold_start_baseline.md` — so the acceptance is a committed table,
+# not a sentence in a README quoting one figure.
+#
 # Preconditions, and the run is worthless without them:
 #   * nothing is keeping the service awake — there is deliberately no keep-warm
 #     cron (§7e explains the 750-hour arithmetic that rules one out)
@@ -25,9 +44,11 @@
 
 set -euo pipefail
 
+cd "$(dirname "$0")/.."
+
 BASE_URL="${1:-${SHELF_LIFE_API:-}}"
 if [ -z "${BASE_URL}" ]; then
-  echo "usage: $0 <base-url> [idle-minutes]   (or set SHELF_LIFE_API)" >&2
+  echo "usage: $0 <base-url> [idle-minutes]   (or set SHELF_LIFE_API; REPEATS=n, OUT=path)" >&2
   exit 2
 fi
 BASE_URL="${BASE_URL%/}"
@@ -35,6 +56,7 @@ BASE_URL="${BASE_URL%/}"
 # Render spins a free service down after 15 idle minutes. 16 is the default here
 # so the wait clears that rather than racing it.
 IDLE_MINUTES="${2:-16}"
+REPEATS="${REPEATS:-3}"
 
 #: **The deployment acceptance criterion**, in seconds, and this script exits
 #: non-zero when the cold measurement exceeds it.
@@ -51,12 +73,14 @@ IDLE_MINUTES="${2:-16}"
 #: fails CI rather than quietly succeeding.
 STOP_RULE_SECONDS="${STOP_RULE_SECONDS:-90}"
 
+WORK=$(mktemp -d)
+trap 'rm -rf "${WORK}"' EXIT
+CYCLES="${WORK}/cycles.jsonl"
+: > "${CYCLES}"
+
 #: The most recent measurement, in seconds. `timed` writes it; the caller copies
-#: it out immediately, because every later call overwrites it — and the value the
-#: acceptance criterion is applied to must be the COLD one, not the warm request
-#: that happens to have run last.
+#: it out immediately, because every later call overwrites it.
 LAST_SECONDS=""
-COLD_SECONDS=""
 
 timed() {  # timed <label> <curl args...> -> seconds, and fails loudly on a non-2xx
   local label="$1"; shift
@@ -67,16 +91,22 @@ timed() {  # timed <label> <curl args...> -> seconds, and fails loudly on a non-
   LAST_SECONDS="${result% *}"
 }
 
-echo "Waiting ${IDLE_MINUTES} minutes for ${BASE_URL} to scale to zero."
-echo "Send it nothing during the wait — including opening the UI."
-if [ "${IDLE_MINUTES}" != "0" ]; then
-  sleep $((IDLE_MINUTES * 60))
-fi
+health_field() {  # health_field <json-file> <field> -> value or empty
+  python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2]); print("" if v is None else v)' "$1" "$2"
+}
 
-echo
-echo "Cold — the first request after ${IDLE_MINUTES} idle minutes:"
-timed "/health (cold)" "${BASE_URL}/health"
-COLD_SECONDS="${LAST_SECONDS}"
+predict_payload='{"title": "Senior Data Engineer", "location": "Berlin",
+          "content_chars": 1400, "first_published": "2026-08-20T00:00:00Z",
+          "as_of": "2026-09-14T03:45:00Z"}'
+# /rank is the shape the operating point was designed for (README), and its
+# first call is timed separately: a batch is not one posting three times.
+rank_payload='{"budget": 1, "as_of": "2026-09-14T03:45:00Z", "postings": [
+          {"title": "Senior Data Engineer", "location": "Berlin", "content_chars": 1400,
+           "first_published": "2026-08-20T00:00:00Z"},
+          {"title": "Werkstudent Marketing", "location": "Munich", "content_chars": 600,
+           "first_published": "2026-09-01T00:00:00Z"},
+          {"title": "Staff Software Engineer, Infrastructure", "location": "Remote",
+           "content_chars": 2800, "first_published": "2026-08-10T00:00:00Z"}]}'
 
 # Which of the two measurements is this? The answer is not a flag the caller
 # passes, because a caller who has to remember which kind of run this is will
@@ -87,56 +117,200 @@ COLD_SECONDS="${LAST_SECONDS}"
 #                real instance, and a LOWER BOUND: it never touches joblib, never
 #                unpickles a pipeline or a booster, and /predict answers 503
 #                without reaching the model.
-#   DEFINITIVE — the same image with a released artifact in it. Adds the load
-#                path the baseline omits, and is the only measurement that can
-#                accept the architecture.
+#   REHEARSAL  — an image carrying a model fitted on the SYNTHETIC panel. The
+#                load path runs for real — same libraries, an artifact of the
+#                same shape — so the unpickle cost is measured; but the
+#                criterion is about the artifact that ships, and this is not
+#                it. Measures, records, accepts nothing.
+#   DEFINITIVE — the same image with a released artifact fitted on the real
+#                panel. Adds the load path the baseline omits, and is the only
+#                measurement that can accept the architecture.
 #
 # `docs/design.md` §7e: the architecture is not accepted until the DEFINITIVE
-# measurement is within the criterion.
-MODEL_LOADED=$(curl -fsS --max-time 60 "${BASE_URL}/health" \
+# measurement is within the criterion. Asked once, up front, so the wait is not
+# spent on a run whose kind is unknown; asked again after every cold request,
+# because a deploy landing mid-run would otherwise mix the two.
+curl -fsS --max-time 180 "${BASE_URL}/health" > "${WORK}/kind.json"
+MODEL_LOADED=$(curl -fsS --max-time 180 "${BASE_URL}/health" \
   | python3 -c 'import json,sys; print("yes" if json.load(sys.stdin).get("model_loaded") else "no")')
+DATASET=$(health_field "${WORK}/kind.json" dataset)
+if [ "${MODEL_LOADED}" != "yes" ]; then KIND="BASELINE"
+elif [ "${DATASET}" != "real" ]; then KIND="REHEARSAL"
+else KIND="DEFINITIVE"; fi
+echo "Measuring ${BASE_URL}: ${KIND} (model_loaded=${MODEL_LOADED}, dataset=${DATASET:-none})"
+echo "${REPEATS} cycle(s) of ${IDLE_MINUTES} idle minutes each; criterion ${STOP_RULE_SECONDS} s."
 
-payload='{"title": "Senior Data Engineer", "location": "Berlin",
-          "content_chars": 1400, "first_published": "2026-08-20T00:00:00Z",
-          "as_of": "2026-09-14T03:45:00Z"}'
-
-PREDICT_SECONDS=""
-if [ "${MODEL_LOADED}" = "yes" ]; then
+for cycle in $(seq 1 "${REPEATS}"); do
   echo
-  echo "First prediction — the load path the baseline cannot reach:"
-  timed "/predict (first)" -X POST "${BASE_URL}/predict" \
-    -H 'content-type: application/json' -d "${payload}"
-  PREDICT_SECONDS="${LAST_SECONDS}"
-  timed "/predict (warm)" -X POST "${BASE_URL}/predict" \
-    -H 'content-type: application/json' -d "${payload}"
-else
-  echo
-  echo "No model loaded, so /predict is a 503 and is not timed."
-fi
+  echo "== cycle ${cycle}/${REPEATS}: waiting ${IDLE_MINUTES} minutes for the service to scale to zero."
+  echo "   Send it nothing during the wait — including opening the UI."
+  if [ "${IDLE_MINUTES}" != "0" ]; then
+    sleep $((IDLE_MINUTES * 60))
+  fi
 
-# --- the acceptance criterion, applied ---------------------------------------
+  echo "Cold — the first request after ${IDLE_MINUTES} idle minutes:"
+  timed "/health (cold)" "${BASE_URL}/health"
+  cold="${LAST_SECONDS}"
+  curl -fsS --max-time 60 "${BASE_URL}/health" > "${WORK}/health.json"
+  loaded_now=$([ "$(health_field "${WORK}/health.json" model_loaded)" = "True" ] && echo yes || echo no)
+  if [ "${loaded_now}" != "${MODEL_LOADED}" ]; then
+    echo "the service changed kind mid-run (model_loaded flipped) — a deploy landed. Start over." >&2
+    exit 1
+  fi
+  timed "/health (warm)" "${BASE_URL}/health"
+
+  predict_first=""; predict_warm=""; rank_first=""; rank_warm=""
+  if [ "${MODEL_LOADED}" = "yes" ]; then
+    echo "First prediction — the load path the baseline cannot reach:"
+    timed "/predict (first)" -X POST "${BASE_URL}/predict" \
+      -H 'content-type: application/json' -d "${predict_payload}"
+    predict_first="${LAST_SECONDS}"
+    timed "/predict (warm)" -X POST "${BASE_URL}/predict" \
+      -H 'content-type: application/json' -d "${predict_payload}"
+    predict_warm="${LAST_SECONDS}"
+    timed "/rank (first, 3 postings)" -X POST "${BASE_URL}/rank" \
+      -H 'content-type: application/json' -d "${rank_payload}"
+    rank_first="${LAST_SECONDS}"
+    timed "/rank (warm, 3 postings)" -X POST "${BASE_URL}/rank" \
+      -H 'content-type: application/json' -d "${rank_payload}"
+    rank_warm="${LAST_SECONDS}"
+  else
+    echo "No model loaded, so /predict and /rank answer 503 and are not timed."
+  fi
+
+  ready=$(health_field "${WORK}/health.json" ready_after_seconds)
+  load=$(health_field "${WORK}/health.json" load_seconds)
+  rss=$(health_field "${WORK}/health.json" rss_mb)
+  printf '  %-28s ready after %.2f s, of which unpickle %.2f s; peak RSS %.0f MB\n' \
+    "inside the process:" "${ready:-0}" "${load:-0}" "${rss:-0}"
+
+  python3 - "${CYCLES}" "${cycle}" "${cold}" "${predict_first}" "${predict_warm}" \
+      "${rank_first}" "${rank_warm}" "${ready}" "${load}" "${rss}" "${WORK}/health.json" <<'PY'
+import json, sys
+path, cycle, cold, pf, pw, rf, rw, ready, load, rss, health = sys.argv[1:]
+f = lambda v: float(v) if v else None
+h = json.load(open(health))
+row = {"cycle": int(cycle), "cold_health": f(cold), "predict_first": f(pf),
+       "predict_warm": f(pw), "rank_first": f(rf), "rank_warm": f(rw),
+       "ready_after": f(ready), "load": f(load), "rss_mb": f(rss),
+       "artifact_tag": h.get("artifact_tag"), "model": h.get("model"),
+       "dataset": h.get("dataset"), "model_loaded": bool(h.get("model_loaded"))}
+open(path, "a").write(json.dumps(row) + "\n")
+PY
+done
+
+# --- the report, then the criterion --------------------------------------------
 #
-# Applied to the SLOWEST request, not to the wake alone. The UI's timeout is per
-# request and guards both, so a /health that wakes in 40 s followed by a
-# /predict that takes 100 s is a failure even though the wake looked fine.
-verdict=$(COLD="${COLD_SECONDS:-0}" PRED="${PREDICT_SECONDS:-0}" STOP="${STOP_RULE_SECONDS}" \
-  python3 -c '
-import os, sys
+# Applied to the SLOWEST request of the SLOWEST cycle, not to the wake alone
+# and not to a median. The UI's timeout is per request and guards every
+# request, so a /health that wakes in 40 s followed by a /predict that takes
+# 100 s is a failure even though the wake looked fine.
+case "${KIND}" in
+  DEFINITIVE) OUT="${OUT:-reports/cold_start.md}" ;;
+  REHEARSAL)  OUT="${OUT:-reports/cold_start_rehearsal.md}" ;;
+  *)          OUT="${OUT:-reports/cold_start_baseline.md}" ;;
+esac
+verdict=$(python3 - "${CYCLES}" "${OUT}" "${KIND}" "${BASE_URL}" "${IDLE_MINUTES}" "${STOP_RULE_SECONDS}" <<'PY'
+import json, statistics, sys
+from datetime import date
 
-cold = float(os.environ["COLD"])
-predict = float(os.environ["PRED"] or 0.0)
-stop = float(os.environ["STOP"])
-worst = max(cold, predict)
-print(f"{cold:.2f} {predict:.2f} {worst:.2f} {stop:.0f}")
+cycles_path, out, kind, url, idle, stop = sys.argv[1:]
+stop = float(stop)
+rows = [json.loads(line) for line in open(cycles_path) if line.strip()]
+
+def worst_of(row):
+    return max(v for v in (row["cold_health"], row["predict_first"], row["rank_first"]) if v is not None)
+
+worst = max(worst_of(r) for r in rows)
+median_cold = statistics.median(r["cold_health"] for r in rows)
+first = rows[0]
+
+def cell(v, unit=" s"):
+    return "—" if v is None else f"{v:.2f}{unit}"
+
+lines = [
+    f"# Cold start — {kind.lower()} measurement",
+    "",
+    "| | |",
+    "|---|---|",
+    "| Generated by | `scripts/cold_start.sh` |",
+    f"| Service | `{url}` |",
+    f"| Release serving | `{first['artifact_tag'] or '(none — no model)'}` |",
+    f"| Model | `{first['model'] or '—'}` on the `{first['dataset'] or '—'}` panel |",
+    f"| Measured on | {date.today().isoformat()} |",
+    f"| Cycles | {len(rows)}, each after {idle} idle minutes, nothing else touching the service |",
+    f"| Criterion | {stop:.0f} s, applied to the slowest request of the slowest cycle |",
+    "",
+    "_Regenerate rather than edit._",
+    "",
+]
+if kind == "BASELINE":
+    lines += [
+        "**This is a lower bound and accepts nothing.** The image carries no artifact,",
+        "so no cycle here unpickled a pipeline or a booster, and `/predict` and `/rank`",
+        "answered 503 without reaching the model. `docs/design.md` §7e: a baseline over",
+        "the criterion condemns the architecture; a baseline within it implies nothing.",
+        "",
+    ]
+elif kind == "REHEARSAL":
+    lines += [
+        "**This is a rehearsal and accepts nothing.** The model loaded here was fitted on",
+        "the synthetic panel, so the load path ran for real — the unpickle column below is a",
+        "measurement, not an estimate — but the criterion is about the artifact that ships,",
+        "and this is not it. `docs/design.md` §7e.",
+        "",
+    ]
+else:
+    lines += [
+        "**This is the definitive measurement** — a real released artifact, loaded on the",
+        "real instance, and used by `/predict` and `/rank`. The criterion in `docs/design.md`",
+        "§7e is applied to the worst request of the worst cycle below.",
+        "",
+    ]
+lines += [
+    "## Every cycle",
+    "",
+    "Outside timings are what a visitor waits; the last three columns are what the",
+    "process says it cost itself (`/health`), so the platform wake is the difference",
+    "between the cold `/health` and *ready after*.",
+    "",
+    "| cycle | cold `/health` | first `/predict` | warm `/predict` | first `/rank` (3) | warm `/rank` (3) | ready after | of which unpickle | peak RSS |",
+    "|---|---|---|---|---|---|---|---|---|",
+]
+for r in rows:
+    lines.append(
+        f"| {r['cycle']} | {cell(r['cold_health'])} | {cell(r['predict_first'])} | "
+        f"{cell(r['predict_warm'])} | {cell(r['rank_first'])} | {cell(r['rank_warm'])} | "
+        f"{cell(r['ready_after'])} | {cell(r['load'])} | {cell(r['rss_mb'], ' MB')} |"
+    )
+lines += [
+    "",
+    "## Verdict",
+    "",
+    f"- Worst request, worst cycle: **{worst:.2f} s** against {stop:.0f} s",
+    f"- Median cold `/health`: {median_cold:.2f} s over {len(rows)} cycle(s)",
+]
+if worst > stop:
+    lines.append(f"- **STOP** — over the criterion. §7e: reassess the architecture, do not raise the timeout.")
+elif kind == "BASELINE":
+    lines.append("- Within the criterion, and **that accepts nothing** — the unpickle is not in this number.")
+elif kind == "REHEARSAL":
+    lines.append("- Within the criterion, and **that accepts nothing** — the artifact is synthetic, not the one that ships.")
+else:
+    lines.append("- **ACCEPTED** — within the criterion with a real artifact, loaded and used, repeatedly.")
+lines.append("")
+open(out, "w").write("\n".join(lines))
+print(f"{worst:.2f} {median_cold:.2f} {stop:.0f} {len(rows)}")
 sys.exit(1 if worst > stop else 0)
-') && within=0 || within=1
+PY
+) && within=0 || within=1
 set -- ${verdict}
-cold_s="$1"; predict_s="$2"; worst_s="$3"; stop_s="$4"
+worst_s="$1"; median_s="$2"; stop_s="$3"; n="$4"
 
 echo
+echo "wrote -> ${OUT}"
 if [ "${within}" -ne 0 ]; then
-  echo "STOP: ${worst_s} s exceeds the ${stop_s} s acceptance criterion." >&2
-  echo "  cold /health ${cold_s} s   first /predict ${predict_s} s" >&2
+  echo "STOP: ${worst_s} s exceeds the ${stop_s} s acceptance criterion (worst of ${n} cycles)." >&2
   echo >&2
   echo "docs/design.md §7e: past this line the decision is reassessed, not tuned" >&2
   echo "around. Specifically NOT the available shortcut — raising the UI timeout" >&2
@@ -148,11 +322,12 @@ if [ "${within}" -ne 0 ]; then
   echo "    with pre-computed examples show the same work?" >&2
   echo "  * does the image have to carry XGBoost, when import-and-unpickle is" >&2
   echo "    what the tenth of a CPU is actually spending its time on?" >&2
+  echo "The report above says which term to look at first." >&2
   exit 1
 fi
 
 if [ "${MODEL_LOADED}" != "yes" ]; then
-  echo "BASELINE recorded: ${cold_s} s, within the ${stop_s} s criterion."
+  echo "BASELINE recorded: worst ${worst_s} s, median cold ${median_s} s, within the ${stop_s} s criterion."
   echo
   echo "This does NOT accept the deployment architecture, and the number is a"
   echo "lower bound rather than a result. The image carries no artifact, so this"
@@ -174,9 +349,18 @@ if [ "${MODEL_LOADED}" != "yes" ]; then
   exit 0
 fi
 
-echo "ACCEPTED: ${worst_s} s is within the ${stop_s} s acceptance criterion."
-echo "  cold /health ${cold_s} s   first /predict ${predict_s} s"
+if [ "${KIND}" = "REHEARSAL" ]; then
+  echo "REHEARSAL recorded: worst ${worst_s} s, median cold ${median_s} s, within the ${stop_s} s criterion."
+  echo
+  echo "This does NOT accept the deployment architecture. The load path ran — the"
+  echo "unpickle column in ${OUT} is a real measurement of a real artifact of the"
+  echo "same shape — but the model was fitted on the synthetic panel, and the"
+  echo "criterion is about the one that ships. Re-run against the real release."
+  exit 0
+fi
+
+echo "ACCEPTED: worst ${worst_s} s over ${n} cycles is within the ${stop_s} s acceptance criterion."
+echo "  median cold /health ${median_s} s"
 echo
-echo "This is the definitive measurement — a real artifact, loaded and used."
-echo "Put both figures in the README beside the caveat, not instead of it:"
-echo "  \"the first request after idle takes N seconds; subsequent ones take M ms\""
+echo "This is the definitive measurement — a real artifact, loaded and used,"
+echo "repeatedly. Commit ${OUT}; the README links to it rather than quoting it."

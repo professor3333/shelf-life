@@ -775,6 +775,35 @@ run it just did rather than taking the caller's word for it — it asks `/health
 whether a model is loaded — because a caller who has to remember which sort of
 measurement they are looking at will eventually file a lower bound as a result.
 
+### The acceptance protocol — **ADDED 2026-09-11**
+
+Everything above says *that* the definitive measurement is owed. This says
+what it consists of, so that on the day it is a checklist rather than a
+judgement, and so that the estimate below (§7e-ii: baseline 32.65 s plus a
+locally measured load cost of 25.18 s, about 58 s) is never mistaken for it.
+The estimate is two measurements of different things on different machines,
+added; the acceptance is one measurement of the right thing on the right one.
+
+| needed | produced by | recorded in |
+|---|---|---|
+| a true cold start with the **real** artifact | `scripts/cold_start.sh` against the public URL after `MODEL_TAG` names a real release; the script reads `/health` and files a run as `BASELINE` (no model), `REHEARSAL` (synthetic model) or `DEFINITIVE` (real) — only the last can accept | `reports/cold_start.md` |
+| artifact download time | not part of a cold start: the artifact is fetched at *build* time and baked into the image, so the download is paid once, in Render's build log, never by a visitor | the build log; the `fetched … checksum verified` lines |
+| deserialisation and startup time | `/health` reports `load_seconds` (the unpickle alone) and `ready_after_seconds` (process start to model ready); the platform wake is the cold `/health` minus the latter | the last three columns of the report |
+| first successful `/predict` | timed, first and warm, every cycle | the report |
+| first successful `/rank` | timed, first and warm, every cycle, on a three-posting batch — the shape the operating point was designed for (§15) | the report |
+| memory under the actual model | `/health` reports peak RSS (`rss_mb`) from inside the process, against the instance's 512 MB | the report |
+| repeat measurements | `REPEATS` cycles, default three, each after the full idle window; the criterion is applied to the worst request of the worst cycle, because the stranger who gets the slow one does not experience the median | one row per cycle |
+| the ≤ 90 s criterion | enforced by the script's exit code, on the definitive kind only | the report's verdict line |
+
+**What is settled now, and what is not.** The protocol and the machinery are:
+every column above was exercised on 2026-09-11 against a local container
+carrying the rehearsal release — filed as `REHEARSAL`, which accepts nothing —
+and against the model-less image, filed as `BASELINE`. What is not settled is
+the number, and nothing here can settle it before a real artifact is on the
+public URL. **The Render architecture is provisional until `reports/cold_start.md`
+exists with a `DEFINITIVE` verdict of `ACCEPTED`.** A README sentence quoting a
+figure is not that file.
+
 ### 7e-ii. The omitted work, measured on its own — **2026-09-10**
 
 The `nothing` in the table above is what this subsection exists to attack. The
