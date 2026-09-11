@@ -541,8 +541,61 @@ def minimum_waves(
     }
 
 
+#: How far past the observed cadence the newest crawl may fall before the panel
+#: is called stalled rather than merely shallow. Two waves of slack: one missed
+#: crawl is a hiccup, two in a row is a stopped input.
+STALE_AFTER_MULTIPLE = 2.0
+
+
+def accrual_status(
+    frame: pd.DataFrame,
+    now: pd.Timestamp | None = None,
+    tolerance: float = STALE_AFTER_MULTIPLE,
+) -> dict[str, object]:
+    """Is the panel still growing, or has the source stopped feeding it?
+
+    **The question `projected_clear` cannot ask and must not answer without.** A
+    projection is `newest wave + shortfall × spacing`, which is a sensible date
+    only while waves keep arriving. If they stop, the projection does not recede
+    — it sits exactly where it was, quietly turning into a date in the past while
+    a reader who checks it every morning goes on believing the wait is running
+    down. The gate is not closer than yesterday; nothing happened.
+
+    That failure has a shape worth naming: the daily watch prints the same line
+    every day whether the panel gained a wave or the scraper died, and the two
+    are indistinguishable in its output. `waves=2` on Tuesday and `waves=2` on
+    Thursday reads as patience and is actually an outage.
+
+    So this compares the newest crawl in the panel against the clock. Cadence
+    comes from every wave rather than the labelled ones, for the reason
+    `minimum_waves` gives: at a long horizon the labelled subset is the smallest
+    sample available and its error runs the wrong way.
+    """
+    now = pd.Timestamp.now(tz="UTC") if now is None else now
+    waves = crawl_waves(frame)
+    if not len(waves):
+        return {"stalled": True, "newest_wave": None, "age": None, "spacing": None}
+
+    newest = waves.max()
+    gaps = waves.diff().dropna()
+    spacing = gaps.median() if len(gaps) else pd.Timedelta(days=1)
+    age = now - newest
+    return {
+        "stalled": bool(age > tolerance * spacing),
+        "newest_wave": newest,
+        "age": age,
+        "spacing": spacing,
+        # Waves that should have landed since the newest one did. The newest
+        # wave itself is not missing, so this floors the elapsed cadences
+        # rather than counting boundaries.
+        "waves_missed": max(0, int(age / spacing)) if spacing else 0,
+    }
+
+
 def projected_clear(
-    frame: pd.DataFrame, target_folds: int = DEFAULT_TARGET_FOLDS
+    frame: pd.DataFrame,
+    target_folds: int = DEFAULT_TARGET_FOLDS,
+    now: pd.Timestamp | None = None,
 ) -> dict[str, object]:
     """The dates the two gates clear, if crawls keep arriving as they have.
 
@@ -563,9 +616,15 @@ def projected_clear(
     depth = minimum_waves(frame, target_folds=target_folds)
     newest = crawl_waves(frame[frame["label_observable"]]).max()
     spacing = depth["spacing"]
+    accrual = accrual_status(frame, now=now)
 
     def date_for(shortfall: int) -> pd.Timestamp | None:
-        return None if shortfall == 0 else newest + shortfall * spacing
+        # No date while the panel is stalled. `newest + shortfall × spacing` is
+        # arithmetic on an assumption that has stopped holding, and printing its
+        # answer would be the most confident-looking line in the report.
+        if shortfall == 0 or accrual["stalled"]:
+            return None
+        return newest + shortfall * spacing
 
     return {
         "newest_labelled_wave": newest,
@@ -574,10 +633,17 @@ def projected_clear(
         "folds_clear": date_for(int(depth["folds_shortfall"])),
         "folds_available": depth["folds_available"],
         "target_folds": depth["target_folds"],
+        "stalled": accrual["stalled"],
+        "newest_wave": accrual["newest_wave"],
+        "wave_age": accrual["age"],
     }
 
 
-def depth_report(frame: pd.DataFrame, target_folds: int = DEFAULT_TARGET_FOLDS) -> str:
+def depth_report(
+    frame: pd.DataFrame,
+    target_folds: int = DEFAULT_TARGET_FOLDS,
+    now: pd.Timestamp | None = None,
+) -> str:
     """`minimum_waves` as a sentence, for a report that has to explain a wait.
 
     Two sentences, because there are two waits and conflating them is how a
@@ -609,7 +675,23 @@ def depth_report(frame: pd.DataFrame, target_folds: int = DEFAULT_TARGET_FOLDS) 
         f"losing a fold it was expected to win — need "
         f"{depth['needed_for_folds']} labelled wave(s), {fold_verdict}."
     )
-    return legality + " " + evaluability
+    accrual = accrual_status(frame, now=now)
+    if not accrual["stalled"]:
+        return legality + " " + evaluability
+
+    # The loudest line in the report, because it is the one that changes what to
+    # do. Everything above is a distance; this says the distance is not closing.
+    missed = accrual["waves_missed"]
+    stall = (
+        f" **THE PANEL IS NOT ACCRUING.** The newest crawl is "
+        f"{accrual['newest_wave']:%Y-%m-%d %H:%M}Z, {accrual['age'].days} day(s) old against a "
+        f"cadence of {accrual['spacing']}; about {missed} wave(s) have not arrived. Every "
+        "shortfall above is therefore a distance that is not closing, and no date is "
+        "projected — `newest + shortfall x spacing` is arithmetic on an assumption that has "
+        "stopped holding. Check the collector, and the path from it to this panel, before "
+        "waiting another day — a collector that runs but no longer feeds the panel looks the same."
+    )
+    return legality + " " + evaluability + stall
 
 
 #: How the waves that survive the embargo are meant to be shared out. Not a

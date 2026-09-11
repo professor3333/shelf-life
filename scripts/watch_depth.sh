@@ -19,6 +19,7 @@
 # the fold evidence that has just become available for the first time.
 #
 # Exit codes: 0 the fold gate is open · 3 still accruing · 4 no legal split yet ·
+# 5 the panel has stopped accruing and the wait is not running down ·
 # anything else, a step failed.
 
 set -euo pipefail
@@ -99,7 +100,17 @@ print("FOLDS", depth["folds_available"], sep="\t")
 print("SHORTFALL", depth["folds_shortfall"], sep="\t")
 print("USABLE_CUTS", usable, sep="\t")
 print("VAL_POS", val_positives, sep="\t")
-print("CLEARS", "open" if ahead["folds_clear"] is None else ahead["folds_clear"].date(), sep="\t")
+# Three states, not two. `folds_clear` is None both when the gate is already
+# open and when the panel has stopped accruing, and collapsing those to "open"
+# would print the most reassuring word available on the day the collector died.
+if ahead["stalled"]:
+    clears = "stalled"
+elif ahead["folds_clear"] is None:
+    clears = "open"
+else:
+    clears = ahead["folds_clear"].date()
+print("CLEARS", clears, sep="\t")
+print("STALLED", int(bool(ahead["stalled"])), sep="\t")
 PY
 )
 STATUS=$?
@@ -114,6 +125,7 @@ SHORTFALL=$(field SHORTFALL)
 USABLE=$(field USABLE_CUTS)
 VAL_POS=$(field VAL_POS)
 CLEARS=$(field CLEARS)
+STALLED=$(field STALLED)
 STAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 mkdir -p "$(dirname "${LOG}")"
@@ -142,6 +154,20 @@ if [ "${CHANGED}" -eq 1 ]; then
   else
     echo "  positives      : ${VAL_POS} in validation"
   fi
+fi
+
+# Checked before the depth gates, because a stall makes every one of them a
+# distance that is not closing. Reporting "still accruing, 18 more waves" on a
+# panel whose collector stopped two days ago is the failure this exists to end:
+# the line is identical to a healthy day, so nobody looks.
+if [ "${STALLED}" -eq 1 ]; then
+  echo
+  echo "== THE PANEL IS NOT ACCRUING — the wait is not running down."
+  echo "Check the collector, and the path from it to this panel: the newest wave here is older"
+  echo "than twice the observed cadence. A collector that is running but whose output no longer"
+  echo "reaches the panel looks identical to one that has stopped."
+  echo "Every shortfall above is a distance that is not closing, and no date is projected."
+  exit 5
 fi
 
 if [ "${USABLE}" -eq 0 ]; then
