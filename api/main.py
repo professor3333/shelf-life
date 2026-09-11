@@ -190,8 +190,9 @@ def create_app(artifact: Path | str | None = None) -> FastAPI:
     def predict(posting: PostingRequest) -> PredictionResponse:
         """Score one posting.
 
-        The probability is the chance the posting leaves the board within the
-        horizon named in the response — **not** the chance it is filled.
+        The probability is the chance the posting is removed from the board
+        within the horizon named in the response — **not** the chance it is
+        filled. The response says so itself, in `predicts`.
         """
         prediction = _predictor(app).predict(posting.payload(), t=posting.as_of)
         return PredictionResponse(**prediction.as_dict())

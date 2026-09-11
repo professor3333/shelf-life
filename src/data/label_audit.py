@@ -240,10 +240,10 @@ def lifespan_concentration(panel: pd.DataFrame) -> pd.DataFrame:
     )
     table = (
         labelled.groupby("seen in", observed=True)["y"]
-        .agg(rows="size", closures="sum", closure_rate="mean")
+        .agg(rows="size", removals="sum", removal_rate="mean")
         .reset_index()
     )
-    table["closure_rate"] = table["closure_rate"].round(4)
+    table["removal_rate"] = table["removal_rate"].round(4)
     return table
 
 
@@ -251,7 +251,7 @@ def lifespan_verdict(panel: pd.DataFrame) -> str:
     """Is the target measuring hiring, or the crawl's grip on a listing?"""
     labelled = panel[panel["label_observable"]].copy()
     if labelled.empty or labelled["y"].sum() == 0:
-        return "_No closures yet._"
+        return "_No removals yet._"
 
     first_seen = panel.groupby(["source", "source_id"])["run_index"].transform("min")
     labelled["n_obs"] = labelled["run_index"] - first_seen.loc[labelled.index] + 1
@@ -267,7 +267,7 @@ def lifespan_verdict(panel: pd.DataFrame) -> str:
     summary = (
         f"Postings seen in fewer than {SETTLED_OBSERVATIONS} complete runs are "
         f"{brief.shape[0] / labelled.shape[0]:.1%} of labelled rows and carry "
-        f"**{share:.1%} of all closures**: {brief_rate:.1%} against {settled_rate:.1%}, "
+        f"**{share:.1%} of all removals**: {brief_rate:.1%} against {settled_rate:.1%}, "
         f"a factor of {ratio:.0f}."
     )
     if ratio >= 10:
@@ -290,7 +290,7 @@ def lifespan_verdict(panel: pd.DataFrame) -> str:
             "that produces it does not switch on, it scales."
         )
     return (
-        f"{summary}\n\nFlat enough that closures are not concentrated on postings the "
+        f"{summary}\n\nFlat enough that removals are not concentrated on postings the "
         "crawl barely held, which is what this check exists to rule out."
     )
 
@@ -312,10 +312,10 @@ def _verdict(comparison: Comparison) -> str:
     if verdict == "below control":
         return (
             f"**below control** ({arithmetic}) — relisting is *less* common among "
-            "postings the label calls closed than among postings that stayed up"
+            "postings the label calls removed than among postings that stayed up"
         )
     return (
-        f"**elevated** ({arithmetic}) — relisting is more common among closed "
+        f"**elevated** ({arithmetic}) — relisting is more common among removed "
         "postings than among survivors, which is contamination of the target and "
         "wants a labelling rule rather than a caveat"
     )
@@ -349,18 +349,18 @@ def render(panel: pd.DataFrame, prov: provenance.Provenance | None = None) -> st
         "  distinguishable, by this project or by a human reading the dead URL**, and no",
         "  count of them appears in this file for that reason.",
         "",
-        f"## Relisting under a new posting id — {positives} closure(s)",
+        f"## Relisting under a new posting id — {positives} removal(s)",
         "",
         "If a posting disappears only to return under a new id, the label has recorded",
-        "a closure that did not happen. Every rate is therefore reported against the",
+        "a removal that did not happen. Every rate is therefore reported against the",
         "same rate among postings that *stayed up*, because a bare rate here cannot be",
-        "read at all: the first run of this audit found 4 of 100 closed postings",
+        "read at all: the first run of this audit found 4 of 100 removed postings",
         "relisted and took it for a 4% error rate in the target. Survivors relist at a",
         "similar rate, so the 4% measures how these boards behave rather than anything",
-        "about closure — and whether the two rates differ is a further question the",
+        "about removal — and whether the two rates differ is a further question the",
         "counts are not yet large enough to answer.",
         "",
-        "| identity | closed | control (still open) | reading |",
+        "| identity | removed | control (still up) | reading |",
         "|---|---|---|---|",
     ]
     for c in comparisons:
@@ -386,7 +386,7 @@ def render(panel: pd.DataFrame, prov: provenance.Provenance | None = None) -> st
         "is only called anything once it clears twice its standard error. Most will not,",
         "and *indistinguishable* is the honest majority verdict at this depth — it means",
         "the audit cannot see contamination of a few percent, not that there is none.",
-        "It sharpens as closures accumulate; the panel adds roughly 19 a day.",
+        "It sharpens as removals accumulate; the panel adds roughly 19 a day.",
         "",
         "## Board stability",
         "",
@@ -395,34 +395,35 @@ def render(panel: pd.DataFrame, prov: provenance.Provenance | None = None) -> st
         "",
         _table(stability, list(stability.columns)),
         "",
-        "## Closure dispersion",
+        "## Removal dispersion",
         "",
-        "Closures spread across sources and days are consistent with ordinary hiring.",
-        "A systems change would empty one board on one day.",
+        "Removals spread across sources and days are consistent with postings coming",
+        "down one at a time, for whatever reason each comes down. A systems change —",
+        "an ATS migration, a board tidied — would empty one board on one day.",
         "",
     ]
     lines.append(
         _table(dispersion, list(dispersion.columns))
         if not dispersion.empty
-        else "_No closures yet._"
+        else "_No removals yet._"
     )
     lines += [
         "",
-        "## Closures against observed lifespan",
+        "## Removals against observed lifespan",
         "",
         "A posting seen once and never again is indistinguishable, in the panel, from a",
         "posting filled the next morning: both are absent from two consecutive complete",
         "runs and never seen again. One is a hire, the other a crawl that briefly",
         "included a row it then stopped returning, and the label cannot tell them apart.",
         "",
-        _table(lifespan, list(lifespan.columns)) if not lifespan.empty else "_No closures yet._",
+        _table(lifespan, list(lifespan.columns)) if not lifespan.empty else "_No removals yet._",
         "",
         lifespan_verdict(panel),
         "",
         "## The external check — done",
         "",
         "Everything above measures the label against itself. The check it could not make",
-        "was whether a posting this file calls closed is actually gone, which needs the",
+        "was whether a posting this file calls removed is actually gone, which needs the",
         "board rather than the panel.",
         "",
         "That now exists: [`label_check.md`](label_check.md), written by",

@@ -551,8 +551,8 @@ a time-to-fill proxy that no single scrape can produce — the question
 
 | Error | Cost |
 |---|---|
-| Predicted "closing soon", actually stays open | a rushed application. Hours. |
-| Predicted "stays open", actually closes | a job never applied to. Unrecoverable. |
+| Predicted "removal soon", actually stays up | a rushed application. Hours. |
+| Predicted "stays up", actually removed | a job never applied to. Unrecoverable. |
 
 The costs are not symmetric and the second is worse, which argues for a
 **low threshold and a recall-leaning operating point.** It also argues against
@@ -567,6 +567,17 @@ it is filled, when the req is cancelled, when the board is tidied, or when the
 company reorganises its careers page. The model predicts an observable event,
 and the write-up must say so in exactly those words rather than quietly
 promoting it to "hired".
+
+**The word is *removal*, everywhere a reader meets the label** (decided
+2026-09-11). "Closed" was the working name and it drifts: "likely to close"
+reads as a job being filled, which is the one claim the label cannot support.
+So the README, the model card, the API response (`removal_flagged`, and a
+`predicts` field that spells the event out) and the UI headline all say
+*removed* / *removal* / *disappearance*. What has been verified against the
+boards is exactly that — 59 of 60 sampled removals are gone under their own
+id (`reports/label_check.md`) — and nothing beyond it. Should external outcome
+data ever exist (an ATS export, a hiring confirmation), a *filled* label would
+be a new target with its own definition here, not a relabelling of this one.
 
 ---
 

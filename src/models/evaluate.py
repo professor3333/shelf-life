@@ -301,7 +301,7 @@ def threshold_sweep(
 
     The threshold is a modelling decision, and a decision is only defensible
     against the alternatives. `docs/design.md` §5 fixed the cost asymmetry — a
-    false "closing soon" costs a rushed application measured in hours, a false
+    false "removal soon" costs a rushed application measured in hours, a false
     "stays open" costs a job never applied to, which is unrecoverable — so the
     operating point leans to recall, and twenty a day is the largest list a
     person will actually read. This table is what that choice was made against.
@@ -839,17 +839,18 @@ def _lifespan_caveat(panel: pd.DataFrame) -> list[str]:
     brief, settled = census[~settled_bucket], census[settled_bucket]
     if not brief["rows"].sum() or not settled["rows"].sum():
         return []
-    brief_rate = float(brief["closures"].sum()) / float(brief["rows"].sum())
-    settled_rate = float(settled["closures"].sum()) / float(settled["rows"].sum())
+    brief_rate = float(brief["removals"].sum()) / float(brief["rows"].sum())
+    settled_rate = float(settled["removals"].sum()) / float(settled["rows"].sum())
     if brief_rate < 10 * settled_rate:
         return []
-    share = float(brief["closures"].sum()) / max(float(census["closures"].sum()), 1.0)
+    share = float(brief["removals"].sum()) / max(float(census["removals"].sum()), 1.0)
 
     return [
         f"**Read all of the above against the label first.** Rows whose posting had been "
-        f"seen in fewer than {SETTLED_OBSERVATIONS} complete crawls as of their own `t` close "
-        f"at {brief_rate:.1%} against {settled_rate:.1%} for the rest, and carry {share:.0%} of "
-        "the closures — see [`label_validity.md`](label_validity.md). Any feature tracking how "
+        f"seen in fewer than {SETTLED_OBSERVATIONS} complete crawls as of their own `t` are "
+        f"removed at {brief_rate:.1%} against {settled_rate:.1%} for the rest, and carry "
+        f"{share:.0%} of "
+        "the removals — see [`label_validity.md`](label_validity.md). Any feature tracking how "
         "long a posting has been around will separate those rows, so a lead built on "
         "`age_days` is mostly a lead on *observed lifespan*.",
         "",

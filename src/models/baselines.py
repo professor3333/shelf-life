@@ -154,7 +154,7 @@ class SingleFeatureCeiling(RuleBaseline):
 
 
 def older_than_thirty_days(frame: pd.DataFrame) -> pd.Series:
-    """ "A posting that has been up more than a month is not about to close."
+    """ "A posting that has been up more than a month is not about to be removed."
 
     Stated as a hypothesis worth testing rather than as a fact: on the
     2026-09-07 panel it is false and slightly backwards, 1.30% against 1.14%.

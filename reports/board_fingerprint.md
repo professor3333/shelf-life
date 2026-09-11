@@ -6,7 +6,7 @@
 | Horizon | H=1 (calendar basis) — a pipeline smoke test, not the build's horizon |
 | Data | **real** · snapshot `2026-09-11` · `data/processed/features/job_days_h1_calendar.parquet` |
 | Panel | 12,675 rows · sha256 `3b25b9eb039c…` |
-| Code | `9a8023468` on `feature/board-fingerprint` (dirty tree) |
+| Code | `6fa799126` on `feature/say-removed-not-closed` (dirty tree) |
 
 _Regenerate rather than edit._
 
@@ -14,7 +14,7 @@ _Regenerate rather than edit._
 board it has never seen. This asks whether the identity left with the columns.
 A random forest is fitted on the **training block only** — the production
 `Pipeline`, same imputation and encoding, with the estimator's target swapped for
-`source` — and asked to name the board of every validation row. The closure
+`source` — and asked to name the board of every validation row. The removal
 label is not used: a fingerprint is a property of the feature matrix.
 
 ## The headline

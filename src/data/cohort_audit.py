@@ -286,18 +286,18 @@ def _cohort_verdict(table: pd.DataFrame) -> str:
         return "_Only one cohort is labelled at this depth; nothing to compare._"
     inc, stock = by.loc[INCIDENT], by.loc[INCUMBENT]
     if inc["positives"] == 0 and stock["positives"] == 0:
-        return "_No closures in either cohort yet._"
+        return "_No removals in either cohort yet._"
     ratio = inc["rate"] / stock["rate"] if stock["rate"] else float("inf")
     if ratio >= 10 or (inc["rate"] >= 0.9 and stock["rate"] <= 0.1):
         return (
-            f"**The label is not indifferent to cohort.** Incident rows close at "
+            f"**The label is not indifferent to cohort.** Incident rows are removed at "
             f"{inc['rate']:.1%} against {stock['rate']:.1%} for the stock, a factor of "
             f"{ratio:.0f}. Read the age tables below before believing any age-shaped "
             "feature: this is the signature of a label that keys on arrival, and on "
             "2026-09-11 it was a bug."
         )
     return (
-        f"Incident rows close at {inc['rate']:.1%} against {stock['rate']:.1%} for the "
+        f"Incident rows are removed at {inc['rate']:.1%} against {stock['rate']:.1%} for the "
         f"stock ({int(inc['rows']):,} against {int(stock['rows']):,} rows). Close enough that "
         "the label is not keying on which population a row came from — the condition under which "
         "the job-day formulation makes age a feature rather than an artefact."
@@ -451,7 +451,7 @@ def render(panel: pd.DataFrame, prov: provenance.Provenance | None = None) -> st
     lines += [
         "## What this file cannot tell you",
         "",
-        "Whether a closure is a hire. `reports/label_check.md` verifies that removals are",
+        "Whether a removal is a hire. `reports/label_check.md` verifies that removals are",
         "removals; nothing in the panel says why. And an incident cohort that is small —",
         "it is, at every depth this panel has reached — carries wide intervals on every",
         "rate above; a difference between cohorts that is inside those is not a finding.",
@@ -476,7 +476,7 @@ def main() -> None:  # pragma: no cover - thin CLI
     for cohort in (INCUMBENT, INCIDENT):
         if cohort in table.index:
             r = table.loc[cohort]
-            summary = f"{int(r['rows']):6,} rows  {int(r['positives']):4} closures  {r['rate']:.1%}"
+            summary = f"{int(r['rows']):6,} rows  {int(r['positives']):4} removals  {r['rate']:.1%}"
             print(f"{cohort:10} {summary}")
     print(f"wrote -> {args.out}")
 

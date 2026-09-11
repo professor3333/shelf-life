@@ -162,14 +162,14 @@ def verdict(prediction: dict) -> tuple[str, str]:
     """
     horizon = prediction["horizon_days"]
     days = "day" if horizon == 1 else "days"
-    if prediction["closing_soon"]:
-        headline = f"LIKELY TO CLOSE within {horizon} {days}"
+    if prediction["removal_flagged"]:
+        headline = f"LIKELY TO BE REMOVED from the board within {horizon} {days}"
         explanation = (
             f"The probability is at or above the threshold of "
             f"{prediction['threshold']:.3f}, so this posting is on the alert list."
         )
     else:
-        headline = f"NOT flagged as closing within {horizon} {days}"
+        headline = f"NOT flagged for removal within {horizon} {days}"
         explanation = (
             f"The probability is below the threshold of "
             f"{prediction['threshold']:.3f}, so this posting is not on the alert list."
@@ -180,9 +180,9 @@ def verdict(prediction: dict) -> tuple[str, str]:
 #: Shown under every result. Wording taken from the problem definition rather
 #: than paraphrased, because paraphrasing a caveat is how it gets softened.
 CAVEAT = (
-    '**"Closed" means removed from the board, which is not the same as filled.** '
-    "A posting can be pulled, expire, or be reposted elsewhere. The model predicts "
-    "disappearance, and no claim beyond that is supported by the label."
+    "**Removed from the board is not the same as filled.** A posting can be pulled, "
+    "expire, or be reposted elsewhere. The model predicts removal — disappearance from "
+    "the board it was seen on — and no claim beyond that is supported by the label."
 )
 
 

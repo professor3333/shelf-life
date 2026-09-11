@@ -119,16 +119,20 @@ class PredictionResponse(BaseModel):
     shallow to freeze against, that distinction is the difference between a
     number and a placeholder.
 
-    **What the probability is not.** It is the chance the posting *leaves the
-    board* within the horizon — not the chance it is filled. A posting can be
-    pulled, expire, or move. `docs/problem_definition.md` says so at greater
-    length and the README says it in plain words.
+    **What the probability is not.** It is the chance the posting is *removed
+    from the board* within the horizon — not the chance it is filled. A posting
+    can be pulled, expire, or move. `docs/problem_definition.md` says so at
+    greater length and the README says it in plain words — and `predicts` says
+    it in the response, because a caveat that lives only in documentation is
+    not read by client code. `removal_flagged` is the threshold decision: the
+    probability is at or above `threshold`, so the posting is on the alert list.
     """
 
     probability: float = Field(ge=0.0, le=1.0)
     threshold: float
-    closing_soon: bool
+    removal_flagged: bool
     horizon_days: int
+    predicts: str
     board_context_supplied: bool
     model: str
     dataset: str

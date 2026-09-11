@@ -86,7 +86,10 @@ def test_the_api_returns_the_pinned_probability(client):
 
 def test_the_response_carries_what_makes_a_probability_readable(client):
     body = client.post("/predict", json={**FIXED_POSTING, "as_of": FIXED_T}).json()
-    assert body["closing_soon"] == (body["probability"] >= body["threshold"])
+    assert body["removal_flagged"] == (body["probability"] >= body["threshold"])
+    # The response names what it predicts, so a client cannot read "filled" into it.
+    assert body["predicts"].startswith("removal from the board within")
+    assert "not filled" in body["predicts"]
     assert body["horizon_days"] == 1
     assert body["board_context_supplied"] is False
     assert body["model"] == FROZEN_RUN

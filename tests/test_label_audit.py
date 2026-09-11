@@ -278,6 +278,6 @@ def test_lifetime_is_not_the_denominator():
     for i in range(6):
         rows += [_row(f"p{i}", wave, y=1 if (wave == 7 and i == 0) else 0) for wave in range(8)]
     table = lifespan_concentration(_panel(rows)).set_index("seen in")
-    assert table.loc["1 run", "closures"] == 0
-    assert table.loc["6+ runs", "closures"] == 1
+    assert table.loc["1 run", "removals"] == 0
+    assert table.loc["6+ runs", "removals"] == 1
     assert "Flat enough" in lifespan_verdict(_panel(rows))
