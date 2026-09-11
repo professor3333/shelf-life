@@ -228,9 +228,16 @@ Let `t` be a prediction point, `H = 7` days, and let a *complete run* mean
 
 Define `t_gone(j)` — the removal time of posting `j`:
 
-> the start time of the earliest complete run in which `j` was absent, such
-> that `j` was also absent from the next complete run and never re-appeared.
-> Undefined if no such pair exists.
+> the start time of the earliest complete run **after `j` was first seen** in
+> which `j` was absent, such that `j` was also absent from the next complete
+> run. Undefined if no such pair exists.
+
+Two clauses in that sentence have histories. *Never re-appeared* was dropped on
+2026-09-09 (`design.md` §11): a label is final at corroboration, whatever the
+posting does afterwards. *After `j` was first seen* was added on 2026-09-11,
+because without it the runs before a posting was listed count as absences,
+and two of them date its closure before its own first row — every row of every
+late-arriving posting became a positive (`DEBUGGING.md`, 2026-09-11).
 
 That is the project's `ABSENCE_CORROBORATION = 2` rule (the scraper's
 `schema.md`, "Guard 2"), imported unchanged. It is imported rather than relaxed because a

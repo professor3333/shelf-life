@@ -392,6 +392,32 @@ def test_the_scripts_pass_the_panel_to_every_step_they_run():
         assert '--panel "${PANEL}"' in line, f"{module} is run without --panel"
 
 
+# --- a posting cannot close before it is first seen --------------------------
+
+
+def test_absences_before_first_sight_are_not_a_closure():
+    """A posting that first appears at run 2 and stays to the end never closed.
+
+    `t_gone` scans run pairs for two consecutive absences. Runs 0 and 1 are
+    both "absent" for a posting the board had not listed yet, and reading
+    that pair as a closure dated the closure *before the posting existed*, so
+    every one of its rows fell inside every horizon and was labelled 1.
+    Postings first seen at run 1 escaped (run 0 absent, run 1 present), which
+    is why the damage split exactly on first-seen index >= 2. Measured on the
+    2026-09-11 panel: 671 of 785 positives at H=1, 633 of them on postings
+    still on the board on the last day."""
+    out = _panel({"stock": [0, 1, 2, 3, 4, 5], "late": [2, 3, 4, 5]}, runs=_runs(6))
+    late = out[out["source_id"] == "late"].sort_values("run_index")
+    assert late["label_observable"].tolist() == [True, True, True, False]
+    assert late["y"].dropna().tolist() == [0, 0, 0]
+
+    # And a genuine closure after a late arrival still counts: seen at 2-3,
+    # absent at 4 and 5 -> gone at run 4, so the row at run 3 is a positive.
+    out = _panel({"stock": [0, 1, 2, 3, 4, 5], "brief": [2, 3]}, runs=_runs(6))
+    brief = out[out["source_id"] == "brief"].sort_values("run_index")
+    assert brief["y"].tolist() == [0, 1]
+
+
 # --- the database is ahead of the log ----------------------------------------
 
 
