@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import json
 import os
 import plistlib
 import re
@@ -419,6 +420,46 @@ def test_the_smoke_test_asks_for_fields_the_api_actually_returns() -> None:
     )
     # The decision and the caveat are the two that make a score an answer.
     assert {"removal_flagged", "predicts", "threshold"} <= required
+
+
+def test_the_smoke_test_exercises_rank_the_way_an_operator_would() -> None:
+    """`/rank` is the call the product is built around (§15), and until
+    2026-09-11 the deployed smoke test never made it — a deployment where
+    `/predict` answered and `/rank` did not would have passed.
+
+    Structural: the script posts a multi-posting batch with a budget, twice,
+    and its checks name the properties an operator relies on. The field names
+    it reads are the API's, for the reason `closing_soon` taught.
+    """
+    from api.schemas import RankedPosting, RankResponse
+
+    smoke = (ROOT / "scripts" / "smoke.sh").read_text()
+    assert '"${BASE_URL}/rank"' in smoke, "the smoke test never calls /rank"
+    assert "for pass in 1 2" in smoke, "determinism needs the same batch sent twice"
+    body = re.search(r"cat <<'JSON'\n(.*?)^JSON$", smoke, re.DOTALL | re.MULTILINE)
+    assert body, "no rank_body heredoc"
+    batch = json.loads(body.group(1))
+    assert len(batch["postings"]) >= 3 and batch["budget"] < len(batch["postings"]), (
+        "the batch must be larger than its budget for the budget to be tested"
+    )
+
+    start = smoke.index("rank returned an unusable ranking")
+    check = smoke[start : smoke.index('echo "ok  /rank"')]
+    for property_ in (
+        "len(postings) != 5",  # correct count
+        "0.0 <= p <= 1.0",  # scores valid
+        "permutation",  # ranks
+        "not descending",  # order
+        "watch ranks 1 and 2 and nothing else",  # budget respected
+        "not deterministic",  # same batch, same answer
+        "alone and",  # /rank agrees with /predict
+    ):
+        assert property_ in check, f"the /rank check no longer verifies: {property_}"
+
+    read = set(re.findall(r'(?:item|first|second)(?:\.get\(|\[)"(\w+)"', check))
+    known = set(RankResponse.model_fields) | set(RankedPosting.model_fields)
+    missing = read - known
+    assert not missing, f"smoke.sh reads {sorted(missing)} which /rank does not return"
 
 
 def test_the_ui_timeout_never_exceeds_the_cold_start_stop_rule() -> None:

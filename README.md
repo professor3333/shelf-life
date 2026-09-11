@@ -1490,11 +1490,13 @@ build leaves the previous revision serving. Putting the tag in a committed file
 rather than a platform dashboard means *which model is serving* is answerable
 from git history.
 
-**The verification refuses three things.** A deploy is only green if the URL is
+**The verification refuses four things.** A deploy is only green if the URL is
 serving the release the commit named — not the one it replaced, which is what an
 unwaited smoke test would happily confirm; if `/predict` returns a probability
 *with* the threshold it was compared against and a malformed payload still gets a
-422; and if the loaded model was **not** fitted on the synthetic fixture. That
+422; if `/rank` — the call the product is built around — ranks a five-posting
+board under a budget of two correctly, deterministically, and in agreement with
+`/predict`; and if the loaded model was **not** fitted on the synthetic fixture. That
 last check is why the placeholder currently in `models/` cannot reach a public
 URL by accident. Setup, release ritual, rollback and teardown:
 [`docs/deploy.md`](docs/deploy.md).
