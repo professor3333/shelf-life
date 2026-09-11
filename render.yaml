@@ -62,5 +62,6 @@ services:
         - reports/**
         - learning_log/**
         - README.md
+        - MODEL_CARD.md
         - DEBUGGING.md
         - .devcontainer/**
