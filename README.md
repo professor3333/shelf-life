@@ -42,17 +42,37 @@ the posting left, the role did not. [`reports/label_check.md`](reports/label_che
 > `/predict` returns 503, because `MODEL_TAG` names no release yet. That is the
 > intended state, not an outage: see [Deployment](#deployment).
 >
-> **The measured 7-day base rate is 7.76%** (2026-09-09, 174 removals in 2,242
-> settled job-days) — replacing the 11.3% that a constant-hazard extrapolation
-> had planned for. **No model has been fitted at H = 7 yet**: the horizon needs
-> 20 labelled crawl waves for an honest three-way split and there are 2, so
-> `reports/test_results.md` records the refusal rather than a number.
-> `scripts/watch_depth.sh` reports the shortfall daily.
+> **No model has been fitted at H = 7 yet.** An honest three-way split needs
+> more labelled crawl waves than the panel has, and choosing a model needs more
+> still. [`reports/readiness.md`](reports/readiness.md) says how many, how far
+> off, whether the panel is still accruing, and the projected dates;
+> [`reports/test_results.md`](reports/test_results.md) records the refusal
+> rather than a number. `scripts/watch_depth.sh` re-measures both daily.
 > [Why, and when it clears](#why-there-is-no-test-number-yet).
 >
 > The ladder *has* run end to end on the real panel at H = 1, the pipeline smoke
-> test, where nothing separates from the base rate. Those numbers describe the
-> smoke test and are labelled as such wherever they appear.
+> test, where nothing separates from the base rate
+> ([`reports/model_comparison.md`](reports/model_comparison.md)). Those numbers
+> describe the smoke test and are labelled as such wherever they appear.
+
+**Where the numbers live.** The scraper runs daily, so every count, rate and
+date in this project moves. The generated reports under `reports/` are the
+authoritative values — each names the command that writes it and the snapshot
+it describes — and this README links to them rather than restating them:
+
+| question | report |
+|---|---|
+| Is the H=7 model ready; how far off; is the panel accruing | [`readiness.md`](reports/readiness.md) |
+| The base rate, the label's stability, relisting, removals against lifespan | [`label_validity.md`](reports/label_validity.md) |
+| Are removals real removals (checked against the boards) | [`label_check.md`](reports/label_check.md) |
+| Does the label treat the initial stock and new arrivals alike | [`cohort_audit.md`](reports/cohort_audit.md) |
+| Can the features name the board without `source` | [`board_fingerprint.md`](reports/board_fingerprint.md) |
+| The ladder, folds, threshold, calibration, per-board and transfer | [`model_comparison.md`](reports/model_comparison.md) |
+| The held-out result, or the refusal to produce one | [`test_results.md`](reports/test_results.md) |
+| Every run that has ever been kept | [`depth_ledger.md`](reports/depth_ledger.md) |
+
+Where a number in this README carries a date, it is the value on that date and
+is kept as the record of a decision, not as the current state.
 
 ---
 
@@ -243,7 +263,7 @@ Eight steps, in the order they were done. Each links to its detail below.
 | # | Step | The discipline that makes it honest |
 |---|---|---|
 | 1 | **Pin a snapshot** | The scraper runs daily, so "the data" moves. Every experiment reads a dated, hashed copy — never the live database. |
-| 2 | **Define the label once, in code** | Two consecutive absences, never reappearing; unobservable outcomes dropped rather than called negative. Sources whose crawls were truncated carry no label at all. |
+| 2 | **Define the label once, in code** | Two consecutive absences, final at that moment even if the posting later returns (`docs/design.md` §11); unobservable outcomes dropped rather than called negative. Sources whose crawls were truncated carry no label at all. |
 | 3 | **Assemble a job-day panel** | One row per (posting, complete crawl), every feature sealed at `t`. |
 | 4 | **Audit before modelling** | A written verdict for all 44 columns, enforced by a test — a column with no verdict raises rather than being silently used. |
 | 5 | **Split on time, with an embargo** | A strip wide enough that no training label was computed from the evaluation period. |
@@ -300,14 +320,20 @@ discrete-time hazard models; `docs/design.md` §8 records why it was chosen over
 one row per posting.)
 
 The label is positive when the posting is absent from a complete run and still
-absent from the run after it, and never reappears. Two consecutive absences
-rather than one, because a single missed crawl is as likely to be a hiccup as a
-removal.
+absent from the run after it. Two consecutive absences rather than one, because
+a single missed crawl is as likely to be a hiccup as a removal — and **the label
+is final at that moment**: a posting that returns after two absent runs keeps
+it. That bound is what makes the embargo's arithmetic true, and it costs one
+posting in 1,530 (`docs/design.md` §11, decided 2026-09-09). The scan for those
+absences starts at the posting's first sighting, not at the panel's first run —
+the runs before a posting existed are not absences (`DEBUGGING.md`, 2026-09-11).
 
 **Rows whose outcome is not yet observable are dropped, not labelled zero.** A
 posting first seen yesterday has not had time to be removed; calling that a negative
 teaches the model that recent means open, which is a labelling bug that produces
-a beautiful score. 1,166 of 8,040 job-days are dropped for this reason.
+a beautiful score. `python -m src.features.assemble` prints how many rows are
+dropped for this reason on every build; the dated table under
+[The data](#the-data) shows one snapshot's figures.
 
 ### The prediction point
 
@@ -544,9 +570,11 @@ budget — a list of 500 alerts nobody reads has perfect recall and zero value.
 ## Why there is no test number yet
 
 **At H = 7, the horizon this build is about**, an honest three-way split needs
-**20** labelled crawl waves and the panel has **2**. The first cohort settled on
-2026-09-09 and gave the base rate above; depth for a split arrives 2026-09-19,
-and depth to *choose* a model on 2026-09-30.
+more labelled crawl waves than the panel has, and a model *choice* needs more
+still — the two gates are not the same day. The counts, the shortfall and the
+projected dates are measured, not planned, and they move: a missed crawl widens
+the embargo for the whole panel and pushes both later.
+[`reports/readiness.md`](reports/readiness.md) is the current answer.
 
 At H = 1 — the pipeline smoke test, and `docs/design.md` §2 calls it that — the
 same arithmetic needs eight waves, the panel reached eight on 2026-09-09, and
@@ -601,18 +629,16 @@ only irreversible step, waved it through.
 `selection_folds`, so a served probability whose model was chosen by nothing can
 say so at the endpoint.
 
-**What the first real run found.** The ladder ran on the real panel for the first
-time on 2026-09-09, on validation only, 22 positives, no error bars:
-
-| | validation PR-AUC |
-|---|---|
-| base rate, and `prior` | 0.0190 |
-| `age_ceiling` — the ceiling on any age-only rule | 0.0229 |
-| `xgboost`, every allowed feature | 0.0226 |
-
-Nothing separates from the base rate, and the best rule an age column could
-support matches gradient boosting with the whole feature set. Whether that
-survives fold variance is exactly what the missing folds would say, which is why
+**What the real runs have found.** The ladder first ran on the real panel on
+2026-09-09, on validation only, with no error bars, and nothing separated from
+the base rate. The label bug of 2026-09-11 (`DEBUGGING.md`) landed the same
+day, so the run that stands is the one on the corrected label —
+[`reports/model_comparison.md`](reports/model_comparison.md), which is
+regenerated by `scripts/rehearse.sh` and carries the current table. Its
+reading has not changed: nothing separates from the base rate, and the best
+rule an age column could support matches gradient boosting with the whole
+feature set. Whether that survives fold variance is exactly what the missing
+folds would say, which is why
 `reports/model_comparison.md` records **no verdict**: with nothing to select on,
 naming a winner would be selection on the validation block.
 
@@ -781,16 +807,16 @@ that mixed them with real ones would be worse than no history.
 
 ### The two gates, and they are not the same day
 
-At **H = 7**, the horizon this build is about:
-
-| | labelled waves | date | what it unlocks |
-|---|---|---|---|
-| **A legal split** | **20** | 2026-09-19 | the rehearsal runs: real numbers, **no error bars** |
-| **Three rolling-origin folds** | **31** | 2026-09-30 | a comparison that can be believed, and §12 can close |
-
-Nine waves burn at each boundary rather than three, because the embargo is the
-horizon plus the widest observed run gap — 8d10h against daily crawls. The H=1
-figures are 8 and 13 on the same arithmetic, and H=1 is a smoke test.
+At **H = 7**, the horizon this build is about, the first gate is **a legal
+split** — the rehearsal runs, with real numbers and **no error bars** — and the
+second, days later, is **three rolling-origin folds** — a comparison that can be
+believed, and §12 can close. The labelled-wave count each needs, the shortfall,
+and the projected dates are in
+[`reports/readiness.md`](reports/readiness.md), regenerated by every watch;
+they move because the embargo is the horizon plus the widest observed run gap,
+so one late crawl widens it for the whole panel. Roughly nine waves burn at
+each boundary at H=7 against daily crawls, rather than three at H=1 — and H=1 is
+a smoke test.
 
 Eight rather than seven: a removal needs corroboration at two consecutive later
 runs, so the newest labelled wave structurally cannot hold a positive and a
@@ -1242,9 +1268,10 @@ Branch per unit of work, PR per feature, and the suite green before either.
 Generated files under `reports/` name the command that writes them; regenerate
 rather than edit. `docs/design.md` records every decision with a date, the
 reasoning, the measurement behind it and what would change my mind. As of
-2026-09-09 none is open: the last three — board identity, the resurrection
-window, and board context at serve time — were closed on measurements from the
-2026-09-08 snapshot, and each carries the trigger that would reopen it.
+2026-09-11 none is open. Board identity, the resurrection window and board
+context at serve time were settled on the 2026-09-08 snapshot; what the product
+scores (§15) and board *availability* patterns (§4a) on 2026-09-11 — and each
+carries the trigger that would reopen it.
 
 ---
 

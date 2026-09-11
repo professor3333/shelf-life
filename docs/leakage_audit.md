@@ -202,7 +202,9 @@ modelling — `salary_raw`. None of them is dangerous. Together they are a fifth
 of the matrix, and a wide matrix is where a leak hides.
 
 **4. The label's forward reach is not bounded, so no embargo fully seals it.**
-`t_gone` requires that a posting *never re-appeared*, and that clause reads the
+*(Resolved 2026-09-09: `design.md` §11 bounds the window at two runs and drops
+the clause; kept as written because it is the finding that forced the
+decision.)* `t_gone` required that a posting *never re-appeared*, and that clause read the
 whole remaining panel rather than a fixed window. `greenhouse:gitlab 8615319002`
 was present at runs [0, 3, 4]: two consecutive absences — enough to satisfy the
 corroboration guard — and then it returned, flipping a run-0 label from 1 to 0

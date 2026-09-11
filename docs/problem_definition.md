@@ -323,10 +323,13 @@ the ~24 hours between two runs. At a 7-day horizon a ±1-day boundary error
 affects only postings removed within a day of `t + H`; at H=1 it is most of the
 signal, which is the second reason H=1 is not the primary horizon.
 
-**Reappearance.** A posting can vanish and return. Across all complete runs
-this happened to **2 postings out of 1,240** (0.16%). Small enough to accept,
-large enough that `t_gone` is defined with "never re-appeared" in it rather
-than being defined on the first absence.
+**Reappearance.** A posting can vanish and return. On the 2026-09-04 panel
+this happened to 2 postings out of 1,240; by 2026-09-08, 145 of 1,530 — 144 of
+them after a *single* absent run, which the two-run corroboration already
+absorbs, and one after two. "Never re-appeared" was therefore dropped from
+`t_gone` on 2026-09-09: the label is final at corroboration, the one posting
+in 1,530 is mislabelled on purpose, and the embargo's arithmetic becomes true
+(`design.md` §11).
 
 ### One operational rule that follows
 
@@ -637,8 +640,8 @@ and a per-posting lifetime is therefore unobservable at both ends.
 **What are we predicting?**
 A binary outcome: whether that posting is **absent from the board within 7 days
 of that observation**, where absence means missing from two consecutive
-complete runs and never returning. Not whether it was filled — whether it came
-down. Rows whose 7-day window has not fully elapsed are dropped, never labelled
+complete runs — final at that moment, whatever happens later. Not whether it
+was filled — whether it came down. Rows whose 7-day window has not fully elapsed are dropped, never labelled
 0.
 
 **When is the prediction made?**
