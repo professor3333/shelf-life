@@ -804,6 +804,43 @@ public URL. **The Render architecture is provisional until `reports/cold_start.m
 exists with a `DEFINITIVE` verdict of `ACCEPTED`.** A README sentence quoting a
 figure is not that file.
 
+### The baseline, re-measured 2026-09-11 — and what it caught
+
+The protocol's first run, three cycles against the live model-less service
+after the lock (#72) and the runtime fields (#74) had deployed
+(`reports/cold_start_baseline.md`):
+
+| cycle | cold `/health` | ready after (inside) | peak RSS |
+|---|---|---|---|
+| 1 | 62.83 s | 42.21 s | 212 MB |
+| 2 | 72.39 s | 46.39 s | 206 MB |
+| 3 | 64.42 s | 38.54 s | 212 MB |
+
+**Twice the 2026-09-06 baseline.** The decomposition said where: the process
+itself took 38–46 s to become ready — interpreter and imports, no artifact —
+against a whole cold start of 32.65 s five days earlier. Platform wake, the
+difference, was 20–26 s and unchanged in kind. So the regression was in the
+image, and the image had changed once: the switch from pip to uv. **pip
+compiles bytecode at install time by default; uv does not.** Every cold start
+was compiling scikit-learn, XGBoost, pandas and FastAPI to bytecode in memory
+on a tenth of a CPU — and throwing it away, since the process cannot write to
+site-packages. Confirmed locally under a hard `--cpus 0.1` quota: the same
+imports take **341 s** from source and **177 s** from `.pyc`.
+
+Fixed with one line, `UV_COMPILE_BYTECODE=1`, pinned by a test, and the
+baseline is to be re-run after it deploys. Two things worth saying about it:
+
+- **The estimate would have been wrong by the whole margin.** 58 s was the
+  baseline plus the locally measured load cost. On the regressed image the
+  same arithmetic gives 72 + 25 ≈ 97 s — over the criterion — and nothing
+  short of the measurement would have said so. This is the case §7e says a
+  baseline *can* decide, and it nearly did.
+- **The decomposition is what made it a diagnosis instead of a number.** A
+  cold `/health` of 72 s alone says "slower"; 46 s of it inside the process
+  before any artifact says "imports", which says "bytecode", which says
+  "uv". The three `/health` fields cost nothing and turned an hour of
+  guessing into a `grep`.
+
 ### 7e-ii. The omitted work, measured on its own — **2026-09-10**
 
 The `nothing` in the table above is what this subsection exists to attack. The

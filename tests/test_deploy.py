@@ -247,6 +247,17 @@ def test_every_environment_installs_from_the_lock() -> None:
     )
 
 
+def test_the_image_precompiles_bytecode() -> None:
+    """uv does not compile `.pyc` at install; pip did. On 0.1 of a CPU the
+    difference is the cold start: 341 s of imports against 177 s, measured
+    locally under a hard quota on 2026-09-11, and 64–72 s against 32.65 s on
+    the real instance. The setting is one line and this is what keeps it."""
+    dockerfile = DOCKERFILE.read_text()
+    assert re.search(r"^\s*UV_COMPILE_BYTECODE=1", dockerfile, re.MULTILINE), (
+        "the image must compile bytecode at install, or every cold start compiles it"
+    )
+
+
 def test_the_image_refuses_an_artifact_from_a_different_library() -> None:
     """The build-time load turns `load()`'s version warning into a failure.
 

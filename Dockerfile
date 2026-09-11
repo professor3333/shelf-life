@@ -22,18 +22,28 @@
 
 FROM python:3.12-slim
 
-# Bytecode files and buffered stdout both cost more than they are worth in a
-# container: the first is written to a layer nobody reads, the second hides the
-# logs of a process that just died.
+# Buffered stdout hides the logs of a process that just died, so it is off.
 #
-# The uv settings make the install a function of `uv.lock` and nothing else:
-# the environment lands at a fixed path, from the image's own interpreter (no
-# managed-Python download), with no cache left in a layer.
+# Bytecode is the cold start. On a tenth of a CPU, importing scikit-learn,
+# XGBoost, pandas and FastAPI from source — compiling every module to bytecode
+# in memory, every start, because the process cannot write it back — takes
+# about twice as long as importing precompiled `.pyc` files. pip compiled them
+# at install time by default; uv does not, and the switch to uv (2026-09-11)
+# doubled the measured cold start from 32.65 s to 64–72 s before anyone
+# looked (`reports/cold_start_baseline.md`, `DEBUGGING.md`). So uv is told to
+# compile at install — the one moment the environment is writable — and the
+# runtime is told not to try: `.pyc` files exist, and the process runs as a
+# user who could not write them anyway.
+#
+# The other uv settings make the install a function of `uv.lock` and nothing
+# else: the environment lands at a fixed path, from the image's own
+# interpreter (no managed-Python download), with no cache left in a layer.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_PROJECT_ENVIRONMENT=/app/.venv \
     UV_PYTHON_DOWNLOADS=never \
-    UV_NO_CACHE=1
+    UV_NO_CACHE=1 \
+    UV_COMPILE_BYTECODE=1
 
 # The installer, pinned to the version that wrote the lock. Installing it with
 # pip would fetch whatever uv was newest that day, which is the one unpinned
