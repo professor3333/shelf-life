@@ -1,7 +1,8 @@
 # Shelf-life model card
 
 **Status: awaiting final H=7 selection — no released model.** Reviewed
-2026-09-11. This is the release summary to complete after selection; pending
+2026-09-11; the [README's model card](README.md#model-card) is the short form
+of this one and the two say the same thing or one of them is wrong. This is the release summary to complete after selection; pending
 fields are unavailable evidence, not zero scores. The current comparison is an
 H=1 rehearsal, and both local model sidecars identify synthetic H=1 artifacts.
 Neither supplies final seven-day results. `MODEL_TAG` has no release value.
@@ -85,7 +86,7 @@ directly to the estimator. See the [feature audit](docs/leakage_audit.md) and
 | Temporal policy | Earliest train, middle validation, latest test; never random rows. `best_cuts` prefers three rolling-origin folds within train, then approximately 60/20/20 of retained waves after embargoes. This simulates training on past boards and scoring later observations. |
 | Posting overlap | The implemented job-day split permits the same posting at different times across blocks, a deliberate departure recorded in [design §8](docs/design.md#8-the-split--decided-2026-09-04). It does not guarantee disjoint posting IDs; report carried-over versus unseen-in-training performance separately. |
 | Embargo | At each boundary: `H days + largest observed within-source complete-run gap`, for one corroborating run. On this snapshot: **9 days 13:43:51.653374**, discarding 10 crawl waves per boundary. Recompute and record it for the final snapshot. |
-| Current depth | Five labelled waves; zero legal cuts and zero folds. Current depth requirements are 22 labelled waves for a legal split and 34 for three folds, not promised dates. |
+| Current depth | On 2026-09-11: five labelled waves, zero legal cuts, zero folds, against 22 labelled waves for a legal split and 34 for three folds. The live figure is [readiness](reports/readiness.md); this row is the reviewed one and is not updated by hand. |
 | Selected threshold | Pending. Default policy selects the validation score at rank `min(validation rows, 20 × prediction days)` and freezes it with the fitted pipeline. |
 | Budget behaviour | `probability >= threshold` includes ties and need not yield exactly 20 alerts on a later day. `/rank` with an explicit budget selects exactly the requested top count, capped at batch size, using input order to break ties; it reports `threshold_source=batch_budget`. Without that override, the frozen threshold applies. A batch rank cutoff is not a calibrated probability guarantee. |
 
