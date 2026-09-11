@@ -491,6 +491,49 @@ def test_the_cold_start_script_cannot_accept_without_a_model() -> None:
     )
 
 
+def test_the_cold_start_script_cannot_accept_a_synthetic_model() -> None:
+    """A model that loads is not yet the model that ships.
+
+    The rehearsal release carries a synthetic artifact, and its cold start is
+    worth taking — the unpickle runs for real — but the criterion is about the
+    artifact the public URL will serve. The script must file such a run as a
+    rehearsal and return before the acceptance verdict, the way it does for the
+    model-less baseline.
+    """
+    script = (ROOT / "scripts" / "cold_start.sh").read_text()
+    assert "DATASET=$(health_field" in script, "the script no longer asks /health which panel"
+    rehearsal = script.index('if [ "${KIND}" = "REHEARSAL" ]')
+    accepted = script.index("ACCEPTED:")
+    assert rehearsal < accepted
+    assert "exit 0" in script[rehearsal:accepted]
+    assert "does NOT accept" in script[rehearsal:accepted]
+
+
+def test_the_cold_start_script_produces_every_row_of_the_protocol() -> None:
+    """`docs/design.md` §7e lists what the definitive measurement must contain.
+
+    Each row maps to something the script does: times `/rank` as well as
+    `/predict`, repeats, reads the process's own cost from `/health`, and
+    writes a report. Checked structurally, because the only run that matters
+    happens once, on the day, against a service this suite cannot reach.
+    """
+    from api.schemas import HealthResponse
+
+    script = (ROOT / "scripts" / "cold_start.sh").read_text()
+    assert '"${BASE_URL}/rank"' in script, "the first /rank is not timed"
+    assert '"${BASE_URL}/predict"' in script
+    assert 'REPEATS="${REPEATS:-' in script and "for cycle in" in script, "no repeats"
+    assert "reports/cold_start.md" in script, "the definitive run writes no report"
+    for other in ("reports/cold_start_baseline.md", "reports/cold_start_rehearsal.md"):
+        assert other in script, f"a non-definitive run must be filed apart, in {other}"
+
+    # The fields it reads off /health are ones /health returns.
+    read = set(re.findall(r'health_field "\$\{WORK\}/\w+\.json" (\w+)', script))
+    assert {"ready_after_seconds", "load_seconds", "rss_mb", "dataset", "model_loaded"} <= read
+    missing = read - set(HealthResponse.model_fields)
+    assert not missing, f"cold_start.sh reads {sorted(missing)} which /health does not return"
+
+
 def _artifact_cost_script() -> str:
     return (ROOT / "scripts" / "artifact_cost.sh").read_text()
 

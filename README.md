@@ -853,6 +853,7 @@ echo artifact-<date> > MODEL_TAG && git push   # committing the tag is the deplo
 ./scripts/smoke.sh <url>
 
 ./scripts/cold_start.sh <url> 16               # the gate that can fail — see below
+                                               # (three cycles; writes reports/cold_start.md)
 ```
 
 The blank lines are the point. Data, then modelling — which touches
@@ -871,7 +872,10 @@ the rule is *reassess the architecture, do not raise the timeout*.
 
 The baseline is 32.65 s on the no-artifact image, and it is a floor rather than
 an estimate — whatever unpickling the pipeline costs on 0.1 vCPU is exactly the
-part an image with no model could not measure.
+part an image with no model could not measure. What the definitive run has to
+contain — real artifact, first `/predict` and `/rank`, the unpickle and memory
+from inside the process, repeated cycles, the criterion — is a table in
+`docs/design.md` §7e, and the script produces every row of it.
 
 The last two lines are the whole of the deployment, because the path around them
 already exists: [`docs/deploy.md`](docs/deploy.md) has the one-time cloud setup,
@@ -1538,7 +1542,10 @@ only one also unpickles a pipeline. Adding that difference to the remote baselin
 is pessimistic by construction, because the slower of the two CPUs is the one
 that produced the 25.18 s.
 
-The honest reading of **57.83 s against 90 s** is deliberately narrow. It does not
+The honest reading of **57.83 s against 90 s** is deliberately narrow. It is an
+estimate assembled from two measurements of different things on different
+machines, and the acceptance is one measurement of the right thing on the right
+one — `reports/cold_start.md`, which does not exist yet. It does not
 accept the architecture — nothing measured locally can, and the artifact in
 `models/` is the synthetic-fixture one, so its size is not the frozen model's
 size. What it buys is the removal of the largest unknown from the critical path
@@ -1583,7 +1590,14 @@ That measurement is deliberately **not** taken by CI, which runs right after a
 rebuild when the service is warm. `scripts/cold_start.sh` waits out the idle
 window first and prints the cold and warm figures side by side, because the
 difference between them is the cost, and the absolute figure alone hides how much
-of it is just scoring a row.
+of it is just scoring a row. It repeats the cycle three times, times the first
+`/rank` as well as the first `/predict`, and prints beside the outside timing
+what `/health` says the process cost itself — `ready_after_seconds`,
+`load_seconds` for the unpickle alone, and peak `rss_mb` — so a slow number on
+the day arrives with its decomposition. Every cycle goes to
+`reports/cold_start.md`; the script files the run as a baseline, a rehearsal
+(synthetic model — the load path measured, nothing accepted) or the definitive
+measurement by asking `/health`, and only the last can print `ACCEPTED`.
 
 ---
 

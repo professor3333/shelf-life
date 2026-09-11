@@ -216,3 +216,14 @@ class HealthResponse(BaseModel):
     fitted_on: str | None = None
     created_at: str | None = None
     detail: str | None = None
+    #: What this process cost to become ready, measured by the process itself,
+    #: for `scripts/cold_start.sh` to print beside its outside timing. The
+    #: acceptance criterion is applied to the outside number only; these say
+    #: where it went. `load_seconds` is the unpickle — the term the no-artifact
+    #: baseline omits (`docs/design.md` §7e); `ready_after_seconds` is process
+    #: start to model ready, so the difference from `load_seconds` is the
+    #: interpreter and the imports; `rss_mb` is peak resident memory, against
+    #: the free instance's 512 MB.
+    load_seconds: float | None = None
+    ready_after_seconds: float | None = None
+    rss_mb: float | None = None

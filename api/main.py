@@ -39,10 +39,12 @@ from __future__ import annotations
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from time import perf_counter
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
+from api.runtime import process_age_seconds, rss_mb
 from api.schemas import (
     HealthResponse,
     PostingRequest,
@@ -116,12 +118,18 @@ def create_app(artifact: Path | str | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        # Timed, because the unpickle is the one cost of a cold start that the
+        # no-artifact baseline cannot see and the outside timing cannot isolate
+        # (`docs/design.md` §7e). `/health` reports both numbers.
+        started = perf_counter()
         try:
             app.state.predictor = Predictor.load(path)
             app.state.detail = None
         except (ArtifactError, OSError) as error:
             app.state.predictor = None
             app.state.detail = str(error)
+        app.state.load_seconds = perf_counter() - started
+        app.state.ready_after_seconds = process_age_seconds()
         yield
         app.state.predictor = None
 
@@ -164,6 +172,11 @@ def create_app(artifact: Path | str | None = None) -> FastAPI:
     def health() -> HealthResponse:
         """Is the process up, and does it have a model? Both, separately."""
         predictor = getattr(app.state, "predictor", None)
+        cost = {
+            "load_seconds": getattr(app.state, "load_seconds", None),
+            "ready_after_seconds": getattr(app.state, "ready_after_seconds", None),
+            "rss_mb": rss_mb(),
+        }
         if predictor is None:
             return HealthResponse(
                 status="degraded",
@@ -171,6 +184,7 @@ def create_app(artifact: Path | str | None = None) -> FastAPI:
                 artifact=str(app.state.artifact_path),
                 artifact_tag=artifact_tag(),
                 detail=getattr(app.state, "detail", None),
+                **cost,
             )
         metadata = predictor.metadata
         return HealthResponse(
@@ -178,6 +192,7 @@ def create_app(artifact: Path | str | None = None) -> FastAPI:
             model_loaded=True,
             artifact=str(app.state.artifact_path),
             artifact_tag=artifact_tag(),
+            **cost,
             model=metadata.run_name,
             dataset=metadata.dataset,
             horizon_days=metadata.horizon_days,

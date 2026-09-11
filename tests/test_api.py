@@ -60,6 +60,24 @@ def test_health_reports_the_loaded_model(client):
     assert 0.0 <= body["threshold"] <= 1.0
 
 
+def test_health_reports_what_the_process_cost(client, modelless_client):
+    """The three numbers `scripts/cold_start.sh` prints beside its outside timing.
+
+    `load_seconds` is the unpickle — the one term the no-artifact baseline
+    cannot measure; it is reported in both states so the model-less baseline
+    shows a near-zero load beside the definitive run's real one, rather than a
+    missing field that could be mistaken for "not measured".
+    """
+    body = client.get("/health").json()
+    assert body["load_seconds"] > 0.0
+    assert body["ready_after_seconds"] >= body["load_seconds"]
+    assert body["rss_mb"] > 10.0
+
+    empty = modelless_client.get("/health").json()
+    assert empty["load_seconds"] is not None and empty["load_seconds"] < body["load_seconds"] + 1
+    assert empty["rss_mb"] > 10.0
+
+
 def test_health_is_200_even_with_no_model(modelless_client):
     """Up-but-empty is a different fact from unreachable, and both are useful."""
     body = modelless_client.get("/health").json()
