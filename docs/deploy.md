@@ -176,6 +176,14 @@ carries the threshold it was compared against, a malformed payload still gets a
 the synthetic panel. `ALLOW_SYNTHETIC=1` overrides the last check for a
 deliberate rehearsal.
 
+It also makes the call an operator would actually make: `/rank` on a
+five-posting board with a budget of two, twice. Five come back, every score is
+a probability, the ranks are a permutation ordered by score, exactly two are
+watched and they are ranks 1 and 2, the applied threshold is the second score,
+the second call ranks identically, and the first posting — the one `/predict`
+just scored — gets the same probability through `/rank`. A deployment where
+`/predict` answered and `/rank` did not would otherwise have passed.
+
 ### Which model is actually serving
 
 ```bash

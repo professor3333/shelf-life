@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Is the thing that just deployed actually serving predictions?
 #
-#     ./scripts/smoke.sh https://shelf-life-xxxxx.europe-west1.run.app
+#     ./scripts/smoke.sh https://shelf-life-xxxx.onrender.com [expected-release-tag]
 #
-# `gcloud run deploy` succeeding means a container started and its port opened.
+# A platform reporting "deployed" means a container started and its port opened.
 # It does not mean a model loaded: the image builds and boots happily with no
 # artifact at all, answers /health with `model_loaded: false`, and returns 503
 # from /predict. That is deliberate behaviour (see the Dockerfile) and it is
@@ -127,6 +127,91 @@ print(f"  predicts: {body['predicts']}")
 print(f"  board context supplied: {body['board_context_supplied']}")
 PY
 echo "ok  /predict"
+
+# --- /rank, the shape the operating point was designed for -------------------
+#
+# Give the service a board, get back the postings most likely to be removed,
+# under a budget. This is the call an operator would actually make (README,
+# `docs/design.md` §15), so a deployment where /predict answers and /rank does
+# not is a deployment of the wrong endpoint. Checked, on five postings with a
+# budget of two: 200, five back, every score a probability, ranks a permutation
+# ordered by score, exactly two watched and they are ranks 1 and 2, the applied
+# threshold is the second score, the same batch ranks the same way twice, and
+# the first posting — the one /predict just scored — gets the same probability
+# through /rank as it did alone. The unit tests pin all of this against the
+# repository's artifact; this pins it against the one that is serving.
+rank_body() {
+  cat <<'JSON'
+{
+  "budget": 2,
+  "as_of": "2026-09-14T03:45:00Z",
+  "postings": [
+    {"title": "Senior Data Engineer", "location": "Berlin",
+     "salary_raw": "120000 - 160000 USD", "departments": "Eng", "offices": "HQ",
+     "n_offices": 1, "n_metadata": 3, "content_chars": 1400,
+     "first_published": "2026-08-20T00:00:00Z", "updated_at": "2026-09-01T00:00:00Z"},
+    {"title": "Werkstudent Marketing (m/w/d)", "location": "München",
+     "content_chars": 600, "first_published": "2026-09-01T00:00:00Z"},
+    {"title": "Staff Software Engineer, Infrastructure", "location": "Remote",
+     "salary_raw": "200000 - 260000 USD", "content_chars": 2800,
+     "first_published": "2026-08-10T00:00:00Z"},
+    {"title": "Customer Support Specialist", "location": "Dublin",
+     "content_chars": 900, "first_published": "2026-09-05T00:00:00Z"},
+    {"title": "Head of Product", "location": "London",
+     "departments": "Product", "n_metadata": 5, "content_chars": 2100,
+     "first_published": "2026-07-28T00:00:00Z"}
+  ]
+}
+JSON
+}
+for pass in 1 2; do
+  rank_body | curl -fsS --max-time 60 -X POST "${BASE_URL}/rank" \
+    -H 'content-type: application/json' -d @- > "${WORK}/rank${pass}.json" \
+    || fail "/rank did not answer 2xx (pass ${pass})"
+done
+python3 - "${WORK}/rank1.json" "${WORK}/rank2.json" "${WORK}/predict.json" <<'PY' || fail "/rank returned an unusable ranking"
+import json, sys
+
+first, second, single = (json.load(open(path)) for path in sys.argv[1:])
+postings = first.get("postings")
+if not isinstance(postings, list) or len(postings) != 5:
+    sys.exit(f"sent 5 postings, got back {len(postings) if isinstance(postings, list) else postings!r}")
+
+for item in postings:
+    p = item.get("probability")
+    if not isinstance(p, (int, float)) or not 0.0 <= p <= 1.0:
+        sys.exit(f"a probability is not a probability: {p!r}")
+
+ranks = sorted(item["rank"] for item in postings)
+if ranks != list(range(1, 6)):
+    sys.exit(f"ranks are not a permutation of 1..5: {ranks}")
+
+by_rank = sorted(postings, key=lambda item: item["rank"])
+scores = [item["probability"] for item in by_rank]
+if any(a < b for a, b in zip(scores, scores[1:])):
+    sys.exit(f"scores are not descending in rank order: {scores}")
+
+watched = [item["rank"] for item in postings if item["watch"]]
+if sorted(watched) != [1, 2]:
+    sys.exit(f"budget 2 should watch ranks 1 and 2 and nothing else; watched {sorted(watched)}")
+if first.get("budget") != 2 or first.get("threshold_source") != "batch_budget":
+    sys.exit(f"budget {first.get('budget')!r}, source {first.get('threshold_source')!r}; expected 2 / batch_budget")
+if abs(first["threshold_applied"] - scores[1]) > 1e-9:
+    sys.exit(f"threshold_applied {first['threshold_applied']} is not the budget-th score {scores[1]}")
+
+if second.get("postings") != postings:
+    sys.exit("the same batch ranked differently on a second call — the ranking is not deterministic")
+
+alone = single.get("probability")
+through_rank = postings[0]["probability"]
+if abs(alone - through_rank) > 1e-9:
+    sys.exit(f"posting 1 scores {alone} alone and {through_rank} in the batch — two code paths, two models")
+
+print(f"  5 postings, budget 2, source {first['threshold_source']}, threshold {first['threshold_applied']:.4f}")
+print("  ranks: " + ", ".join(f"#{item['rank']} {item['probability']:.4f}{' *' if item['watch'] else ''}" for item in by_rank))
+print("  deterministic across two calls; posting 1 matches /predict")
+PY
+echo "ok  /rank"
 
 # --- bad input is a 4xx, never a 500 ----------------------------------------
 code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -X POST "${BASE_URL}/predict" \
