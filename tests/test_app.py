@@ -70,15 +70,16 @@ def test_values_are_stripped_and_non_strings_pass_through():
 
 def test_the_verdict_names_the_horizon_and_the_threshold():
     headline, explanation = verdict(
-        {"closing_soon": True, "threshold": 0.4, "horizon_days": 1, "probability": 0.9}
+        {"removal_flagged": True, "threshold": 0.4, "horizon_days": 1, "probability": 0.9}
     )
     assert "within 1 day" in headline
+    assert "REMOVED" in headline and "CLOSE" not in headline.upper().replace("DISCLOSE", "")
     assert "0.400" in explanation
 
 
 def test_a_probability_below_the_threshold_is_not_flagged():
     headline, _ = verdict(
-        {"closing_soon": False, "threshold": 0.4, "horizon_days": 7, "probability": 0.1}
+        {"removal_flagged": False, "threshold": 0.4, "horizon_days": 7, "probability": 0.1}
     )
     assert "NOT flagged" in headline and "7 days" in headline
 

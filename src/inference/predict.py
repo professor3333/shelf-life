@@ -39,14 +39,25 @@ from src.inference.artifact import DEFAULT_ARTIFACT, Artifact, load
 from src.inference.contract import board_context_supplied, build_row
 
 
+def predicts(horizon_days: int) -> str:
+    """The sentence every prediction carries about what it predicts."""
+    unit = "day" if horizon_days == 1 else "days"
+    return f"removal from the board within {horizon_days} {unit} — not filled"
+
+
 @dataclass(frozen=True)
 class Prediction:
     """One answer, with everything needed to read it."""
 
     probability: float
     threshold: float
-    closing_soon: bool
+    removal_flagged: bool
     horizon_days: int
+    #: What the number is a probability *of*, in the response itself. The label
+    #: is removal from the board; "filled" is the overclaim every caller is one
+    #: paraphrase away from, and a caveat that lives only in documentation is not
+    #: read by client code.
+    predicts: str
     board_context_supplied: bool
     model: str
     dataset: str
@@ -158,8 +169,9 @@ class Predictor:
         return Prediction(
             probability=probability,
             threshold=applied,
-            closing_soon=probability >= applied,
+            removal_flagged=probability >= applied,
             horizon_days=self.metadata.horizon_days,
+            predicts=predicts(self.metadata.horizon_days),
             board_context_supplied=board_context_supplied(payload),
             model=self.metadata.run_name,
             dataset=self.metadata.dataset,

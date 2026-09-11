@@ -375,14 +375,14 @@ def _what_it_means_section(frozen: FrozenModel, budget_per_day: int) -> list[str
         "",
         f"- The list runs to **{reading['alerts_per_day']:.0f} postings a day**.",
         f"- About **{reading['real_closures_caught_per_day']:.1f} of them are genuinely "
-        f"about to close**; the other {reading['false_alarms_per_day']:.1f} are not.",
-        f"- That is **{reading['share_of_closures_caught']:.0%} of the closures** that "
+        f"about to be removed**; the other {reading['false_alarms_per_day']:.1f} are not.",
+        f"- That is **{reading['share_of_closures_caught']:.0%} of the removals** that "
         f"happen — so **{reading['closures_missed_per_day']:.1f} a day are missed**, and "
         "missing one is the expensive error: a rushed application costs hours, a job "
         "never applied to is unrecoverable.",
         "",
         "**Against reading the same number of postings with no model at all**, off a "
-        f"board closing at {base_rate:.1%} a day: that person would find "
+        f"board losing {base_rate:.1%} of its postings a day: that person would find "
         f"**{reading['unaided_closures_caught_per_day']:.1f}** real ones against this "
         f"model's {reading['real_closures_caught_per_day']:.1f} — a lift of "
         f"**{reading['lift_over_unaided']:.1f}×**.",

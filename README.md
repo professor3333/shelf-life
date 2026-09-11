@@ -13,7 +13,15 @@ the same model must handle and is measured on its own
 The label is **removed from the board**, which is not the same thing as
 **filled**. The name of the project is chosen not to claim otherwise, and that
 distinction is repeated everywhere a number appears — including on the screen of
-the UI.
+the UI, and in every API response, which carries a `predicts` field that says
+*removal from the board within N days — not filled* in so many words.
+
+**One word for the label: removal.** This document, the model card, the API
+and the UI say *removed*, *removal*, *disappearance*; never *filled*, *hired*
+or *closed* as the name of the event. Where a code identifier or a generated
+table still says `closure` — `closure_rate`, a `closures` column — it means
+removal and nothing more; those names predate the rule and are being retired
+as the files they live in are touched.
 
 **That the label measures removal has been checked against the boards, not just
 argued.** A sample of postings the panel calls removed was verified against each
@@ -34,7 +42,7 @@ the posting left, the role did not. [`reports/label_check.md`](reports/label_che
 > `/predict` returns 503, because `MODEL_TAG` names no release yet. That is the
 > intended state, not an outage: see [Deployment](#deployment).
 >
-> **The measured 7-day base rate is 7.76%** (2026-09-09, 174 closures in 2,242
+> **The measured 7-day base rate is 7.76%** (2026-09-09, 174 removals in 2,242
 > settled job-days) — replacing the 11.3% that a constant-hazard extrapolation
 > had planned for. **No model has been fitted at H = 7 yet**: the horizon needs
 > 20 labelled crawl waves for an honest three-way split and there are 2, so
@@ -84,7 +92,7 @@ flowchart TD
     end
 
     U(["A stranger, holding one posting"])
-    R(["probability + the threshold it was compared against<br/>plus: closed is not filled"])
+    R(["probability + the threshold it was compared against<br/>plus: removed is not filled"])
 
     A -->|"daily crawl, since 2026-08-29"| B
     B --> C
@@ -207,7 +215,7 @@ model choice:
    evidence of removal if the crawl saw the whole board that day. For 78% of the
    collected postings it did not, and the label meant something else entirely.
 2. **The outcome is censored at both ends.** Postings first seen recently have
-   not had time to close; postings already present when collection began had been
+   not had time to be removed; postings already present when collection began had been
    open for an unknown time.
 3. **Positives are rare and the panel is short.** 96 positives across 6,874
    labelled rows at `H = 1` means differences of a few points sit inside the
@@ -297,7 +305,7 @@ rather than one, because a single missed crawl is as likely to be a hiccup as a
 removal.
 
 **Rows whose outcome is not yet observable are dropped, not labelled zero.** A
-posting first seen yesterday has not had time to close; calling that a negative
+posting first seen yesterday has not had time to be removed; calling that a negative
 teaches the model that recent means open, which is a labelling bug that produces
 a beautiful score. 1,166 of 8,040 job-days are dropped for this reason.
 
@@ -381,7 +389,7 @@ Per source, on the labelled rows:
 arbeitnow is 4,450 of the 5,712 postings — and every one of its crawls in the
 current rules epoch stopped at its page cap without observing the whole board.
 A posting's absence from a partial crawl is not evidence of removal; it may
-simply have fallen past page 8. Treating those absences as closures would have
+simply have fallen past page 8. Treating those absences as removals would have
 manufactured thousands of false positives, and the label would have been
 measuring pagination. So `complete_runs` admits only crawls that finished, which
 leaves the six Greenhouse boards and python_org. The defect is recorded in
@@ -622,7 +630,7 @@ by 0.06 PR-AUC across seven rolling-origin folds and still returns the verdict
 label that is pure noise, is the machinery working.
 
 **The ladder starts with rules, not models.** Two of its rungs are a sentence
-each — *a posting up more than a month is not about to close*, *fresh postings
+each — *a posting up more than a month is not about to be removed*, *fresh postings
 move* — and a third bounds what any age-only rule could buy, by binning age into
 deciles and predicting each bin's training rate rather than fitting a monotone
 curve through it. `reports/baseline_results.md` compares the best model against
@@ -630,7 +638,7 @@ the best rule at the alert budget and says which won, because "XGBoost beats
 logistic regression" is a statement about scikit-learn and this one is not.
 
 The first rule is already known to be false here: postings older than 30 days
-close at 1.30% against 1.14% for younger ones, and the rate across age buckets
+are removed at 1.30% against 1.14% for younger ones, and the rate across age buckets
 runs 1.13%, 1.59%, 0.86%, 1.49%, 1.77%, 0.82% — flat and non-monotone. It stays
 in the ladder because a plausible belief that the data refuses is a result, and
 a reader who holds it is better served seeing it priced than not finding it.
@@ -759,7 +767,7 @@ commit, the labelled waves, the positives, the folds, and the metric with its
 fold spread. `evaluate` and `freeze` append to it automatically.
 
 It exists because of a fact this project cannot argue its way out of. The panel
-accrues about **19 closures a day** against 100 today, so the first honest result
+accrues about **19 removals a day** against 100 today, so the first honest result
 will carry an interval wide enough to swallow most differences between models.
 That is the finding, not an excuse — and the only way to show it as one is to
 keep the earlier runs and let a reader watch the interval narrow against a
@@ -784,7 +792,7 @@ Nine waves burn at each boundary rather than three, because the embargo is the
 horizon plus the widest observed run gap — 8d10h against daily crawls. The H=1
 figures are 8 and 13 on the same arithmetic, and H=1 is a smoke test.
 
-Eight rather than seven: a closure needs corroboration at two consecutive later
+Eight rather than seven: a removal needs corroboration at two consecutive later
 runs, so the newest labelled wave structurally cannot hold a positive and a
 seven-wave split is refused for having no positives in the test block. That
 arithmetic was wrong in this repository until 2026-09-07 and `DEBUGGING.md`
@@ -1068,8 +1076,9 @@ curl -s -X POST http://localhost:8000/predict \
 {
   "probability": 0.010016298852860928,
   "threshold": 0.3962169587612152,
-  "closing_soon": false,
+  "removal_flagged": false,
   "horizon_days": 1,
+  "predicts": "removal from the board within 1 day — not filled",
   "board_context_supplied": false,
   "model": "05-xgboost_engineered",
   "dataset": "synthetic",
@@ -1092,7 +1101,7 @@ defaults to now, and can be pinned by sending `as_of`, which is what makes a
 prediction reproducible.
 
 Every response says which threshold it was compared against, what horizon
-"closing" refers to, whether board-level context was supplied — and whether the
+"removal" refers to, whether board-level context was supplied — and whether the
 loaded model was fitted on the real panel or the synthetic fixture. A service
 serving a rehearsal must not look like a service serving a model.
 
@@ -1513,12 +1522,12 @@ context, which a stranger holding one advert cannot.
 
 **Caveats.** Read the [known failure modes](#known-failure-modes-and-caveats)
 below in full — they are part of this card, not an appendix to it. The
-load-bearing ones: closed ≠ filled; this is a Greenhouse model; positives are
-rare and the panel is short; and a label is never final, because "never
-reappeared" reads the whole remaining panel.
+load-bearing ones: removed ≠ filled; this is a Greenhouse model; positives are
+rare and the panel is short; and a label is final at corroboration, so the one
+posting in 1,530 that returns after two absent runs is mislabelled on purpose.
 
 **Ethical note.** The honest failure mode of a tool like this is that it gets
-quoted as a hiring signal, because "83% likely to close" reads like knowledge
+quoted as a hiring signal, because "83% likely to be removed" still reads like knowledge
 about a job market and is in fact a statement about a row disappearing from a
 list. Every response the service returns carries the threshold, the horizon and
 whether the model was fitted on real data, and the UI carries the caveat on
@@ -1528,7 +1537,7 @@ screen rather than in a footnote — that is the mitigation, and it is deliberat
 
 ## Known failure modes and caveats
 
-1. **"Closed" is not "filled."** The label is disappearance from the board. A
+1. **"Removed" is not "filled."** The label is disappearance from the board. A
    posting can be pulled, expire, be reposted, or be moved to another system.
    Every claim this project makes is about disappearance. The disappearance
    itself is verified — 59 of 60 sampled removals are genuinely gone from the

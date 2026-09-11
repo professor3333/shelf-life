@@ -6,7 +6,7 @@
 | Horizon | H=7 (calendar basis) |
 | Data | **real** · snapshot `2026-09-11` · `data/processed/features/job_days_h7_calendar.parquet` |
 | Panel | 12,675 rows · sha256 `5b476a7989aa…` |
-| Code | `2972c5854` on `reports/the-refusal-on-the-corrected-label` (dirty tree) |
+| Code | `6fa799126` on `feature/say-removed-not-closed` (dirty tree) |
 
 _Regenerate rather than edit._
 

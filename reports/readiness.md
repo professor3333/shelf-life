@@ -6,7 +6,7 @@
 | Horizon | H=7 (calendar basis) |
 | Data | **real** · snapshot `2026-09-11` · `data/processed/features/job_days_h7_calendar.parquet` |
 | Panel | 12,675 rows · sha256 `5b476a7989aa…` |
-| Code | `9a8023468` on `feature/board-fingerprint` (dirty tree) |
+| Code | `6fa799126` on `feature/say-removed-not-closed` (dirty tree) |
 
 _Regenerate rather than edit._
 
@@ -14,7 +14,7 @@ _Regenerate rather than edit._
 
 ## Is the panel still accruing?
 
-Yes. The newest crawl is `2026-09-11 04:23Z`, 0 days 08:16:49.408779 old against a cadence of 1 days 00:00:03.564294 — within tolerance, so the projections below are meaningful.
+Yes. The newest crawl is `2026-09-11 04:23Z`, 0 days 08:43:58.539004 old against a cadence of 1 days 00:00:03.564294 — within tolerance, so the projections below are meaningful.
 
 ## The two gates
 
@@ -28,7 +28,7 @@ selection on the validation block.
 | a legal three-way split | 22 | 5 | 17 | 2026-09-21 |
 | 3 rolling-origin folds | 34 | 5 | 29 | 2026-10-03 |
 
-At H=7 the embargo is 9 days 13:43:51.653374 against a cadence of 1 days 00:00:03.564294, so each of the two block boundaries discards 10 wave(s), and the newest 1 labelled wave(s) cannot carry a positive at all — a closure needs the posting absent from two consecutive later runs.
+At H=7 the embargo is 9 days 13:43:51.653374 against a cadence of 1 days 00:00:03.564294, so each of the two block boundaries discards 10 wave(s), and the newest 1 labelled wave(s) cannot carry a positive at all — a removal needs the posting absent from two consecutive later runs.
 
 Legal cuts available today: **0**. Rolling-origin folds at the deepest legal cut: **0**.
 

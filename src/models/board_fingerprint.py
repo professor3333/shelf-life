@@ -266,7 +266,7 @@ def render(panel: pd.DataFrame, prov: provenance.Provenance | None = None) -> st
         "board it has never seen. This asks whether the identity left with the columns.",
         "A random forest is fitted on the **training block only** — the production",
         "`Pipeline`, same imputation and encoding, with the estimator's target swapped for",
-        f"`{TARGET}` — and asked to name the board of every validation row. The closure",
+        f"`{TARGET}` — and asked to name the board of every validation row. The removal",
         "label is not used: a fingerprint is a property of the feature matrix.",
         "",
         "## The headline",

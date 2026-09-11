@@ -354,7 +354,7 @@ The output is consumed as a probability, so ranking well while calibrated badly
 is a failure of the actual use, not a technicality — hence Brier alongside
 PR-AUC rather than after it.
 
-**Cost asymmetry:** a false "closing soon" costs a rushed application, measured
+**Cost asymmetry:** a false "removal soon" costs a rushed application, measured
 in hours. A false "stays open" costs a job never applied to, which is
 unrecoverable. The second is worse, so the operating point leans to recall and
 the threshold is chosen against a fixed alert budget rather than at 0.5.

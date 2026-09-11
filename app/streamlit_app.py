@@ -13,7 +13,7 @@ were two different models wearing one name.
 rather than sent as empty strings, so an untouched field stays a missing value
 the API imputes instead of becoming a category the model has never seen.
 
-**It shows the caveat on screen.** "Closed" means removed from the board, not
+**It shows the caveat on screen.** The label is removal from the board, not
 filled. That sentence belongs where the number is, not only in the README —
 whoever reads a probability is the person who needs it.
 

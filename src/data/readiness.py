@@ -110,7 +110,7 @@ def render(panel: pd.DataFrame, prov, now: pd.Timestamp | None = None) -> str:
         f"At H={DEFAULT_HORIZON} the embargo is {depth['embargo']} against a cadence of "
         f"{depth['spacing']}, so each of the two block boundaries discards "
         f"{depth['burnt_per_boundary']} wave(s), and the newest {depth['blind_tail']} "
-        "labelled wave(s) cannot carry a positive at all — a closure needs the posting "
+        "labelled wave(s) cannot carry a positive at all — a removal needs the posting "
         "absent from two consecutive later runs.",
         "",
         f"Legal cuts available today: **{usable}**. Rolling-origin folds at the deepest "

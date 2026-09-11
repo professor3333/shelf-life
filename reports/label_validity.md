@@ -6,7 +6,7 @@
 | Horizon | H=7 (calendar basis) |
 | Data | **real** · snapshot `2026-09-11` · `data/processed/features/job_days_h7_calendar.parquet` |
 | Panel | 12,675 rows · sha256 `5b476a7989aa…` |
-| Code | `8a2874b2c` on `reports/rerun-the-rehearsal-on-the-honest-label` (dirty tree) |
+| Code | `6fa799126` on `feature/say-removed-not-closed` (dirty tree) |
 
 _Regenerate rather than edit._
 
@@ -28,20 +28,20 @@ A posting can vanish for reasons unrelated to hiring. They split in two:
   distinguishable, by this project or by a human reading the dead URL**, and no
   count of them appears in this file for that reason.
 
-## Relisting under a new posting id — 436 closure(s)
+## Relisting under a new posting id — 436 removal(s)
 
 If a posting disappears only to return under a new id, the label has recorded
-a closure that did not happen. Every rate is therefore reported against the
+a removal that did not happen. Every rate is therefore reported against the
 same rate among postings that *stayed up*, because a bare rate here cannot be
-read at all: the first run of this audit found 4 of 100 closed postings
+read at all: the first run of this audit found 4 of 100 removed postings
 relisted and took it for a 4% error rate in the target. Survivors relist at a
 similar rate, so the 4% measures how these boards behave rather than anything
-about closure — and whether the two rates differ is a further question the
+about removal — and whether the two rates differ is a further question the
 counts are not yet large enough to answer.
 
-| identity | closed | control (still open) | reading |
+| identity | removed | control (still up) | reading |
 |---|---|---|---|
-| `requisition_id` | 7/153 = 4.6% | 131/1072 = 12.2% | **below control** (-7.6% ± 3.9%) — relisting is *less* common among postings the label calls closed than among postings that stayed up |
+| `requisition_id` | 7/153 = 4.6% | 131/1072 = 12.2% | **below control** (-7.6% ± 3.9%) — relisting is *less* common among postings the label calls removed than among postings that stayed up |
 | `title` | 19/158 = 12.0% | 152/1100 = 13.8% | **indistinguishable** (-1.8% ± 5.6%) — the difference does not clear twice its standard error, so this sample says nothing either way |
 
 `requisition_id` is the employer's own key for a role, so a match is the same
@@ -54,7 +54,7 @@ rather than anything about the label.
 is only called anything once it clears twice its standard error. Most will not,
 and *indistinguishable* is the honest majority verdict at this depth — it means
 the audit cannot see contamination of a few percent, not that there is none.
-It sharpens as closures accumulate; the panel adds roughly 19 a day.
+It sharpens as removals accumulate; the panel adds roughly 19 a day.
 
 ## Board stability
 
@@ -71,10 +71,11 @@ so it appears as a cliff rather than as drift.
 | python_org | 10 | 29 | 32 | -6.2% |
 | greenhouse:airtable | 11 | 16 | 16 | 0.0% |
 
-## Closure dispersion
+## Removal dispersion
 
-Closures spread across sources and days are consistent with ordinary hiring.
-A systems change would empty one board on one day.
+Removals spread across sources and days are consistent with postings coming
+down one at a time, for whatever reason each comes down. A systems change —
+an ATS migration, a board tidied — would empty one board on one day.
 
 | source | 2026-08-31 | 2026-09-01 | 2026-09-02 | 2026-09-03 | 2026-09-04 |
 |---|---|---|---|---|---|
@@ -85,14 +86,14 @@ A systems change would empty one board on one day.
 | greenhouse:gitlab | 24 | 21 | 16 | 31 | 23 |
 | python_org | 0 | 4 | 4 | 5 | 4 |
 
-## Closures against observed lifespan
+## Removals against observed lifespan
 
 A posting seen once and never again is indistinguishable, in the panel, from a
 posting filled the next morning: both are absent from two consecutive complete
 runs and never seen again. One is a hire, the other a crawl that briefly
 included a row it then stopped returning, and the label cannot tell them apart.
 
-| seen in | rows | closures | closure_rate |
+| seen in | rows | removals | removal_rate |
 |---|---|---|---|
 | 1 run | 1238 | 106 | 0.0856 |
 | 2 runs | 1190 | 92 | 0.0773 |
@@ -104,7 +105,7 @@ _Every posting falls on one side of the threshold; nothing to compare._
 ## The external check — done
 
 Everything above measures the label against itself. The check it could not make
-was whether a posting this file calls closed is actually gone, which needs the
+was whether a posting this file calls removed is actually gone, which needs the
 board rather than the panel.
 
 That now exists: [`label_check.md`](label_check.md), written by

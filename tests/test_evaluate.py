@@ -723,7 +723,7 @@ def test_a_target_dominated_by_short_lived_postings_is_flagged_in_the_reading():
     panel["label_observable"] = True
 
     text = "\n".join(_lifespan_caveat(panel))
-    assert "seen in fewer than 6 complete crawls as of their own `t` close at" in text
+    assert "seen in fewer than 6 complete crawls as of their own `t` are" in text
     # The caveat must carry the verification, not the superseded reading of it:
     # the concentration is real, and `label_check.md` showed the removals behind
     # it are genuine, so "this is measuring the crawl" is the wrong conclusion.

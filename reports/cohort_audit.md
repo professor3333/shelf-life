@@ -6,7 +6,7 @@
 | Horizon | H=7 (calendar basis) |
 | Data | **real** · snapshot `2026-09-11` · `data/processed/features/job_days_h7_calendar.parquet` |
 | Panel | 12,675 rows · sha256 `5b476a7989aa…` |
-| Code | `3590fe934` on `feature/cohort-audit` (dirty tree) |
+| Code | `6fa799126` on `feature/say-removed-not-closed` (dirty tree) |
 
 _Regenerate rather than edit._
 
@@ -24,7 +24,7 @@ so both belong in the dataset — provided the label is indifferent to which is 
 | incident | 254 | 105 | 25 | 9.8% | 44 |
 | incumbent | 5403 | 1135 | 411 | 7.6% | 90 |
 
-Incident rows close at 9.8% against 7.6% for the stock (254 against 5,403 rows). Close enough that the label is not keying on which population a row came from — the condition under which the job-day formulation makes age a feature rather than an artefact.
+Incident rows are removed at 9.8% against 7.6% for the stock (254 against 5,403 rows). Close enough that the label is not keying on which population a row came from — the condition under which the job-day formulation makes age a feature rather than an artefact.
 
 ## 2. First-seen wave — collection-era effects
 
@@ -100,7 +100,7 @@ split is legal._
 
 ## What this file cannot tell you
 
-Whether a closure is a hire. `reports/label_check.md` verifies that removals are
+Whether a removal is a hire. `reports/label_check.md` verifies that removals are
 removals; nothing in the panel says why. And an incident cohort that is small —
 it is, at every depth this panel has reached — carries wide intervals on every
 rate above; a difference between cohorts that is inside those is not a finding.
