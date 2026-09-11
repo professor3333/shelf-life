@@ -1391,7 +1391,7 @@ kind it is, is stated wherever it matters.
 |     | URL                                                     | what it does today                                                |
 | --- | ------------------------------------------------------- | ----------------------------------------------------------------- |
 | API | <https://shelf-life-5hin.onrender.com>                  | `/health` → `degraded` · `/docs` browsable · `/predict` → **503**  |
-| UI  | <https://shelf-life-2l8tanmdatboms9mhxh3rj.streamlit.app/> | loads, and reports the API's health before showing you a form   |
+| UI  | <https://shelf-life-2l8tanmdatboms9mhxh3rj.streamlit.app/> | loads; reports the API's state before showing a form — or, as found on 2026-09-11, that it cannot reach the API until the `SHELF_LIFE_API` secret is set on the host |
 
 **What is absent is the model, not the deployment.** The service, the container,
 the UI and the release-fetching build all went up on 2026-09-06, before there was
@@ -1432,6 +1432,7 @@ The chain between the two, link by link, with what has actually executed:
 | container: `await_release.sh` then `smoke.sh` | run, locally, with `ALLOW_SYNTHETIC=1` | rehearsal |
 | `MODEL_TAG` commit → Render rebuild → CI verification against the public URL | **never executed** — every `Verify deployment` run so far has exited in seconds with "no release to verify" | `gh run list --workflow=verify-deployment.yml` |
 | the public URL answering from the H=7 artifact | **not done** | — |
+| the UI on Community Cloud, verified as deployed | run — `./scripts/smoke_ui.sh` (exists, `RUNNING`, server answers) and `scripts/smoke_ui_browser.py` (rendered, reached the API); the second **found the `SHELF_LIFE_API` secret unset** and the public UI saying "cannot reach the API at localhost" | the `verify-ui` job, on every change to `app/` |
 
 Everything above the bracket is one command, `./scripts/release.sh --rehearse`,
 and the same script with `--run <spec>` is the real thing: it stops before

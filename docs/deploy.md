@@ -33,7 +33,8 @@ Two things must be true before any of it matters, and the workflow checks both
 and exits **green** if either is missing, because a check that fails on every
 push before the service exists is a check people learn to ignore:
 
-1. The repository variable `SHELF_LIFE_API` names the deployed API.
+1. The repository variable `SHELF_LIFE_API` names the deployed API — and
+   `SHELF_LIFE_UI` the deployed UI, for the second job (§3).
 2. `MODEL_TAG` names a release. Until the panel clears its depth gate there is
    no model to release, the file is deliberately empty, and the deployed service
    is deliberately model-less.
@@ -96,7 +97,28 @@ can change a prediction, so drift there is cosmetic (`docs/design.md` §16). `do
 previous arrangement, where the UI was deployed without `src/` present at all.
 
 Without the secret the UI defaults to `http://localhost:8000` and shows the
-error saying so.
+error saying so — **to every visitor, indefinitely, with every test green**,
+which is what the public UI was doing on 2026-09-11 when the first automated
+look at it was taken (`DEBUGGING.md`). So the secret is verified, not assumed:
+
+4. Copy the app URL and tell the repository about it, so the workflow can
+   check the deployed UI after every change to `app/` or `requirements.txt`:
+
+   ```bash
+   gh variable set SHELF_LIFE_UI --body "https://shelf-life-xxxx.streamlit.app"
+   ```
+
+5. Run the two UI checks by hand once, before relying on the workflow:
+
+   ```bash
+   ./scripts/smoke_ui.sh "$SHELF_LIFE_UI"                                   # exists, RUNNING, server answers
+   uv run --no-project --with playwright playwright install chromium        # once
+   uv run --no-project --with playwright python scripts/smoke_ui_browser.py "$SHELF_LIFE_UI"
+   ```
+
+   The second opens the page in a headless browser and reads what the app
+   wrote after calling the API. It is the only check that can see the
+   secret: Streamlit draws the page over a WebSocket, so nothing HTTP can.
 
 ---
 
@@ -184,6 +206,30 @@ the second call ranks identically, and the first posting — the one `/predict`
 just scored — gets the same probability through `/rank`. A deployment where
 `/predict` answered and `/rank` did not would otherwise have passed.
 
+### And the UI, after every change to it
+
+The same workflow's `verify-ui` job runs when `app/`, `requirements.txt` or
+the UI scripts change, against `SHELF_LIFE_UI`:
+
+```bash
+./scripts/smoke_ui.sh "$SHELF_LIFE_UI" 8                                       # HTTP
+uv run --no-project --with playwright python scripts/smoke_ui_browser.py "$SHELF_LIFE_UI"
+```
+
+The HTTP half proves the app exists on Community Cloud (a missing app is a
+404), that the host reports it `RUNNING` — `INSTALLER_ERROR` is a
+`requirements.txt` the host could not resolve, `USER_SCRIPT_ERROR` a script
+that crashed on boot, `IS_SHUTDOWN` the free tier's sleep, which the script
+wakes as a visitor's click would — and that the Streamlit server behind the
+host page answers. The browser half proves the page rendered and that what it
+says about the API is one of the two honest states: a model is serving, or the
+API is up with no model. "cannot reach the API" fails it, and that is the
+sentence an unset secret produces.
+
+Stated limitation: Community Cloud exposes no version, so unlike
+`await_release.sh` this cannot wait for *this commit's* UI. It waits ninety
+seconds for the reboot to begin, then verifies the UI as it is.
+
 ### Which model is actually serving
 
 ```bash
@@ -258,6 +304,9 @@ comes back within the criterion.** Until then it is provisional.
 | Symptom | What it means | What to do |
 |---|---|---|
 | Workflow notice: "No SHELF_LIFE_API variable set" | the service does not exist yet, or was never recorded | §1, then `gh variable set` |
+| Workflow notice: "No SHELF_LIFE_UI variable set" | the UI was never recorded | §1 step 4, then `gh variable set` |
+| UI smoke: "cannot reach the API" | the `SHELF_LIFE_API` secret is unset or wrong on Community Cloud, or the host cannot reach Render | §1, the app's **Settings → Secrets**; then `curl "$SHELF_LIFE_API/health"` |
+| UI smoke: `INSTALLER_ERROR` / `USER_SCRIPT_ERROR` | the host could not install `requirements.txt`, or the script crashed there | the app's **Manage app** log on Community Cloud |
 | Workflow notice: "MODEL_TAG names no release" | working as designed; no model has been frozen | nothing, until the panel clears |
 | `await_release.sh` times out | the build failed, so the old revision is still serving | read Render's build log |
 | Build fails in `src.inference.fetch` | the published bytes do not match the published checksums | re-cut the release; do not force it |
