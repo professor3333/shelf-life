@@ -145,11 +145,18 @@ def _snapshot_date(raw_root: Path = Path("data/raw")) -> str | None:
 
 
 #: The dependency lock whose hash travels on the artifact. A SHA pins the
-#: source; this pins what the source ran against.
-LOCK_FILE = Path("uv.lock")
+#: source; this pins what the source ran against — every package, hashed, as
+#: `uv sync --locked` installs it locally, in CI and in the serving image. It
+#: is committed, which is what makes the hash mean something: until 2026-09-12
+#: the file was gitignored, so the hash named a resolution nobody else could
+#: fetch, and the artifact's "dependencies" line was a promise with no object
+#: behind it. Anchored to the repository root rather than the working
+#: directory, so a freeze run from anywhere hashes the same file.
+LOCK_FILE = Path(__file__).resolve().parents[2] / "uv.lock"
 
 
 def lock_sha256(path: Path = LOCK_FILE) -> str | None:
+    """The lock's sha256, or None outside a checkout that has one."""
     return sha256_of(path) if path.exists() else None
 
 

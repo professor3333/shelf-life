@@ -352,11 +352,16 @@ def test_the_artifact_names_everything_it_is_traceable_to(tmp_path, monkeypatch)
 
     assert meta.rules_version == 2
     assert meta.seed is not None
-    assert meta.lock_sha256 is None or len(meta.lock_sha256) == 64
+    # The lock is committed, so an artifact frozen in this checkout always
+    # names it — a None here would mean the hash points at a file nobody has.
+    import hashlib
+
+    from src.models import provenance
+
+    assert provenance.LOCK_FILE.exists()
+    assert meta.lock_sha256 == hashlib.sha256(provenance.LOCK_FILE.read_bytes()).hexdigest()
     assert "git_sha" in meta.provenance and "panel_sha256" in meta.provenance
     assert meta.horizon_days >= 1 and meta.params and meta.features
 
     sidecar = json.loads(paths["artifact"].with_suffix(".json").read_text())
-    import hashlib
-
     assert sidecar["artifact_sha256"] == hashlib.sha256(paths["artifact"].read_bytes()).hexdigest()
