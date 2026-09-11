@@ -4,6 +4,34 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-11 — the public UI had been telling visitors it cannot reach the API
+
+- **Problem:** no crash, no failing test, no failing workflow. The first
+  automated look at the deployed UI (`scripts/smoke_ui_browser.py`, written
+  for that purpose) read the page and found "cannot reach the API at
+  http://localhost:8000". The `SHELF_LIFE_API` secret was not set on
+  Community Cloud; the UI had fallen back to its laptop default and shown the
+  error to every visitor since 2026-09-06.
+- **Root cause:** the deployed UI was verified by nothing. The suite renders
+  `app/streamlit_app.py` through Streamlit's test runtime, which says the
+  script runs; `verify-deployment.yml` checked the API only. A secret is
+  deployment-specific configuration that exists in a dashboard and nowhere in
+  the repository, so no test in the repository could see it missing — and the
+  UI's honest fallback (say the URL, say what to set) made the failure
+  legible but not loud.
+- **Solution:** `scripts/smoke_ui.sh` (the app exists, the host reports
+  `RUNNING`, the Streamlit server answers) and `scripts/smoke_ui_browser.py`
+  (the page rendered; what it says about the API is one of the two honest
+  states), run by a `verify-ui` job on every change to `app/` or
+  `requirements.txt`. The secret itself has to be set in the Community Cloud
+  dashboard (`docs/deploy.md` §1).
+- **Lesson:** a deployment has two halves and each needs its own check; a
+  green API says nothing about the UI in front of it. And configuration that
+  lives only in a vendor's dashboard is invisible to every test — the only
+  check that can see it is one that looks at what a visitor sees.
+
+---
+
 ## 2026-09-11 — the smoke test asked for a response field the API had renamed
 
 - **Problem:** no crash, and no failing test. `scripts/smoke.sh` required

@@ -16,6 +16,21 @@ name: Verify deployment
 # service, or before there is a released model, it reports why it has nothing to
 # check and exits green — a workflow that fails on every push because a URL does
 # not exist yet is a workflow people learn to ignore.
+#
+# The second job does the same for the UI. Streamlit Community Cloud also
+# deploys from `main` by itself, and the suite's rendering of the app through
+# Streamlit's test runtime says nothing about the copy it hosts: whether the
+# host resolved `requirements.txt`, whether the script booted there, whether
+# the `SHELF_LIFE_API` secret is set, whether the host can reach the API.
+# Every one of those breaks a visit with every unit test green, and on
+# 2026-09-11 one of them was: the secret was unset and the public UI had been
+# saying "cannot reach the API at http://localhost:8000" to anyone who looked.
+#
+#     push to main ──> Community Cloud reboots ──> smoke_ui.sh ──> smoke_ui_browser.py
+#
+# Its limitation, stated: the host exposes no version, so this cannot wait for
+# *this commit's* UI the way `await_release.sh` waits for a release tag. It
+# waits a grace period for the reboot to start, then verifies the UI as it is.
 
 on:
   push:
@@ -26,7 +41,10 @@ on:
       - render.yaml
       - "src/**"
       - "api/**"
+      - "app/**"
       - requirements.txt
+      - "scripts/smoke*.sh"
+      - "scripts/smoke_ui_browser.py"
   workflow_dispatch:
     inputs:
       allow_synthetic:
@@ -101,3 +119,49 @@ jobs:
             echo "\`./scripts/cold_start.sh ${{ steps.what.outputs.url }}\`, then put the"
             echo "number in the README (\`docs/design.md\` §7e)."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  verify-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Is there a UI to verify?
+        id: ui
+        run: |
+          url='${{ vars.SHELF_LIFE_UI }}'
+          if [ -z "${url}" ]; then
+            echo "::notice::No SHELF_LIFE_UI variable set, so no deployed UI to verify."
+            echo "Set it once the Community Cloud app exists — docs/deploy.md §1."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      # Community Cloud picks a push up within about a minute and reboots the
+      # app; checking before that would verify the previous version and pass.
+      - name: Give the host time to notice the push
+        if: steps.ui.outputs.skip == 'false' && github.event_name == 'push'
+        run: sleep 90
+
+      - name: The app exists, the host says RUNNING, the server answers
+        if: steps.ui.outputs.skip == 'false'
+        run: ./scripts/smoke_ui.sh "${{ steps.ui.outputs.url }}" 8
+
+      # The rendered page is the only place the API configuration shows.
+      # Playwright is a browser, not a project dependency: `--with` installs
+      # it beside the locked environment for this command and nowhere else.
+      - uses: astral-sh/setup-uv@v6
+        if: steps.ui.outputs.skip == 'false'
+        with:
+          version: "0.12.5"
+          enable-cache: true
+
+      - name: The page rendered and reached the API
+        if: steps.ui.outputs.skip == 'false'
+        run: |
+          uv run --no-project --with "playwright==${PLAYWRIGHT}" playwright install --with-deps chromium
+          uv run --no-project --with "playwright==${PLAYWRIGHT}" python scripts/smoke_ui_browser.py "${{ steps.ui.outputs.url }}"
+        env:
+          PLAYWRIGHT: "1.62.0"

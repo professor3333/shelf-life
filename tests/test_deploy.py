@@ -790,6 +790,56 @@ def test_the_rehearsal_declines_rather_than_fails_when_shallow() -> None:
     assert 'GATE}" -eq 3' in text
 
 
+# --- the UI, as deployed rather than as rendered by the test runtime ------------
+
+
+def test_the_ui_check_reads_the_sentences_the_app_actually_writes() -> None:
+    """The browser check decides "rendered" and "reached the API" by text.
+
+    Those sentences live in `app/streamlit_app.py` and `app/client.py`; the
+    check keeps its own copies, because it must run with no project import (it
+    runs under `uv run --no-project`, with a browser and nothing else). A
+    reworded caption would make the check report a UI that renders as one that
+    does not — so the copies are held to the originals here.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "smoke_ui_browser", ROOT / "scripts" / "smoke_ui_browser.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    app = (ROOT / "app" / "streamlit_app.py").read_text()
+    client = (ROOT / "app" / "client.py").read_text()
+    assert module.CAPTION in app.replace('"\n    "', ""), "the caption the check waits for"
+    assert module.UNREACHABLE in client, "the sentence the client writes when the API is down"
+    assert module.MODEL_LESS in app, "the warning for the deliberate model-less deployment"
+    assert module.MODEL_SERVING in app, "the sidebar heading shown when a model is serving"
+
+
+def test_the_deployed_ui_is_verified_after_app_changes(workflow_text: str) -> None:
+    """A push that touches the UI verifies the UI, not only the API.
+
+    `app/**` and `requirements.txt` are what Community Cloud deploys from, so
+    they must trigger the workflow; the job must run both halves — the HTTP
+    checks and the browser — and must skip, not fail, when no UI variable is
+    set. And the browser must stay out of the project's dependencies:
+    `requirements.txt` is exactly what the host installs.
+    """
+    workflow = yaml.safe_load(workflow_text)
+    paths = workflow[True]["push"]["paths"]  # YAML 1.1 reads a bare `on` as True
+    assert "app/**" in paths and "requirements.txt" in paths
+    assert "verify-ui" in workflow["jobs"], "no UI verification job"
+
+    steps = "\n".join(step.get("run", "") for step in workflow["jobs"]["verify-ui"]["steps"])
+    assert "./scripts/smoke_ui.sh" in steps
+    assert "scripts/smoke_ui_browser.py" in steps
+    assert "vars.SHELF_LIFE_UI" in workflow_text and "skip=true" in steps
+
+    assert "playwright" not in (ROOT / "pyproject.toml").read_text()
+    assert "playwright" not in REQUIREMENTS.read_text()
+    assert os.access(ROOT / "scripts" / "smoke_ui.sh", os.X_OK)
+
+
 # --- the release chain, and where it stops --------------------------------------
 
 
