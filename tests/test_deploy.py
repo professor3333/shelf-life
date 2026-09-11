@@ -40,6 +40,8 @@ RUNBOOK = ROOT / "docs" / "deploy.md"
 README = ROOT / "README.md"
 REHEARSE = ROOT / "scripts" / "rehearse.sh"
 REQUIREMENTS = ROOT / "requirements.txt"
+LOCK = ROOT / "uv.lock"
+CI = ROOT / ".github" / "workflows" / "ci.yml"
 
 #: The pipeline that turns the `MODEL_TAG` file into a bare tag. Comments and
 #: whitespace out, first surviving line wins.
@@ -127,6 +129,12 @@ def test_nothing_in_the_blueprint_scales_beyond_the_free_instance(render: dict) 
 DEVCONTAINER = ROOT / ".devcontainer" / "devcontainer.json"
 
 
+def _served_python() -> str:
+    served = re.search(r"^FROM python:(\d+\.\d+)", DOCKERFILE.read_text(), re.MULTILINE)
+    assert served, "Dockerfile has no `FROM python:<version>` line"
+    return served.group(1)
+
+
 def test_the_dev_container_runs_the_python_the_image_serves() -> None:
     """A model frozen on one minor version, unpickled on another, is a bad day.
 
@@ -144,14 +152,113 @@ def test_the_dev_container_runs_the_python_the_image_serves() -> None:
     dev = re.search(r"python:\d+-(\d+\.\d+)", image.group(1))
     assert dev, f"cannot read a Python version out of {image.group(1)!r}"
 
-    served = re.search(r"^FROM python:(\d+\.\d+)", DOCKERFILE.read_text(), re.MULTILINE)
-    assert served, "Dockerfile has no `FROM python:<version>` line"
-
-    assert dev.group(1) == served.group(1), (
+    served = _served_python()
+    assert dev.group(1) == served, (
         f"the dev container runs Python {dev.group(1)} and the serving image runs "
-        f"{served.group(1)}. An artifact frozen in the container may not unpickle in "
+        f"{served}. An artifact frozen in the container may not unpickle in "
         "the image, which surfaces as a failed deploy rather than as this mismatch."
     )
+
+
+def test_one_python_is_named_everywhere_a_python_is_named() -> None:
+    """`requires-python`, `.python-version`, the lock and the image agree.
+
+    Until 2026-09-12 the package advertised `>=3.11` while every environment
+    that ever ran the suite or froze a model was 3.12 — a supported version
+    nothing tested. One minor version, declared as a range of one, so that a
+    reader of any of these files learns the same thing and the lock resolves
+    for one interpreter rather than several.
+    """
+    served = _served_python()
+
+    pyproject = (ROOT / "pyproject.toml").read_text()
+    declared = re.search(r'^requires-python\s*=\s*"([^"]+)"', pyproject, re.MULTILINE)
+    assert declared, "pyproject.toml declares no requires-python"
+    major, minor = served.split(".")
+    assert declared.group(1) == f">={served},<{major}.{int(minor) + 1}", (
+        f"pyproject.toml says Python {declared.group(1)!r}; the image serves {served}. "
+        "Declare the one version that is tested, or test the ones that are declared."
+    )
+
+    pinned = (ROOT / ".python-version").read_text().strip()
+    assert pinned == served, f".python-version says {pinned}, the image serves {served}"
+
+    lock = re.search(r'^requires-python\s*=\s*"([^"]+)"', LOCK.read_text(), re.MULTILINE)
+    assert lock and lock.group(1) == f"=={served}.*", (
+        f"uv.lock was resolved for Python {lock and lock.group(1)!r}, the image serves {served}: "
+        "run `uv lock`."
+    )
+
+    ruff = re.search(r'^target-version\s*=\s*"py(\d)(\d+)"', pyproject, re.MULTILINE)
+    assert ruff and f"{ruff.group(1)}.{ruff.group(2)}" == served, (
+        "ruff's target-version should be the interpreter the code actually runs on"
+    )
+
+
+# --- the ones about the environment being the same everywhere ---------------
+
+
+def test_the_lock_is_committed_and_nothing_ignores_it() -> None:
+    """A lock nobody can fetch pins nothing.
+
+    The artifact carries `lock_sha256`; that hash is only evidence if the file
+    it names is in the repository at the SHA beside it. `uv.lock` was
+    gitignored until 2026-09-12 — the `.gitignore` entry argued that a lock
+    "validated by nothing" would drift, which was true, and the fix was to make
+    everything install from it rather than to keep it out.
+    """
+    assert LOCK.exists(), "no uv.lock at the repository root — run `uv lock`"
+    ignored = [
+        line.strip()
+        for line in (ROOT / ".gitignore").read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    for pattern in ("uv.lock", "*.lock", ".python-version"):
+        assert pattern not in ignored, f".gitignore lists {pattern}; the lock must be committed"
+
+
+def test_every_environment_installs_from_the_lock() -> None:
+    """CI, the image, and the freeze all read `uv.lock` — with `--locked`.
+
+    `--locked` is the half that matters: it makes a lock that has fallen behind
+    `pyproject.toml` a build failure instead of a silent fresh resolution. An
+    install that read the lock only when it happened to be current would be
+    the old `pip install -e .` with extra steps.
+    """
+    dockerfile = DOCKERFILE.read_text()
+    ci = CI.read_text()
+
+    assert "COPY pyproject.toml uv.lock" in dockerfile, "the image must copy the lock in"
+    assert "uv sync --locked" in dockerfile, "the image must install with `uv sync --locked`"
+    assert "uv sync --locked" in ci, "CI must install with `uv sync --locked`"
+    assert not re.search(r"pip install", dockerfile), "a pip install in the image bypasses the lock"
+    assert not re.search(r"pip install", ci), "a pip install in CI bypasses the lock"
+
+    # The same uv wrote the lock, installs it in CI, and installs it in the
+    # image. Two versions of the installer is one more way for "the same lock"
+    # to mean two different things.
+    in_image = re.search(r"ghcr\.io/astral-sh/uv:(\S+) ", dockerfile)
+    in_ci = re.search(r'version:\s*"([^"]+)"', ci)
+    assert in_image and in_ci, "uv must be pinned to a version in both the Dockerfile and CI"
+    assert in_image.group(1) == in_ci.group(1), (
+        f"the image installs with uv {in_image.group(1)}, CI with uv {in_ci.group(1)}"
+    )
+
+
+def test_the_image_refuses_an_artifact_from_a_different_library() -> None:
+    """The build-time load turns `load()`'s version warning into a failure.
+
+    `load()` warns on a scikit-learn / xgboost / joblib mismatch because a
+    laptop opening an old artifact should not be refused. The image is the one
+    place where drift since the freeze must not pass, and the promotion is by
+    message so an unrelated warning at import time cannot fail a build in its
+    place.
+    """
+    dockerfile = DOCKERFILE.read_text()
+    assert "warnings.filterwarnings('error', message='artifact was written with')" in dockerfile
+    # ...and the message it names is the one `load()` actually emits.
+    artifact = (ROOT / "src" / "inference" / "artifact.py").read_text()
+    assert 'f"artifact was written with {library} {recorded}' in artifact
 
 
 #: Everything whose change must still reach the running service. `MODEL_TAG` is

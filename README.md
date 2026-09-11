@@ -972,7 +972,8 @@ shelf-life/
 ├── data/             not committed — snapshots and derived frames
 ├── models/           not committed — the frozen artifact
 ├── Dockerfile        .github/workflows/  ci.yml verify-deployment.yml
-└── pyproject.toml
+├── pyproject.toml    what the code needs — lower bounds and extras
+└── uv.lock           what it actually runs against — every package, hashed
 ```
 
 `docs/` holds decisions and audits, written by hand. `reports/` holds generated
@@ -982,7 +983,10 @@ output — regenerate rather than edit; each file names the command that writes 
 
 ## Requirements
 
-- Python 3.11 or newer (3.12 is what CI runs)
+- Python 3.12 — one version, not a range. It is what the lock resolves for,
+  what CI runs, what the dev container provides and what the serving image
+  unpickles the artifact under; a test asserts all five agree.
+- [uv](https://docs.astral.sh/uv/), which installs the locked environment
 - Docker, to build the image
 - **For the data pipeline only:** the scraper's SQLite database. Without it, the
   ingestion commands have nothing to read; everything else — tests, API, UI —
@@ -995,17 +999,25 @@ output — regenerate rather than edit; each file names the command that writes 
 ```bash
 git clone https://github.com/professor3333/shelf-life.git
 cd shelf-life
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,api,ui]"
+uv sync --locked --extra dev --extra api --extra ui
+source .venv/bin/activate
 ```
+
+`uv sync --locked` installs exactly what `uv.lock` names — every package, at the
+version and hash the lock records — and refuses if the lock has fallen behind
+`pyproject.toml`. The same command, on the same lock, builds CI's environment
+and the serving image's, so the scikit-learn and XGBoost that freeze a model are
+the ones that unpickle it. The lock is committed; its sha256 travels on every
+frozen artifact as `lock_sha256`. Change a dependency in `pyproject.toml`, run
+`uv lock`, and commit both.
 
 The extras are separable on purpose: `api` for the service, `ui` for the form,
 `tracking` for MLflow, `plots` for the diagnostic figures, `dev` for everything
 plus the test tooling. Running the model ladder should not require installing a
 web framework — and `plots` is separate for a sharper reason: the Dockerfile
-installs `.[api]`, so a plotting library in the base dependencies would ship to
-a 0.1-CPU instance, draw nothing, and be paid for on every cold start. A test
-asserts it stays out.
+installs the `api` extra alone, so a plotting library in the base dependencies
+would ship to a 0.1-CPU instance, draw nothing, and be paid for on every cold
+start. A test asserts it stays out.
 
 ---
 
@@ -1197,6 +1209,15 @@ signature. Then the artifact is **loaded**, which proves it is a fitted
 end-to-end pipeline in the environment that will serve it. Either failure fails
 the build rather than the first stranger's request.
 
+That environment is `uv.lock`, installed with `uv sync --locked` by the same
+pinned `uv` that CI uses — so "the library that wrote the booster" and "the
+library that reads it" are the same resolution by construction, not by luck. The
+load is strict there where it is lenient on a laptop: `load()` only *warns* when
+an artifact's recorded scikit-learn, XGBoost or joblib differ from the installed
+ones, but the image promotes that warning to a build failure. A lock bumped after
+the freeze therefore cannot reach the URL with the old artifact; the build says
+so, and the fix is to re-freeze or not to bump.
+
 Without `ARTIFACT_TAG` the image still builds, deliberately. The container
 starts, `/health` answers 200 with `model_loaded: false`, and `/predict` returns
 503 naming the command that fixes it — a container that refuses to boot over a
@@ -1300,7 +1321,7 @@ carries the trigger that would reopen it.
 ## Reproducibility
 
 A metric with no dataset version is a number about an unknown quantity of data.
-Four things make a result here re-derivable rather than remembered.
+Five things make a result here re-derivable rather than remembered.
 
 **The data is pinned, not read live.** `python -m src.data.snapshot` writes
 `data/raw/<date>/jobs.db` with a SHA-256 manifest. The scraper adds a wave a day,
@@ -1310,6 +1331,16 @@ other — and every report names the snapshot it read.
 **Derived output is disposable and verified so.** Delete `data/processed/` and
 re-run, and the Parquet comes back byte-identical. That is asserted in the test
 suite rather than checked by eye.
+
+**The environment is a lock, and one interpreter.** `uv.lock` names every
+package with its hash, and every environment — the laptop, CI, the serving
+image — installs it with `uv sync --locked`, which refuses a lock that has
+fallen behind `pyproject.toml`. Python is 3.12 in all of them, declared as a
+range of one, because the artifact is a pickle and a pickle read under a
+different minor version than wrote it is a promise nothing here tested. The
+UI's `requirements.txt` is the one deliberate exception: Streamlit Community
+Cloud installs it unpinned, and it can afford to, since the UI imports nothing
+that could load a model.
 
 **Every run logs what cannot be recovered afterwards.** Params and metrics, plus
 the **git SHA** of the code and the **sha256 of the panel** — the panel is hashed

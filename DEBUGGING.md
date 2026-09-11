@@ -4,6 +4,34 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-12 — the artifact's dependency hash named a file that was not in the repository
+
+- **Problem:** no crash. `freeze` recorded `lock_sha256` of `uv.lock` as the
+  artifact's "dependencies" line, and the traceability test accepted it. But
+  `uv.lock` was gitignored: the hash pointed at a file that existed on one
+  laptop, that CI and the image had never installed (both resolved
+  `pyproject.toml`'s lower bounds afresh), and that no reader could fetch at
+  the SHA beside it. Spotted in review, not by a test.
+- **Root cause:** two decisions made on different days that each read fine
+  alone. The `.gitignore` entry (2026-09-06) kept the lock out because nothing
+  validated it; the traceability row (2026-09-11) hashed it because it was
+  there. The test asserted `lock_sha256 is None or len(...) == 64` — a shape,
+  not a claim — so an unreachable file and a reachable one both passed.
+- **Solution:** commit the lock and make it the only install path —
+  `uv sync --locked` locally, in CI and in the Dockerfile, with `uv` pinned
+  to one version in both; the image promotes `load()`'s version-mismatch
+  warning to a build failure; `requires-python` narrowed to the one
+  interpreter every environment uses. `tests/test_deploy.py` asserts the
+  lock is tracked, every environment installs from it with `--locked`, and
+  five files name the same Python. `tests/test_freeze.py` asserts the
+  artifact's hash equals the committed file's.
+- **Lesson:** a hash is evidence only if the thing it names is reachable
+  from the same place as the hash. Before recording a checksum on an
+  artifact, ask where a stranger holding the artifact would find the bytes;
+  and a test of the form `is None or looks right` tests nothing.
+
+---
+
 ## 2026-09-11 — every late-arriving posting was labelled closed before it existed
 
 - **Problem:** no crash. On the H=1 validation block, postings not seen in

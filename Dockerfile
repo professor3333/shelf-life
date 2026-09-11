@@ -25,29 +25,58 @@ FROM python:3.12-slim
 # Bytecode files and buffered stdout both cost more than they are worth in a
 # container: the first is written to a layer nobody reads, the second hides the
 # logs of a process that just died.
+#
+# The uv settings make the install a function of `uv.lock` and nothing else:
+# the environment lands at a fixed path, from the image's own interpreter (no
+# managed-Python download), with no cache left in a layer.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    UV_PROJECT_ENVIRONMENT=/app/.venv \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_NO_CACHE=1
+
+# The installer, pinned to the version that wrote the lock. Installing it with
+# pip would fetch whatever uv was newest that day, which is the one unpinned
+# thing in an image whose point is that nothing is.
+COPY --from=ghcr.io/astral-sh/uv:0.12.5 /uv /bin/uv
 
 WORKDIR /app
 
-# Dependencies first, in their own layer. They change when `pyproject.toml`
-# does, which is rarely; the source changes constantly, and copying it first
-# would reinstall scikit-learn and XGBoost on every edit.
-COPY pyproject.toml README.md ./
-COPY src ./src
-COPY api ./api
-RUN pip install --no-cache-dir ".[api]" \
-    # XGBoost's Linux wheel depends on the CUDA runtime, which is 291MB of GPU
-    # libraries this service will never call: it scores one row at a time on a
-    # free tier that has no GPU. Removing them takes site-packages from 913MB to
-    # 622MB, and the pinned prediction is byte-identical afterwards. Nothing
-    # imports them unless a booster is asked for `device="cuda"`.
-    && pip list --format=freeze | grep -i "^nvidia" | cut -d= -f1 | xargs -r pip uninstall -y
+# Dependencies first, in their own layer, from the lock. `--locked` refuses if
+# `uv.lock` has fallen behind `pyproject.toml`, so an edited dependency list
+# with a stale lock fails the build rather than quietly installing something
+# the lock does not describe. `--no-install-project` keeps the source out of
+# this layer: the lock changes rarely, the source constantly, and copying it
+# first would reinstall scikit-learn and XGBoost on every edit.
+#
+# Only the `api` extra. The image serves; it does not train, track, plot or
+# render a form, and each of those extras is a dependency tree this 0.1-CPU
+# instance would pay for on every cold start.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-install-project --extra api
+
+# The environment first on PATH, so `python` and `uvicorn` below — and in the
+# healthcheck and the command — mean the locked ones.
+ENV PATH="/app/.venv/bin:${PATH}"
 
 # Then everything else the image is allowed to have. `.dockerignore` decides
-# what "everything else" means, and it does not mean `models/`.
+# what "everything else" means, and it does not mean `models/`. The second sync
+# installs the project itself, as a built wheel rather than an editable link,
+# against the already-populated environment.
+#
+# The uninstall comes *after* the last sync, because a sync makes the
+# environment match the lock and would put back anything removed before it —
+# the first draft removed the CUDA libraries in the layer above and the second
+# sync reinstalled them. XGBoost's Linux wheel depends on the CUDA runtime,
+# hundreds of MB of GPU libraries this service will never call: it scores one
+# row at a time on a free tier that has no GPU. Nothing imports them unless a
+# booster is asked for `device="cuda"`, and the pinned prediction is
+# byte-identical without them. The lock still names them, deliberately: it has
+# to reproduce the freeze's environment elsewhere, and a resolution edited by
+# hand is no longer the lock.
 COPY . .
+RUN uv sync --locked --no-editable --extra api \
+    && uv pip list --format=freeze | grep -i "^nvidia" | cut -d= -f1 | xargs -r uv pip uninstall
 
 # The model, by tag, or not at all. Empty by default: the tag is normally read
 # from `MODEL_TAG` below, and a plain `docker build` with neither still works and
@@ -62,6 +91,17 @@ ARG ARTIFACT_TAG=""
 # caught a booster written by a different xgboost than the image installs.
 # Both run at build time, so a bad artifact fails the build rather than the
 # stranger's first request.
+#
+# The load is strict here where it is lenient elsewhere: `load()` *warns* when
+# the artifact's recorded scikit-learn, xgboost or joblib differ from the
+# installed ones, because a laptop loading an old artifact to look at it should
+# not be refused. An image is different — it exists to serve that artifact, and
+# "the environment drifted since the freeze" is exactly the failure a build
+# should stop. The warning is promoted to an error, by message, so nothing else
+# a library says at import time can fail the build in its place. Since the
+# environment comes from the lock and the freeze recorded the lock's hash, a
+# mismatch here means the lock moved after the freeze: re-freeze, or do not
+# bump the library the artifact was written with.
 #
 # The build argument wins if given; otherwise the committed file decides. Blank
 # lines and `#` comments are stripped from it, so `MODEL_TAG` can explain itself
@@ -80,8 +120,12 @@ RUN TAG="${ARTIFACT_TAG}"; \
     if [ -n "${TAG}" ]; then \
         echo "artifact tag: ${TAG}" && \
         python -m src.inference.fetch --repo "${ARTIFACT_REPO}" --tag "${TAG}" --into models && \
-        python -c "from src.inference.artifact import load; a = load(); \
-print(f'artifact ok: {a.metadata.run_name}, fitted on {a.metadata.fitted_on}, threshold {a.metadata.threshold}')"; \
+        python -c "import warnings; warnings.filterwarnings('error', message='artifact was written with'); \
+from src.inference.artifact import load; from src.models.provenance import lock_sha256; a = load(); \
+print(f'artifact ok: {a.metadata.run_name}, fitted on {a.metadata.fitted_on}, threshold {a.metadata.threshold}'); \
+print(f'libraries: {a.metadata.versions}'); \
+same = a.metadata.lock_sha256 == lock_sha256(); \
+print('lock: ' + ('the one the artifact was frozen against' if same else 'moved since the freeze; the library versions above still agree'))"; \
     else \
         echo "no artifact tag: building the no-artifact image (/health will report model_loaded: false)"; \
     fi; \

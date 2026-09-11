@@ -1589,6 +1589,61 @@ enforces it.
 and it is more machinery than a project with one author needs; a clean
 committed tree is simpler and stricter.
 
+### The environment is the lock — **DECIDED 2026-09-12**
+
+The traceability table below names `lock_sha256` of `uv.lock`. On 2026-09-11,
+when that row was written, the file was **gitignored** — the entry argued that a
+lock "validated by nothing" would drift from what was actually installed. That
+was true, and it made the hash worthless: it named a resolution that existed on
+one laptop, that neither CI nor the image had ever installed, and that a reader
+of the artifact could not fetch at the SHA beside it. Meanwhile
+`pyproject.toml` carried lower bounds only, so training, CI and the image each
+resolved afresh and could each land on a different scikit-learn or XGBoost.
+For a pickled estimator that is the failure mode that matters: a booster
+written by one version and read by another either fails to load — the
+Dockerfile's build-time load would catch that — or loads and answers
+differently from its recorded metrics, which nothing would.
+
+**So the lock is committed, and everything installs from it.** Locally,
+`uv sync --locked --extra dev --extra api --extra ui`; in CI, the same;
+in the image, `uv sync --locked --extra api`. `--locked` is the half that
+matters: it refuses a lock that has fallen behind `pyproject.toml`, so "add a
+dependency, forget to re-lock" fails in CI and in the build rather than
+resolving to something newer on the runner than on the laptop that froze the
+model. The installer itself is pinned to one version in both places. The
+lock's hash on the artifact now points at a file in the repository, which is
+what the traceability row always claimed.
+
+**Two consequences worth naming.** First, the image's load check became
+strict: `load()` warns on a scikit-learn / XGBoost / joblib mismatch, because a
+laptop opening an old artifact to look at it should not be refused, but the
+image promotes that one warning to a build failure. With both sides installed
+from the lock, the only way it fires is a lock bumped after the freeze — and
+then the right answer is to re-freeze or not to bump, not to serve. Second, the
+CUDA libraries XGBoost's Linux wheel drags in are still removed from the image,
+but *after* the last sync, since a sync restores the environment to the lock
+and the first draft had them reinstalled by the second sync. The lock keeps
+naming them deliberately: it has to reproduce the freeze's environment
+elsewhere, and a resolution edited by hand is no longer the lock.
+
+**One Python, declared as a range of one.** `requires-python` said `>=3.11`
+while every environment that ever ran the suite or froze a model was 3.12 — a
+supported version nothing tested, on a project whose artifact is a pickle. It
+is now `>=3.12,<3.13`, `.python-version` is committed, the lock resolves for
+one interpreter instead of nine marker combinations, and a test asserts that
+`pyproject.toml`, `.python-version`, `uv.lock`, the Dockerfile and the dev
+container all name the same minor. Testing 3.11 as well was the alternative;
+it would cost a CI matrix to support a version no environment here uses.
+
+*The UI's `requirements.txt` is the one deliberate exception.* Streamlit
+Community Cloud installs it unpinned, and it can afford to: the UI imports
+nothing that could load a model (§7c), so drift there cannot change a
+prediction.
+
+**Would change my mind:** a second deployment target that cannot run `uv` —
+then the lock would be exported to a pinned `requirements` file for it, still
+generated from `uv.lock`, never written by hand.
+
 ### What the artifact is traceable to
 
 Everything below travels on the artifact's metadata and its JSON sidecar, and
@@ -1600,7 +1655,7 @@ the test `test_the_artifact_names_everything_it_is_traceable_to` pins the list:
 | data | `provenance.panel_sha256`, `snapshot_date`, `panel_path` |
 | the scraper's parsing epoch | `rules_version` — runs are only comparable within one, so the panel carries the value it was built at |
 | horizon | `horizon_days`, `horizon_basis` |
-| dependencies | `lock_sha256` of `uv.lock`, plus library versions in `versions` |
+| dependencies | `lock_sha256` of the committed `uv.lock` that every environment installs from, plus library versions in `versions` |
 | training configuration | `run_name`, `params`, `features`, `fitted_on`, `threshold`, `budget_per_day`, `selection_folds` |
 | random seed | `seed` — the one random state every fitted rung shares |
 | the artifact itself | `artifact_sha256` in the sidecar (a file cannot contain its own hash), repeated by `SHA256SUMS` at release and verified on fetch |

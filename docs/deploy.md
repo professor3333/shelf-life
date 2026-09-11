@@ -90,7 +90,9 @@ Dependencies come from `requirements.txt` at the repository root, which installs
 Streamlit, requests and pandas — **and nothing that could load a model**. That
 is deliberate: Community Cloud checks out the whole repository, so `app/` sits
 next to `src/` and could import it. The dependency list and `tests/test_app.py`
-are what stop that. `docs/design.md` §7c records this as a downgrade from the
+are what stop that. It is also the one environment not installed from
+`uv.lock`, and the same fact is why that is acceptable: nothing the UI imports
+can change a prediction, so drift there is cosmetic (`docs/design.md` §16). `docs/design.md` §7c records this as a downgrade from the
 previous arrangement, where the UI was deployed without `src/` present at all.
 
 Without the secret the UI defaults to `http://localhost:8000` and shows the

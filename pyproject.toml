@@ -3,10 +3,23 @@ name = "shelf-life"
 version = "0.1.0"
 description = "Predicting how long a job posting stays on the board."
 readme = "README.md"
-requires-python = ">=3.11"
+# One interpreter, not a range. The artifact is a pickle written under the
+# freeze's Python and read by the serving image's, and the Dockerfile, CI, the
+# dev container and `.python-version` all name 3.12. Advertising `>=3.11` was a
+# promise nothing tested: no 3.11 environment ever ran the suite, and an artifact
+# frozen there would meet a 3.12 image with nothing having said it might not
+# load. `tests/test_deploy.py` asserts these five places agree.
+requires-python = ">=3.12,<3.13"
 license = { text = "MIT" }
 authors = [{ name = "Niroj33" }]
 
+# Lower bounds here say what the code needs; `uv.lock` says what it actually
+# ran against, hashed, package by package, and is the resolution every
+# environment installs — `uv sync --locked` locally, in CI, and in the image.
+# For a pickled estimator the distinction is not cosmetic: a booster written
+# by one xgboost and read by another is a deploy that fails, or worse, one that
+# answers differently from its recorded metrics. The lock's sha256 travels on
+# every frozen artifact as `lock_sha256` (`docs/design.md` §16).
 dependencies = [
     "pandas>=2.2",
     "numpy>=1.26",
@@ -80,7 +93,7 @@ packages = ["src", "api", "app"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
