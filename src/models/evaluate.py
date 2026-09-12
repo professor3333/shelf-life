@@ -38,6 +38,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from sklearn.pipeline import Pipeline
 
 from src.data import cohort_audit
 from src.data.split import (
@@ -185,7 +186,7 @@ def wave_forward_folds(
 
 
 def cross_validate(
-    build: Callable[[], object],
+    build: Callable[[], Pipeline],
     block: pd.DataFrame,
     folds: Sequence[Fold],
     budget_per_day: int = DEFAULT_ALERT_BUDGET,
@@ -341,9 +342,9 @@ def calibration_summary(y_true, y_score, n_bins: int = 10) -> dict[str, float]:
     }
 
 
-def candidate_models(split: SplitResult) -> dict[str, Callable[[], object]]:
+def candidate_models(split: SplitResult) -> dict[str, Callable[[], Pipeline]]:
     """Everything in the ladder, plus the boosted rung."""
-    candidates: dict[str, Callable[[], object]] = {rung.name: rung.build for rung in LADDER}
+    candidates: dict[str, Callable[[], Pipeline]] = {rung.name: rung.build for rung in LADDER}
     candidates["xgboost"] = lambda: build_xgboost(split)
     return candidates
 

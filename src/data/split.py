@@ -52,6 +52,7 @@ message.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -438,7 +439,7 @@ def minimum_waves(
     horizon_days: int | None = None,
     corroboration_runs: int = CORROBORATION_RUNS,
     target_folds: int = DEFAULT_TARGET_FOLDS,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """How many crawl waves a three-block split needs, and how many exist.
 
     `feasible_cuts` answers *can I split this today*; this answers *how much
@@ -551,7 +552,7 @@ def accrual_status(
     frame: pd.DataFrame,
     now: pd.Timestamp | None = None,
     tolerance: float = STALE_AFTER_MULTIPLE,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Is the panel still growing, or has the source stopped feeding it?
 
     **The question `projected_clear` cannot ask and must not answer without.** A
@@ -596,7 +597,7 @@ def projected_clear(
     frame: pd.DataFrame,
     target_folds: int = DEFAULT_TARGET_FOLDS,
     now: pd.Timestamp | None = None,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """The dates the two gates clear, if crawls keep arriving as they have.
 
     `minimum_waves` answers *how many more waves*; a person waiting wants *which

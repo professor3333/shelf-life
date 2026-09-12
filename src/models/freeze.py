@@ -95,6 +95,7 @@ from src.models.metrics import (
 )
 from src.models.train_baseline import DEFAULT_PANEL, RANDOM_STATE, _table, prediction_days
 from src.models.uncertainty import (
+    Interval,
     bootstrap_block,
     evaluate_by_with_evidence,
     evidence_columns,
@@ -126,12 +127,12 @@ class FrozenModel:
     #: PR-AUC on roughly twenty positives, and a point estimate at that count is
     #: not a result on its own — `src/models/uncertainty.py` says why the
     #: resampling unit is the posting rather than the row.
-    test_intervals: dict[str, object]
+    test_intervals: dict[str, Interval]
     #: The same intervals on the validation block, at the same frozen threshold,
     #: so validation and test can be read against each other with a spread on
     #: both sides rather than one — added 2026-09-12; until then only the test
     #: block carried them.
-    validation_intervals: dict[str, object]
+    validation_intervals: dict[str, Interval]
     #: What `src/models/calibration.py` decided, and the numbers it decided on.
     recalibration: dict
     #: The leave-one-board-out assessment of this candidate (`generalisation.assess`),

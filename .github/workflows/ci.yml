@@ -39,5 +39,21 @@ jobs:
       - name: Format
         run: uv run ruff format --check .
 
+      # The project's own annotations, checked against each other. Third-party
+      # scientific libraries ship partial typing, so `ignore_missing_imports`
+      # (pyproject) keeps this about our signatures — a wrong return type or a
+      # `str` where a `Literal` is declared fails here, `pandas` returning
+      # `Any` does not.
+      - name: Types
+        run: uv run mypy
+
+      # Coverage with a floor, not a target: a change that deletes tests or
+      # adds a module nothing exercises fails; the number itself is not a goal.
       - name: Test
-        run: uv run pytest -q
+        run: uv run pytest -q --cov --cov-report=term-missing:skip-covered --cov-fail-under=85
+
+      # The environment that is installed — the same lock the image installs —
+      # against the OSV/PyPI advisory databases. A vulnerable pin fails the
+      # build on the push that introduced it, not in a release later.
+      - name: Audit dependencies
+        run: uv run pip-audit --progress-spinner off

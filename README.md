@@ -1401,6 +1401,15 @@ code, decisions and aggregate numbers.
 
 ## Testing
 
+CI runs, on every push and pull request, from the locked environment: `ruff
+check`, `ruff format --check`, `mypy` over `src/`, `api/` and `app/` (the
+project's own annotations against each other; third-party scientific
+libraries are untyped and ignored), the suite with a coverage floor of 85%
+(a floor, not a target — it exists so a change that deletes tests or adds a
+module nothing exercises fails), and `pip-audit` over the installed lock
+against the advisory databases. CodeQL's `security-and-quality` queries run
+on push and weekly; findings land under the repository's Security tab.
+
 ```bash
 pytest                 # the whole suite; about four minutes
 ruff check .

@@ -183,7 +183,7 @@ def lock_sha256(path: Path = LOCK_FILE) -> str | None:
     return sha256_of(path) if path.exists() else None
 
 
-def period(frame, column: str = "t") -> dict[str, str]:
+def period(frame, column: str = "t") -> dict[str, str | int | None]:
     """The first and last prediction instant a block covers, as dates.
 
     Every claim this project makes is about a period, and a claim without one

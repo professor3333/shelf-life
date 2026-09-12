@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -87,7 +88,7 @@ def _score(pipeline, block: pd.DataFrame) -> dict[str, float]:
     }
 
 
-def majority_baseline(split: SplitResult) -> dict[str, float]:
+def majority_baseline(split: SplitResult) -> dict[str, Any]:
     """What guessing the training block's commonest board scores on validation."""
     commonest = split.train[TARGET].value_counts().idxmax()
     truth = split.val[TARGET].to_numpy()

@@ -40,6 +40,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from time import perf_counter
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -187,7 +188,7 @@ def create_app(artifact: Path | str | None = None) -> FastAPI:
     def health() -> HealthResponse:
         """Is the process up, and does it have a model? Both, separately."""
         predictor = getattr(app.state, "predictor", None)
-        cost = {
+        cost: dict[str, Any] = {
             "load_seconds": getattr(app.state, "load_seconds", None),
             "ready_after_seconds": getattr(app.state, "ready_after_seconds", None),
             "rss_mb": rss_mb(),
