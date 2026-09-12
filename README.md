@@ -1797,7 +1797,11 @@ screen rather than in a footnote — that is the mitigation, and it is deliberat
    all; it does not make the *training population* representative. Those are
    different claims and only the first is settled. The per-source breakdown and
    the leave-one-board-out transfer measurement are mandatory reporting for
-   exactly that reason.
+   exactly that reason — and even a passing transfer gate is transfer *within*
+   this source family, never to a board of a different kind. Widening the
+   family means fixing the collector's page cap first; that is a v2 concern,
+   recorded in [`docs/design.md`](docs/design.md) §17, and not a gate on this
+   build.
 3. **The panel is short and the positives are few.** 96 positives across 6,874
    labelled rows. Differences of a few points between models will be inside the
    noise, which is why fold variance is reported and paired differences are used
