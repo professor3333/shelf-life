@@ -455,7 +455,7 @@ def test_the_smoke_test_exercises_rank_the_way_an_operator_would() -> None:
     )
 
     start = smoke.index("rank returned an unusable ranking")
-    check = smoke[start : smoke.index('echo "ok  /rank"')]
+    check = smoke[start : smoke.index('echo "ok  /rank (board snapshot)"')]
     for property_ in (
         "len(postings) != 5",  # correct count
         "0.0 <= p <= 1.0",  # scores valid
@@ -464,10 +464,11 @@ def test_the_smoke_test_exercises_rank_the_way_an_operator_would() -> None:
         "watch ranks 1 and 2 and nothing else",  # budget respected
         "not deterministic",  # same batch, same answer
         "alone and",  # /rank agrees with /predict
+        "derived from the snapshot",  # the board-ranking mode proper
     ):
         assert property_ in check, f"the /rank check no longer verifies: {property_}"
 
-    read = set(re.findall(r'(?:item|first|second)(?:\.get\(|\[)"(\w+)"', check))
+    read = set(re.findall(r'(?:item|first|second|body)(?:\.get\(|\[)"(\w+)"', check))
     known = set(RankResponse.model_fields) | set(RankedPosting.model_fields)
     missing = read - known
     assert not missing, f"smoke.sh reads {sorted(missing)} which /rank does not return"

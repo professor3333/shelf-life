@@ -36,6 +36,7 @@ import numpy as np
 import pandas as pd
 
 from src.inference.artifact import DEFAULT_ARTIFACT, Artifact, load
+from src.inference.board_snapshot import DERIVED, SUPPLIED_OR_IMPUTED, derive_board_context
 from src.inference.contract import board_context_supplied, build_row
 
 
@@ -123,6 +124,14 @@ class RankedBatch:
     model: str
     dataset: str
     t: str
+    #: Where the four board-context fields came from for this batch: derived
+    #: from a declared snapshot, or (per posting) supplied by the caller or
+    #: imputed. Said at the batch level because in snapshot mode it is one fact
+    #: about the batch, not a property of each posting.
+    board_context_source: str = "supplied per posting or imputed"
+    #: The board size the snapshot implied, so a caller who declared a partial
+    #: board as whole can see the number the model was handed.
+    board_size: int | None = None
 
 
 #: Where `threshold_applied` came from. Named rather than inferred, because the
@@ -189,6 +198,8 @@ class Predictor:
         payloads: Sequence[dict],
         t: pd.Timestamp | str | None = None,
         budget: int | None = None,
+        board_snapshot: bool = False,
+        previous_board_size: int | None = None,
     ) -> RankedBatch:
         """Score many postings and order them, applying the alert budget.
 
@@ -199,12 +210,15 @@ class Predictor:
         isolation, which is coherent but is the degenerate case; this is the
         case it came from.
 
-        **Board context is imputed, exactly as in `predict`.** A batch is not
-        automatically the board. Deriving `board_size_at_t` from the batch would
-        let fifty postings manufacture a board of fifty, and the model was fitted
-        on boards of several hundred — unlike a missing value, which the training
-        fold's imputer handles, that one is confidently wrong. `docs/design.md`
-        §12 revisits this only if the ablation says the four features matter.
+        **Board context is imputed unless the batch is declared a snapshot.** A
+        batch is not automatically the board: deriving `board_size_at_t` from
+        fifty postings would manufacture a board of fifty, and the model was
+        fitted on boards of several hundred. So by default the four fields are
+        imputed exactly as in `predict`, or used if a caller supplied them. With
+        `board_snapshot=True` the caller declares the batch *is* one board,
+        whole, and the four are derived from it by the panel's own definitions
+        (`src/inference/board_snapshot.py`) — the ranking mode `docs/design.md`
+        §12 names as the honest home for board context.
 
         **Scoring is one `predict_proba` call over one frame**, built from the
         same `build_row` and run through the same fitted pipeline object as
@@ -226,6 +240,12 @@ class Predictor:
         moment = pd.Timestamp(t) if t is not None else pd.Timestamp(datetime.now(UTC))
         if moment.tzinfo is None:
             moment = moment.tz_localize("UTC")
+
+        if board_snapshot:
+            payloads = derive_board_context(payloads, previous_board_size)
+            context_source = DERIVED
+        else:
+            context_source = SUPPLIED_OR_IMPUTED
 
         frame = pd.concat([build_row(payload, moment) for payload in payloads], ignore_index=True)
         probabilities = self.artifact.pipeline.predict_proba(frame)[:, 1]
@@ -263,6 +283,8 @@ class Predictor:
             model=self.metadata.run_name,
             dataset=self.metadata.dataset,
             t=moment.isoformat(),
+            board_context_source=context_source,
+            board_size=len(payloads) if board_snapshot else None,
         )
 
 

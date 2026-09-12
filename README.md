@@ -756,11 +756,20 @@ Three properties worth stating, because each is a decision:
   operating point; `batch_budget` is this batch's budget-th score, a property of
   what was submitted rather than of the model. They differ, and neither is
   silently substituted for the other.
-- **Board context is imputed, not derived from the batch.** A submitted batch is
-  not the board: letting fifty postings manufacture `board_size_at_t = 50` would
-  hand the model a value from a distribution it never saw, and unlike a missing
-  value — which the training fold's imputer handles — that one is confidently
-  wrong.
+- **Board context is derived only from a declared snapshot.** An undeclared
+  batch is not the board: letting fifty postings manufacture `board_size_at_t
+  = 50` would hand the model a value from a distribution it never saw, so by
+  default the four board fields are imputed, or used if a posting carries them.
+  With `is_board_snapshot: true` the caller says the batch *is* one whole board
+  and the service computes the four from it by the panel's own definitions —
+  size, same-title count, requisition-group count from an optional
+  `requisition_id`, growth against `previous_board_size`. The response says
+  `board_context_source` and the `board_size` the model was handed. A batch
+  naming two boards, or a snapshot that also carries the four per posting, is a
+  422. This is the board-ranking mode proper; `/predict` is the
+  individual-posting mode and does not accept the four fields at all — a person
+  holding one advert cannot know them, and sending them there is a 422 that
+  names this endpoint ([`docs/design.md`](docs/design.md) §12).
 
 The batch cap is **250 postings**, from measurement rather than taste: 1.42 s on
 a full core, ~23 s at the free instance's 0.1 vCPU, and with the measured
@@ -1757,9 +1766,11 @@ screen rather than in a footnote — that is the mitigation, and it is deliberat
    rather than differences of averages.
 4. **Board context is missing at serve time, and it costs something.** Four
    features describe the board rather than the posting, and a caller holding one
-   job ad cannot supply them. They are imputed when absent, which makes them
-   inert for that caller — the response says so via `board_context_supplied`,
-   and `docs/design.md` §12 keeps them on that basis. The cost is measured
+   job ad cannot supply them. `/predict` does not accept them; they are imputed,
+   which makes them inert for that caller, and the response says so via
+   `board_context_supplied`. `/rank` derives them from a declared board snapshot,
+   which is where they genuinely exist. `docs/design.md` §12 keeps them on that
+   basis, with a rule at the freeze for whether the default model carries them. The cost is measured
    rather than assumed: **0.0019 validation PR-AUC**, against the 0.0005 that a
    refit-without-them suggests. The refit redistributes their weight; the
    deployed model cannot, so it is the larger number that a stranger gets.

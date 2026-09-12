@@ -125,28 +125,28 @@ FIELDS: tuple[Field, ...] = (
         "number",
         "board",
         False,
-        "how many postings the board carried at `t`. Unknowable from one posting",
+        "how many postings the board carried at `t`. Unknowable from one posting; derived from a declared board snapshot in ranking mode",
     ),
     Field(
         "board_growth",
         "number",
         "board",
         False,
-        "change in board size since the previous crawl. Unknowable from one posting",
+        "change in board size since the previous crawl. Unknowable from one posting; derived in ranking mode from `previous_board_size`",
     ),
     Field(
         "n_same_title_on_board",
         "number",
         "board",
         False,
-        "duplicate-title count on the board at `t`. Unknowable from one posting",
+        "duplicate-title count on the board at `t`. Unknowable from one posting; derived from a declared board snapshot in ranking mode",
     ),
     Field(
         "n_same_req_on_board",
         "number",
         "board",
         False,
-        "requisition-group size on the board at `t`. Unknowable from one posting",
+        "requisition-group size on the board at `t`. Unknowable from one posting; derived in ranking mode from `requisition_id`, when given",
     ),
 )
 

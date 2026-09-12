@@ -211,7 +211,25 @@ print(f"  5 postings, budget 2, source {first['threshold_source']}, threshold {f
 print("  ranks: " + ", ".join(f"#{item['rank']} {item['probability']:.4f}{' *' if item['watch'] else ''}" for item in by_rank))
 print("  deterministic across two calls; posting 1 matches /predict")
 PY
-echo "ok  /rank"
+# The board-ranking mode proper: the same five postings declared a snapshot,
+# so the service derives board context from the batch instead of imputing it.
+rank_body | python3 -c 'import json,sys; b=json.load(sys.stdin); b["is_board_snapshot"]=True; print(json.dumps(b))' \
+  | curl -fsS --max-time 60 -X POST "${BASE_URL}/rank" \
+      -H 'content-type: application/json' -d @- > "${WORK}/snapshot.json" \
+  || fail "/rank refused a declared board snapshot"
+python3 - "${WORK}/snapshot.json" <<'PY' || fail "/rank did not derive board context from the snapshot"
+import json, sys
+
+body = json.load(open(sys.argv[1]))
+if body.get("board_context_source") != "derived from the snapshot":
+    sys.exit(f"board_context_source is {body.get('board_context_source')!r}")
+if body.get("board_size") != 5:
+    sys.exit(f"board_size is {body.get('board_size')!r}, expected 5")
+if not all(item.get("board_context_supplied") for item in body["postings"]):
+    sys.exit("a posting in a snapshot was scored with imputed board context")
+print(f"  snapshot of {body['board_size']}: board context {body['board_context_source']}")
+PY
+echo "ok  /rank (board snapshot)"
 
 # --- bad input is a 4xx, never a 500 ----------------------------------------
 code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -X POST "${BASE_URL}/predict" \

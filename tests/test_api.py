@@ -114,9 +114,27 @@ def test_the_response_carries_what_makes_a_probability_readable(client):
     assert body["dataset"] == "synthetic"
 
 
-def test_board_context_is_reported_when_supplied(client):
+def test_predict_takes_only_what_a_person_holding_one_advert_can_know(client):
+    """The individual-posting mode. Board context is not a field here — it
+    belongs to the ranking mode, where the service derives it from the board.
+    Until 2026-09-12 it was accepted and almost always imputed, which mixed
+    the two questions under one endpoint."""
     payload = {**FIXED_POSTING, "as_of": FIXED_T, "board_size_at_t": 300}
-    assert client.post("/predict", json=payload).json()["board_context_supplied"] is True
+    response = client.post("/predict", json=payload)
+    assert response.status_code == 422
+    assert "board_size_at_t" in response.text
+    plain = client.post("/predict", json={**FIXED_POSTING, "as_of": FIXED_T}).json()
+    assert plain["board_context_supplied"] is False
+
+
+def test_board_context_is_reported_when_supplied_per_posting_in_rank(client):
+    body = client.post(
+        "/rank",
+        json={"postings": [{**FIXED_POSTING, "board_size_at_t": 300}], "as_of": FIXED_T},
+    ).json()
+    assert body["postings"][0]["board_context_supplied"] is True
+    assert body["board_context_source"] == "supplied per posting or imputed"
+    assert body["board_size"] is None
 
 
 def test_a_title_alone_is_a_valid_request(client):
@@ -184,11 +202,21 @@ def test_a_malformed_body_is_422(client):
 # --- the schema is the audit ------------------------------------------------
 
 
-def test_the_request_schema_is_exactly_the_contract():
-    """A field in one and not the other is a feature nobody can send, or a field
-    that reaches nothing. `as_of` is the documented exception: it is the
-    prediction instant, an axis, never an input."""
-    assert set(PostingRequest.model_fields) - {"as_of"} == {field.name for field in FIELDS}
+def test_the_two_request_shapes_partition_the_contract():
+    """A field in the contract and in neither shape is a feature nobody can
+    send; a field in a shape and not the contract reaches nothing. The
+    individual-posting shape takes everything a person can know; the board
+    shape adds the four board fields (and `requisition_id`, an identifier for
+    the snapshot count, never a feature). `as_of` is the documented exception:
+    the prediction instant, an axis, never an input."""
+    from api.schemas import BoardPosting
+    from src.inference.contract import BOARD_CONTEXT
+
+    contract = {field.name for field in FIELDS}
+    single = set(PostingRequest.model_fields) - {"as_of"}
+    board = set(BoardPosting.model_fields) - {"as_of", "requisition_id"}
+    assert single == contract - set(BOARD_CONTEXT)
+    assert board == contract
 
 
 def test_the_contract_endpoint_publishes_the_audit(client):
@@ -378,3 +406,58 @@ def test_rank_refuses_without_a_model(modelless_client):
     ranking request with an empty or invented list."""
     response = modelless_client.post("/rank", json={"postings": _postings(3)})
     assert response.status_code == 503
+
+
+# --- the board-ranking mode proper: a declared snapshot ------------------------
+
+
+def test_a_declared_snapshot_derives_board_context_from_the_batch(client):
+    postings = _postings(12)
+    postings[0]["title"] = postings[1]["title"] = "Same Title"
+    body = client.post(
+        "/rank",
+        json={
+            "postings": postings,
+            "as_of": FIXED_T,
+            "is_board_snapshot": True,
+            "previous_board_size": 10,
+        },
+    ).json()
+    assert body["board_context_source"] == "derived from the snapshot"
+    assert body["board_size"] == 12
+    assert all(item["board_context_supplied"] for item in body["postings"])
+
+
+def test_a_snapshot_may_not_carry_board_context_per_posting(client):
+    postings = _postings(3)
+    postings[0]["board_size_at_t"] = 500
+    response = client.post(
+        "/rank", json={"postings": postings, "as_of": FIXED_T, "is_board_snapshot": True}
+    )
+    assert response.status_code == 422
+    assert "derives board context" in response.text
+
+
+def test_a_snapshot_of_two_boards_is_refused(client):
+    postings = _postings(2)
+    postings[0]["source"], postings[1]["source"] = "greenhouse:a", "greenhouse:b"
+    response = client.post(
+        "/rank", json={"postings": postings, "as_of": FIXED_T, "is_board_snapshot": True}
+    )
+    assert response.status_code == 422
+    assert "one board" in response.text
+
+
+def test_the_snapshot_scores_as_supplied_context_would(client, synthetic_artifact):
+    """Deriving the four fields is the same as the caller computing and sending
+    them — through the API, the derived batch and the hand-supplied batch get
+    identical probabilities."""
+    postings = _postings(6)
+    derived = client.post(
+        "/rank", json={"postings": postings, "as_of": FIXED_T, "is_board_snapshot": True}
+    ).json()
+    by_hand = [{**p, "board_size_at_t": 6, "n_same_title_on_board": 1} for p in postings]
+    supplied = client.post("/rank", json={"postings": by_hand, "as_of": FIXED_T}).json()
+    assert [i["probability"] for i in derived["postings"]] == pytest.approx(
+        [i["probability"] for i in supplied["postings"]]
+    )

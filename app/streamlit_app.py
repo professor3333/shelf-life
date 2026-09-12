@@ -200,12 +200,35 @@ if mode == RANK:
         )
     with right:
         as_of_date = st.date_input("As of", value=None, format="YYYY-MM-DD")
+    # The board-ranking mode proper. Board context — how many postings the
+    # board carries, how many share a title, how it grew — is unknowable from
+    # one advert and is imputed for one, but for a whole board it is arithmetic
+    # over the board itself. The caller says whether this is the whole board.
+    is_snapshot = st.checkbox(
+        "These postings are the whole board — derive board context from them",
+        value=False,
+        help="Off: the four board-level features are imputed from the training data "
+        "(or used if a column supplies them). On: they are computed from this batch by "
+        "the panel's own definitions — size, same-title count, requisition-group count "
+        "(from a `requisition_id` column, if present) and growth against yesterday's "
+        "size below. A partial board declared whole hands the model a board size it "
+        "never saw.",
+    )
+    previous_size = st.number_input(
+        "Board size at the previous crawl (for growth; optional)",
+        min_value=0,
+        value=None,
+        step=1,
+        disabled=not is_snapshot,
+    )
     rank_it = st.button("Rank", type="primary")
 
     if rank_it:
         text = uploaded.getvalue().decode("utf-8") if uploaded is not None else pasted
         try:
             allowed = {row["field"] for row in api.contract()}
+            if is_snapshot:
+                allowed = allowed | {"requisition_id"}
             board = parse_board(text, allowed)
         except (ApiError, ValueError) as error:
             st.error(f"could not read the board: {error}")
@@ -216,8 +239,15 @@ if mode == RANK:
 
         try:
             with st.spinner(f"Ranking {len(board)} postings…"):
-                ranking = rank_board(api, board, budget=int(budget), as_of=_iso(as_of_date))
-        except ApiError as error:
+                ranking = rank_board(
+                    api,
+                    board,
+                    budget=int(budget),
+                    as_of=_iso(as_of_date),
+                    is_board_snapshot=bool(is_snapshot),
+                    previous_board_size=int(previous_size) if previous_size is not None else None,
+                )
+        except (ApiError, ValueError) as error:
             st.error(str(error))
             st.stop()
 
@@ -261,11 +291,16 @@ if mode == RANK:
             )
         for note in warnings_for(health):
             st.warning(note)
-        if not all(row["board_context_supplied"] for row in ranking["postings"]):
+        if ranking["board_size"] is not None:
+            st.caption(
+                f"Board context derived from the snapshot: {ranking['board_size']} postings "
+                f"on the board ({ranking['board_context_source']})."
+            )
+        elif not all(row["board_context_supplied"] for row in ranking["postings"]):
             st.warning(
                 "Board context was not supplied for every posting, so the board-level "
                 "features were imputed to constants there. A submitted batch is not the "
-                "board: the service does not count it as one."
+                "board unless you say it is — tick the snapshot box if it is."
             )
         st.info(CAVEAT)
     st.stop()
@@ -300,16 +335,12 @@ with st.form("posting"):
         "embeddings are a later stage of this project, not this one.",
     )
 
-    with st.expander("Board context — only if you run the board"):
-        st.caption(
-            "These four describe the board rather than the posting, so somebody "
-            "holding one job ad cannot know them. Left empty they are imputed "
-            "from the training data, and the result says so."
-        )
-        board_size = st.number_input("Postings on the board", min_value=0, value=None, step=1)
-        board_growth = st.number_input("Change since the previous crawl", value=None, step=1)
-        same_title = st.number_input("Postings with this same title", min_value=0, value=None)
-        same_req = st.number_input("Postings in this requisition group", min_value=0, value=None)
+    st.caption(
+        "Only what you can know from the advert itself. The four board-level "
+        "features — how many postings the board carries, how many share this title, "
+        "how it grew — are imputed here, and the result says so; if you hold the whole "
+        "board, *Rank a board* derives them from it."
+    )
 
     submitted = st.form_submit_button("Predict", type="primary")
 
@@ -330,10 +361,6 @@ if submitted:
             "content_chars": float(len(description)) if description.strip() else None,
             "first_published": _iso(published),
             "updated_at": _iso(updated),
-            "board_size_at_t": board_size,
-            "board_growth": board_growth,
-            "n_same_title_on_board": same_title,
-            "n_same_req_on_board": same_req,
         }
     )
 

@@ -27,9 +27,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.inference.contract import FIELDS_BY_NAME
+from src.inference.contract import BOARD_CONTEXT, FIELDS_BY_NAME
 from src.inference.predict import MAX_BATCH
 
 
@@ -45,6 +45,16 @@ def _why(name: str) -> str:
 
 class PostingRequest(BaseModel):
     """One job posting, as somebody looking at it could describe it.
+
+    **The individual-posting mode.** Only what a person holding one advert can
+    know — so the four board-context fields (`board_size_at_t`, `board_growth`,
+    `n_same_title_on_board`, `n_same_req_on_board`) are not fields here at all.
+    Until 2026-09-12 they were accepted on `/predict` and almost always
+    imputed, which mixed two questions under one endpoint: a caller who did
+    type them in was scoring a posting with numbers the model expects to
+    describe a whole board. They belong to the board-ranking mode, where the
+    service derives them from the snapshot it is given (`BoardPosting`,
+    `RankRequest.is_board_snapshot`). Sent here, they are a 422 that says so.
 
     `extra="forbid"` makes an unknown field a 422 rather than a shrug. Ignoring
     it is friendlier exactly until someone sends `salary` instead of
@@ -79,14 +89,6 @@ class PostingRequest(BaseModel):
     updated_at: datetime | None = Field(default=None, description=_why("updated_at"))
     source: str | None = Field(default=None, description=_why("source"))
     company: str | None = Field(default=None, description=_why("company"))
-    board_size_at_t: float | None = Field(default=None, ge=0, description=_why("board_size_at_t"))
-    board_growth: float | None = Field(default=None, description=_why("board_growth"))
-    n_same_title_on_board: float | None = Field(
-        default=None, ge=0, description=_why("n_same_title_on_board")
-    )
-    n_same_req_on_board: float | None = Field(
-        default=None, ge=0, description=_why("n_same_req_on_board")
-    )
 
     as_of: datetime | None = Field(
         default=None,
@@ -95,6 +97,25 @@ class PostingRequest(BaseModel):
         "prediction can be reproduced exactly.",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def _board_context_belongs_to_the_ranking_mode(cls, data):
+        """Say *why* the four fields are refused here, not just that they are.
+
+        `extra="forbid"` would reject them as unknown, which reads as a typo.
+        They are not unknown; they are the other mode's. `BoardPosting`
+        declares them and skips this.
+        """
+        if cls is PostingRequest and isinstance(data, dict):
+            sent = [name for name in BOARD_CONTEXT if name in data]
+            if sent:
+                raise ValueError(
+                    f"{sent} describe the board, not the posting, and are not accepted on "
+                    "/predict. Send the whole board to /rank with is_board_snapshot=true "
+                    "and the service derives them; or supply them per posting there."
+                )
+        return data
+
     def payload(self) -> dict:
         """The contract's vocabulary, with `as_of` removed.
 
@@ -102,6 +123,31 @@ class PostingRequest(BaseModel):
         the pipeline the same way, as a value the training fold's imputer fills.
         """
         return self.model_dump(exclude_none=True, exclude={"as_of"})
+
+
+class BoardPosting(PostingRequest):
+    """One posting inside a board batch — the board-ranking mode's row.
+
+    Everything `PostingRequest` takes, plus what only a caller holding the
+    board can say: the four board-context fields, if they computed them
+    themselves; or `requisition_id`, which the service uses for the
+    requisition-group count when the batch is a declared snapshot and for
+    nothing else — it is an identifier, never a feature.
+    """
+
+    board_size_at_t: float | None = Field(default=None, ge=0, description=_why("board_size_at_t"))
+    board_growth: float | None = Field(default=None, description=_why("board_growth"))
+    n_same_title_on_board: float | None = Field(
+        default=None, ge=0, description=_why("n_same_title_on_board")
+    )
+    n_same_req_on_board: float | None = Field(
+        default=None, ge=0, description=_why("n_same_req_on_board")
+    )
+    requisition_id: str | None = Field(
+        default=None,
+        description="The employer's requisition id, for the requisition-group count in a "
+        "declared board snapshot. An identifier; never reaches the model.",
+    )
 
 
 class PredictionResponse(BaseModel):
@@ -151,9 +197,20 @@ class RankRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    postings: list[PostingRequest] = Field(min_length=1, max_length=MAX_BATCH)
+    postings: list[BoardPosting] = Field(min_length=1, max_length=MAX_BATCH)
     budget: int | None = Field(default=None, ge=1)
     as_of: datetime | None = None
+    #: The board-ranking mode proper. `true` declares that `postings` is one
+    #: board, whole, as of `as_of`, and the service derives the four
+    #: board-context fields from it by the panel's own definitions — a
+    #: posting may not then also carry them. `false` (the default) leaves them
+    #: to the caller: supplied per posting, or imputed. A partial board
+    #: declared whole yields a board size the model never saw; the response
+    #: reports the size it was handed.
+    is_board_snapshot: bool = False
+    #: Yesterday's board size, for `board_growth` in snapshot mode. Without it
+    #: growth is imputed, as in the panel's first crawl of a board.
+    previous_board_size: int | None = Field(default=None, ge=0)
 
 
 class RankedPosting(BaseModel):
@@ -187,6 +244,10 @@ class RankResponse(BaseModel):
     model: str
     dataset: str
     t: str
+    #: Where the board-context fields came from for this batch, and — in
+    #: snapshot mode — the board size the model was handed.
+    board_context_source: str
+    board_size: int | None = None
 
 
 class HealthResponse(BaseModel):

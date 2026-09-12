@@ -25,10 +25,12 @@ from test_inference import EXPECTED_PROBABILITY, FIXED_POSTING, FIXED_T
 from api.main import create_app
 from app.client import (
     BOARD_BUDGET,
+    DERIVED_ACROSS_PAGES,
     Api,
     ApiError,
     _detail,
     api_url_from,
+    board_context_for,
     build_payload,
     rank_board,
     verdict,
@@ -244,6 +246,7 @@ def test_ties_are_broken_by_input_order_across_pages(monkeypatch):
                 "model": "m",
                 "dataset": "synthetic",
                 "t": "t",
+                "board_context_source": "supplied per posting or imputed",
             }
 
     out = rank_board(Stub(), [{"title": str(i)} for i in range(5)], budget=2)  # type: ignore[arg-type]
@@ -351,6 +354,28 @@ def test_ranking_the_example_board_flags_the_budget_and_shows_both_thresholds(re
     assert any("not the same as filled" in info.value for info in result.info)
 
 
+def test_the_snapshot_switch_derives_board_context_on_the_page(rendered):
+    from app.client import EXAMPLE_BOARD_CSV
+
+    rendered.text_area[0].set_value(EXAMPLE_BOARD_CSV)
+    rendered.checkbox[0].set_value(True)
+    for widget in rendered.number_input:
+        if widget.label.startswith("Budget"):
+            widget.set_value(2)
+    rank = next(button for button in rendered.button if button.label == "Rank")
+    result = rank.click().run()
+
+    assert not result.exception
+    assert any("derived from the snapshot: 5 postings" in c.value for c in result.caption)
+
+
+def test_the_one_posting_form_takes_no_board_context(rendered):
+    rendered = _one_posting_mode(rendered)
+    labels = {widget.label for widget in rendered.number_input}
+    assert not any("board" in label.lower() for label in labels)
+    assert not any("requisition" in label.lower() for label in labels)
+
+
 def test_the_form_renders_without_error(rendered):
     rendered = _one_posting_mode(rendered)
     assert not rendered.exception
@@ -413,3 +438,50 @@ def test_an_empty_secret_does_not_shadow_the_environment(monkeypatch):
     """A blank secret box is 'unset', not 'use the empty string'."""
     monkeypatch.setenv("SHELF_LIFE_API", "http://localhost:9000")
     assert api_url_from("", "") == "http://localhost:9000"
+
+
+# --- the board-ranking mode proper, through the client -------------------------------
+
+
+def test_client_side_snapshot_context_equals_the_services_own():
+    """The client copies the derivation so a paged board can be a snapshot; the
+    copy is held to the service's function, which is held to the panel's."""
+    from src.inference.board_snapshot import derive_board_context
+
+    postings = [
+        {"title": "Engineer", "requisition_id": "R1"},
+        {"title": "Engineer", "requisition_id": "R1"},
+        {"title": "Engineer"},
+        {"title": "Designer", "requisition_id": "R2"},
+    ]
+    assert board_context_for(postings, previous_board_size=6) == derive_board_context(
+        postings, previous_board_size=6
+    )
+
+
+def test_a_paged_snapshot_carries_the_whole_boards_context(wired_api):
+    """Three pages, one board: every posting sees the board's size, not its page's."""
+    from src.inference.predict import MAX_BATCH
+
+    board = _board(2 * MAX_BATCH + 50)
+    out = rank_board(wired_api, board, budget=5, as_of=FIXED_T, is_board_snapshot=True)
+    assert out["pages"] == 3
+    assert out["board_size"] == len(board)
+    assert out["board_context_source"] == DERIVED_ACROSS_PAGES
+    assert all(p["board_context_supplied"] for p in out["postings"])
+
+
+def test_a_one_page_snapshot_scores_as_the_service_would_derive_it(wired_api):
+    board = _board(8)
+    via_client = rank_board(wired_api, board, budget=2, as_of=FIXED_T, is_board_snapshot=True)
+    via_service = wired_api.rank(board, as_of=FIXED_T, is_board_snapshot=True)
+    assert [p["probability"] for p in via_client["postings"]] == pytest.approx(
+        [p["probability"] for p in via_service["postings"]]
+    )
+
+
+def test_a_snapshot_refuses_mixed_boards_and_hand_supplied_context():
+    with pytest.raises(ValueError, match="one board"):
+        board_context_for([{"title": "a", "source": "x"}, {"title": "b", "source": "y"}])
+    with pytest.raises(ValueError, match="send one or the other"):
+        board_context_for([{"title": "a", "board_size_at_t": 9}])
