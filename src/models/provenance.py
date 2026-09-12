@@ -182,6 +182,22 @@ def period(frame, column: str = "t") -> dict[str, str]:
     }
 
 
+def source_is_dirty() -> bool:
+    """Is anything *other than a generated report* uncommitted?
+
+    What a report's `Code` row claims is that the source at that SHA, on that
+    snapshot, produced it. Regenerating the reports in a batch writes twenty
+    files under `reports/` before any is committed, and counting those as
+    dirt made every file after the first say `dirty tree` about itself — a
+    header that was noise on the one day it mattered most (2026-09-12: every
+    committed report said it). So a report's dirtiness excludes `reports/`:
+    the outputs of the run are not inputs to it. `worktree_is_clean`, which
+    gates the freeze, stays strict — there the reports must be committed too,
+    because they are the evidence the artifact is read against.
+    """
+    return bool(_git("status", "--porcelain", "--", ".", ":!reports"))
+
+
 def worktree_is_clean() -> bool:
     """Is there anything uncommitted — tracked or untracked — in the tree?
 
@@ -207,7 +223,7 @@ def collect(panel_path: Path, n_rows: int, dataset: str = REAL) -> Provenance:
     return Provenance(
         git_sha=_git("rev-parse", "HEAD"),
         git_branch=_git("rev-parse", "--abbrev-ref", "HEAD"),
-        git_dirty=bool(_git("status", "--porcelain")),
+        git_dirty=source_is_dirty(),
         dataset=dataset,
         panel_path=str(panel_path),
         panel_sha256=sha256_of(panel_path) if panel_path.exists() else None,
