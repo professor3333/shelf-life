@@ -2009,6 +2009,21 @@ prediction.
 then the lock would be exported to a pinned `requirements` file for it, still
 generated from `uv.lock`, never written by hand.
 
+### The engineering checks — **ADDED 2026-09-12**
+
+CI ran lint, format and the suite. Added, in the order they were ranked
+below the data and evaluation work: **mypy** over the project's own code
+(`ignore_missing_imports`, because pandas and scikit-learn ship partial
+typing and the check is about our signatures — the first run found thirty
+real annotation errors and one honest `str` where a `Literal` was declared);
+a **coverage floor of 85%**, line coverage only because branch tracing more
+than doubled the suite's wall time for a number nobody acts on (88% with
+branches on the day it was set); **pip-audit** over the installed lock, which
+is the environment the image installs; and **CodeQL** on push and weekly.
+None of these is a target. Each exists so that a specific regression — a wrong
+signature, a deleted test, a vulnerable pin, an unsafe pattern — fails on the
+push that introduced it rather than in a release later.
+
 ### The supporting evidence gets the same standard — **ADDED 2026-09-12**
 
 The refusal above protects the artifact. It did not protect the reports the

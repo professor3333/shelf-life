@@ -31,6 +31,7 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -139,7 +140,7 @@ class RankedBatch:
 
     postings: list[Ranked]
     threshold_applied: float
-    threshold_source: str
+    threshold_source: Literal["frozen", "batch_budget"]
     budget: int
     horizon_days: int
     model: str
@@ -158,7 +159,8 @@ class RankedBatch:
 #: Where `threshold_applied` came from. Named rather than inferred, because the
 #: two can differ and silently substituting one for the other would change what
 #: `watch` means without changing the response's shape.
-FROZEN, BATCH_BUDGET = "frozen", "batch_budget"
+FROZEN: Literal["frozen"] = "frozen"
+BATCH_BUDGET: Literal["batch_budget"] = "batch_budget"
 
 
 class Predictor:
@@ -312,6 +314,7 @@ class Predictor:
         """
         # The budget decides how many are flagged; the *threshold* is then
         # whichever operating point that implies, and the response says which.
+        source: Literal["frozen", "batch_budget"]
         if budget is None:
             applied, source = float(self.metadata.threshold), FROZEN
             effective = int((probabilities >= applied).sum())

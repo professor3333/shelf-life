@@ -61,7 +61,7 @@ def derive_board_context(
                 f"posting {index} supplies {present}, but in a board snapshot the service "
                 "derives board context from the batch; send one or the other"
             )
-    sources = {payload.get("source") for payload in payloads if payload.get("source")}
+    sources = {str(payload["source"]) for payload in payloads if payload.get("source")}
     if len(sources) > 1:
         raise InvalidPayload(f"a board snapshot is one board; this batch names {sorted(sources)}")
 

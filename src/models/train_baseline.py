@@ -29,6 +29,7 @@ import pandas as pd
 from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
 from sklearn.tree import DecisionTreeClassifier
 
 from src.data.split import (
@@ -62,7 +63,7 @@ RANDOM_STATE = 0
 class Rung:
     name: str
     description: str
-    build: Callable[[], object]
+    build: Callable[[], Pipeline]
 
 
 LADDER: tuple[Rung, ...] = (

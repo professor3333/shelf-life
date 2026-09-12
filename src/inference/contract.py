@@ -199,7 +199,7 @@ def _coerce(field: Field, value: object) -> object:
                 raise InvalidPayload(f"{field.name} must be a finite number, got {value!r}")
             return number
         if field.kind == "timestamp":
-            moment = pd.Timestamp(value)  # type: ignore[arg-type]
+            moment = pd.Timestamp(value)
             return moment.tz_localize("UTC") if moment.tzinfo is None else moment.tz_convert("UTC")
         if isinstance(value, bool):
             raise InvalidPayload(f"{field.name} must be text, got {value!r}")
@@ -244,9 +244,8 @@ def build_row(payload: dict, t: pd.Timestamp) -> pd.DataFrame:
     clean = validate(payload)
 
     row: dict[str, object] = {field.name: clean.get(field.name) for field in FIELDS}
-    row["t"] = pd.Timestamp(t)
-    if row["t"].tzinfo is None:
-        row["t"] = row["t"].tz_localize("UTC")
+    moment = pd.Timestamp(t)
+    row["t"] = moment.tz_localize("UTC") if moment.tzinfo is None else moment
 
     frame = pd.DataFrame(index=[0])
     for field in FIELDS:

@@ -168,7 +168,7 @@ def tune(
     for index, overrides in enumerate(TUNING_GRID):
         params = _xgb_parameters(split, **overrides)
         per_fold = cross_validate(
-            lambda p=params: build_pipeline(XGBClassifier(**p)),
+            lambda p=params: build_pipeline(XGBClassifier(**p)),  # type: ignore[misc]
             split.train,
             folds,
             budget_per_day,
@@ -316,7 +316,8 @@ def execute(
     model = spec.build(split, params)
     fit_on_training_fold(model, split)
 
-    scored = {}
+    scored: dict[str, dict[str, float]] = {}
+    val_ece = float("nan")
     for block_name in ("train", "val"):
         block = getattr(split, block_name)
         features, target = features_and_target(block)
@@ -326,14 +327,14 @@ def execute(
         )
         scored[block_name] = summary
         if block_name == "val":
-            scored["val_ece"] = expected_calibration_error(target, probabilities)
+            val_ece = expected_calibration_error(target, probabilities)
 
     metrics = {
         "train_pr_auc": scored["train"]["pr_auc"],
         "val_pr_auc": scored["val"]["pr_auc"],
         "gap": scored["train"]["pr_auc"] - scored["val"]["pr_auc"],
         "val_brier": scored["val"]["brier"],
-        "val_ece": float(scored["val_ece"]),
+        "val_ece": float(val_ece),
         "val_roc_auc": scored["val"]["roc_auc"],
         "val_precision": scored["val"]["precision"],
         "val_recall": scored["val"]["recall"],

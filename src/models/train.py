@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 from xgboost import XGBClassifier
@@ -217,7 +218,7 @@ def serve_time_regime(
 
     withheld = without_board_context(split.val)
 
-    rows = []
+    rows: list[dict[str, Any]] = []
     for name, block in (("board context supplied", split.val), ("absent, imputed", withheld)):
         scored = _score(model, block, budget_per_day)
         rows.append(
@@ -231,7 +232,7 @@ def serve_time_regime(
             }
         )
     supplied, absent = rows
-    absent["delta_pr_auc"] = supplied["pr_auc"] - absent["pr_auc"]
+    absent["delta_pr_auc"] = float(supplied["pr_auc"]) - float(absent["pr_auc"])
     supplied["delta_pr_auc"] = 0.0
     return pd.DataFrame(rows)
 
@@ -528,7 +529,7 @@ def log_experiments(
                 )
 
     if ablations is not None and not ablations.empty:
-        withheld_by_name = {"nothing": ()}
+        withheld_by_name: dict[str, tuple[str, ...]] = {"nothing": ()}
         withheld_by_name.update({a.name: a.features for a in ABLATIONS})
         with tracking.family(
             mlflow, "ablations", prov=prov, params={**shared, **base_model_params}
