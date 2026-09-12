@@ -107,9 +107,9 @@ class PostingRequest(BaseModel):
 class PredictionResponse(BaseModel):
     """A probability, and everything needed to read it as a decision.
 
-    Four of these six fields exist because a bare probability is not an answer.
+    Most of these fields exist because a bare probability is not an answer.
     `threshold` is the operating point it was compared against, chosen on
-    validation at a stated alert budget. `horizon_days` is what "closing" means.
+    validation at a stated alert budget. `horizon_days` is what "soon" means.
     `board_context_supplied` says whether the four board-level features carried
     information for this request or were imputed to constants
     (`docs/design.md` §12). `model` names the run, so a number can be traced to

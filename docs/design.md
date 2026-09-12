@@ -121,6 +121,13 @@ embargo is 8d10h against daily waves, so each boundary discards **9** waves:
 **20 labelled waves for a legal split, 31 for three folds.** On 2026-09-09 there
 are 2. Projected: a legal split on **2026-09-19**, folds on **2026-09-30**.
 
+*Revised 2026-09-11:* the 2026-09-09 crawl was missed, which widened the
+embargo for the whole panel — each boundary now discards 10 waves, the gates
+are **22** and **34** labelled waves, and the projections moved to
+**2026-09-21** and **2026-10-03**. The figures above are what was true when
+the decision was made and are left as written; the live ones are
+`reports/readiness.md`, which is the only place they are maintained.
+
 ---
 
 ## 3. Censoring and left truncation — **DECIDED 2026-09-04**

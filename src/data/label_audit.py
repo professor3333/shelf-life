@@ -1,8 +1,9 @@
 """Does "disappeared from the board" mean what the label needs it to mean?
 
 `docs/problem_definition.md` §4 defines a positive as a posting absent from two
-consecutive complete runs and never seen again. That is deliberately *not*
-"filled", and the README says so. But a posting can also vanish for reasons that
+consecutive complete runs after its first sighting — final at corroboration,
+whatever the posting does afterwards (`design.md` §11). That is deliberately
+*not* "filled", and the README says so. But a posting can also vanish for reasons that
 have nothing to do with hiring at all, and those split into two kinds that
 deserve very different treatment.
 
@@ -202,10 +203,10 @@ SETTLED_OBSERVATIONS = 6
 def lifespan_concentration(panel: pd.DataFrame) -> pd.DataFrame:
     """Closure rate against how many panel rows the posting ever has.
 
-    **What this is looking for.** A posting seen once and never again is
+    **What this is looking for.** A posting seen once and then absent is
     indistinguishable, in the panel, from a posting that was filled the next
-    morning — both are "absent from two consecutive complete runs and never seen
-    again". But one of those is a hire and the other is a crawl that briefly
+    morning — both are "absent from two consecutive complete runs". But one of
+    those is a hire and the other is a crawl that briefly
     included a row it then stopped returning, and the label cannot tell them
     apart from the outside.
 
@@ -331,9 +332,9 @@ def render(panel: pd.DataFrame, prov: provenance.Provenance | None = None) -> st
         "# Label validity",
         "",
         *provenance.header(prov, "python -m src.data.label_audit", horizon_banner(panel)),
-        "A positive is a posting absent from two consecutive complete runs and never",
-        "seen again. That is **not** the same as *filled*, and this file is about how",
-        "far apart the two are.",
+        "A positive is a posting absent from two consecutive complete runs after its",
+        "first sighting — final at corroboration, whatever it does afterwards. That is",
+        "**not** the same as *filled*, and this file is about how far apart the two are.",
         "",
         "## What can be checked, and what cannot",
         "",
@@ -411,9 +412,9 @@ def render(panel: pd.DataFrame, prov: provenance.Provenance | None = None) -> st
         "",
         "## Removals against observed lifespan",
         "",
-        "A posting seen once and never again is indistinguishable, in the panel, from a",
+        "A posting seen once and then absent is indistinguishable, in the panel, from a",
         "posting filled the next morning: both are absent from two consecutive complete",
-        "runs and never seen again. One is a hire, the other a crawl that briefly",
+        "runs. One is a hire, the other a crawl that briefly",
         "included a row it then stopped returning, and the label cannot tell them apart.",
         "",
         _table(lifespan, list(lifespan.columns)) if not lifespan.empty else "_No removals yet._",

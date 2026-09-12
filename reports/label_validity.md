@@ -6,13 +6,13 @@
 | Horizon | H=7 (calendar basis) |
 | Data | **real** · snapshot `2026-09-11` · `data/processed/features/job_days_h7_calendar.parquet` |
 | Panel | 12,675 rows · sha256 `bf14a21d28a6…` |
-| Code | `bfa63a946` on `feature/release-only-from-a-clean-tree` (dirty tree) |
+| Code | `b073e4501` on `docs/consistency-audit` (dirty tree) |
 
 _Regenerate rather than edit._
 
-A positive is a posting absent from two consecutive complete runs and never
-seen again. That is **not** the same as *filled*, and this file is about how
-far apart the two are.
+A positive is a posting absent from two consecutive complete runs after its
+first sighting — final at corroboration, whatever it does afterwards. That is
+**not** the same as *filled*, and this file is about how far apart the two are.
 
 ## What can be checked, and what cannot
 
@@ -88,9 +88,9 @@ an ATS migration, a board tidied — would empty one board on one day.
 
 ## Removals against observed lifespan
 
-A posting seen once and never again is indistinguishable, in the panel, from a
+A posting seen once and then absent is indistinguishable, in the panel, from a
 posting filled the next morning: both are absent from two consecutive complete
-runs and never seen again. One is a hire, the other a crawl that briefly
+runs. One is a hire, the other a crawl that briefly
 included a row it then stopped returning, and the label cannot tell them apart.
 
 | seen in | rows | removals | removal_rate |

@@ -6,7 +6,7 @@ of *the current snapshot* — a stale table is worse than none — and wrong for
 one question this project cannot answer from a single run.
 
 **The question is whether the numbers are believable yet.** The panel accrues
-about 19 closures a day against 96 today, so the first honest result will carry
+about 19 removals a day, so the first honest result will carry
 an interval wide enough to swallow most differences between models. That is not
 a defect to hide; it is the finding, and the only way to show it is finding
 rather than excuse is to keep the earlier runs and let a reader watch the
@@ -175,7 +175,7 @@ def render(entries: list[dict]) -> str:
         "",
         "One row per run, keyed by the code and the data it ran on. Read the metric",
         "**against its interval and the positives column**, never on its own: this",
-        "panel accrues about 19 closures a day, so an early row is a number with an",
+        "panel accrues about 19 removals a day, so an early row is a number with an",
         "interval wide enough to swallow most differences between models, and saying",
         "so is the finding.",
         "",
