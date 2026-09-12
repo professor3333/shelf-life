@@ -1410,6 +1410,16 @@ module nothing exercises fails), and `pip-audit` over the installed lock
 against the advisory databases. CodeQL's `security-and-quality` queries run
 on push and weekly; findings land under the repository's Security tab.
 
+Coverage is line **and** branch — 88% on 2026-09-12 — with the per-file table
+in every CI run's job summary and the HTML report as an artifact. The number
+is not the point; [`docs/critical_paths.md`](docs/critical_paths.md) is: the
+paths where this system could be quietly wrong — label construction, the
+split and embargo, the one place the test block is read, leakage enforcement,
+threshold selection, the pre-registered rules, the freeze's refusals, artifact
+compatibility, training/serving skew, `/rank` and the board flow, release
+loading, the deployment contracts — each with the tests that pin it by name,
+and the honest remainder of what is not covered and why.
+
 ```bash
 pytest                 # the whole suite; about four minutes
 ruff check .

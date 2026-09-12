@@ -202,3 +202,17 @@ def test_a_report_about_a_pinned_snapshot_names_that_snapshot_not_the_newest(tmp
     derived = provenance._snapshot_date_for(tmp_path / "processed" / "panel.parquet", raw)
     assert older == "2026-09-04"
     assert derived == "2026-09-12"
+
+
+def test_every_test_the_critical_paths_document_names_exists():
+    """`docs/critical_paths.md` maps each critical path to tests by name. A
+    renamed or deleted test would leave the map pointing at nothing, which
+    is the documentation drift this repository keeps finding elsewhere."""
+    import re
+
+    doc = (Path("docs") / "critical_paths.md").read_text()
+    named = set(re.findall(r"`(test_[a-z0-9_]+)`", doc))
+    assert named, "the map names no tests"
+    suite = "\n".join(path.read_text() for path in Path("tests").glob("test_*.py"))
+    missing = sorted(name for name in named if f"def {name}(" not in suite)
+    assert not missing, f"critical_paths.md names tests that do not exist: {missing}"

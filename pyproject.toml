@@ -123,16 +123,17 @@ no_implicit_optional = true
 
 [tool.coverage.run]
 source = ["src", "api", "app"]
-branch = false
+branch = true
 omit = ["src/plots.py"]
 
 [tool.coverage.report]
 # A floor, not a target. It exists so a change that deletes tests, or adds a
 # module nothing exercises, fails CI; the number itself is not a goal and
 # raising it is not work. Set five points under the measured value on
-# 2026-09-12 (88% with branches, line coverage higher) so ordinary churn does
-# not trip it. Line coverage only: branch tracing more than doubled the
-# suite's wall time on a laptop, for a number nobody acts on.
+# 2026-09-12 (88% with branches) so ordinary churn does not trip it. Branch
+# coverage is measured and published because "which paths are untested" is
+# the useful question; the cost is the suite's wall time roughly doubling
+# under the tracer, paid in CI rather than on every local run.
 fail_under = 85
 show_missing = false
 skip_covered = true
