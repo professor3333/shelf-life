@@ -95,7 +95,12 @@ class Api:
         return self._post("/predict", payload)
 
     def rank(
-        self, postings: list[dict], budget: int | None = None, as_of: str | None = None
+        self,
+        postings: list[dict],
+        budget: int | None = None,
+        as_of: str | None = None,
+        is_board_snapshot: bool = False,
+        previous_board_size: int | None = None,
     ) -> dict:
         """One `/rank` call: at most the service's page of postings."""
         body: dict = {"postings": postings}
@@ -103,6 +108,10 @@ class Api:
             body["budget"] = budget
         if as_of is not None:
             body["as_of"] = as_of
+        if is_board_snapshot:
+            body["is_board_snapshot"] = True
+        if previous_board_size is not None:
+            body["previous_board_size"] = previous_board_size
         return self._post("/rank", body)
 
     def _post(self, path: str, body: dict) -> dict:
@@ -111,6 +120,68 @@ class Api:
         except requests.RequestException as error:
             raise ApiError(f"cannot reach the API at {self.base_url}: {error}") from error
         return _unwrap(response)  # type: ignore[return-value]
+
+
+#: The four fields the service derives from a declared board snapshot, and
+#: that a person holding one advert cannot know. Named here because the
+#: client has to know which fields a snapshot may not also carry.
+BOARD_CONTEXT_FIELDS = (
+    "board_size_at_t",
+    "board_growth",
+    "n_same_title_on_board",
+    "n_same_req_on_board",
+)
+
+#: Accepted in a snapshot for the requisition-group count and then dropped —
+#: an identifier, never a feature. Mirrors `src/inference/board_snapshot.py`.
+REQUISITION_ID = "requisition_id"
+
+DERIVED_ACROSS_PAGES = "derived from the snapshot (by the client, across pages)"
+
+
+def board_context_for(postings: list[dict], previous_board_size: int | None = None) -> list[dict]:
+    """The four board fields for every posting, computed over the whole board.
+
+    The service derives these itself for a batch declared a snapshot — but a
+    batch is at most one page, and a board is often larger. `board_size_at_t`
+    of a page is not the board's size, so for a paged board the client has to
+    do the arithmetic over the whole board and send the result per posting.
+    The arithmetic is the panel's (`src/features/assemble.py:_board_context`)
+    and the service's (`src/inference/board_snapshot.py`), and a test holds
+    this copy equal to the service's: rows in the board; rows sharing the
+    exact title; rows sharing `requisition_id`, absent when the posting has
+    none; growth against yesterday's size when given.
+    """
+    if not postings:
+        raise ValueError("a board snapshot holds at least one posting")
+    for index, posting in enumerate(postings):
+        present = [name for name in BOARD_CONTEXT_FIELDS if posting.get(name) is not None]
+        if present:
+            raise ValueError(
+                f"posting {index} supplies {present}; a snapshot derives board context "
+                "from the board itself — send one or the other"
+            )
+    sources = {p.get("source") for p in postings if p.get("source")}
+    if len(sources) > 1:
+        raise ValueError(f"a board snapshot is one board; this batch names {sorted(sources)}")
+
+    from collections import Counter
+
+    size = len(postings)
+    titles = Counter(p.get("title") for p in postings)
+    requisitions = Counter(p.get(REQUISITION_ID) for p in postings if p.get(REQUISITION_ID))
+    growth = None if previous_board_size is None else float(size - int(previous_board_size))
+    out = []
+    for posting in postings:
+        row = {k: v for k, v in posting.items() if k != REQUISITION_ID}
+        row["board_size_at_t"] = float(size)
+        row["n_same_title_on_board"] = float(titles[posting.get("title")])
+        if posting.get(REQUISITION_ID):
+            row["n_same_req_on_board"] = float(requisitions[posting[REQUISITION_ID]])
+        if growth is not None:
+            row["board_growth"] = growth
+        out.append(row)
+    return out
 
 
 #: What `/rank` calls the operating point when a batch's own budget set it. The
@@ -126,6 +197,8 @@ def rank_board(
     budget: int,
     as_of: str | None = None,
     page_size: int | None = None,
+    is_board_snapshot: bool = False,
+    previous_board_size: int | None = None,
 ) -> dict:
     """Rank a whole board under one budget, in pages the service will accept.
 
@@ -150,6 +223,12 @@ def rank_board(
         raise ValueError("budget must be at least 1")
     if not postings:
         raise ValueError("no postings to rank")
+    # Snapshot mode, over the whole board rather than per page — see
+    # `board_context_for`. The pages then carry the context per posting and
+    # the service is not told they are snapshots, because they are not.
+    board_size = len(postings) if is_board_snapshot else None
+    if is_board_snapshot:
+        postings = board_context_for(postings, previous_board_size)
     size = page_size or int(api.health().get("rank_max_batch") or 1)
     if size < 1:
         raise ValueError("page size must be at least 1")
@@ -164,12 +243,17 @@ def rank_board(
         pages += 1
         if frozen_threshold is None:
             frozen_threshold = float(response["threshold_applied"])
-            meta = {key: response[key] for key in ("horizon_days", "model", "dataset", "t")}
+            meta = {
+                key: response[key]
+                for key in ("horizon_days", "model", "dataset", "t", "board_context_source")
+            }
         for offset, item in enumerate(response["postings"]):
             scored.append((start + offset, float(item["probability"]), item))
 
     # The service's rule, applied once to the whole board: descending
     # probability, ties broken by the order the postings were sent in.
+    service_source = meta.pop("board_context_source", "supplied per posting or imputed")
+    context_source = DERIVED_ACROSS_PAGES if is_board_snapshot else service_source
     order = sorted(scored, key=lambda row: (-row[1], row[0]))
     effective = min(budget, len(order))
     threshold_applied = order[effective - 1][1]
@@ -189,6 +273,8 @@ def rank_board(
         "budget": effective,
         "pages": pages,
         "page_size": size,
+        "board_context_source": context_source,
+        "board_size": board_size,
         **meta,
     }
 

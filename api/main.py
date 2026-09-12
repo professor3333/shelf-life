@@ -226,14 +226,21 @@ def create_app(artifact: Path | str | None = None) -> FastAPI:
         model's frozen operating point or by this batch's budget-th score, and
         the two are never silently interchanged.
 
-        Board-context features are imputed exactly as in `/predict`. A submitted
-        batch is not the board, and letting fifty postings manufacture a board of
-        fifty would hand the model a value from a distribution it never saw.
+        **This is where board context lives.** `/predict` takes only what a
+        person holding one advert can know. Here, with `is_board_snapshot`,
+        the caller declares the batch is one whole board and the service
+        derives `board_size_at_t`, `n_same_title_on_board`, `n_same_req_on_board`
+        and (given `previous_board_size`) `board_growth` from it by the panel's
+        own definitions. Undeclared, a batch is not the board — fifty postings
+        must not manufacture a board of fifty — and the four are imputed, or
+        used if a posting carries them.
         """
         batch = _predictor(app).rank(
             [posting.payload() for posting in request.postings],
             t=request.as_of,
             budget=request.budget,
+            board_snapshot=request.is_board_snapshot,
+            previous_board_size=request.previous_board_size,
         )
         return RankResponse(
             postings=[RankedPosting(**item.as_dict()) for item in batch.postings],
@@ -244,6 +251,8 @@ def create_app(artifact: Path | str | None = None) -> FastAPI:
             model=batch.model,
             dataset=batch.dataset,
             t=batch.t,
+            board_context_source=batch.board_context_source,
+            board_size=batch.board_size,
         )
 
     @app.get("/contract")

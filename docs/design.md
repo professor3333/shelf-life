@@ -1482,12 +1482,49 @@ this section answered on 2026-09-09 and which is the wrong question for a
 default model that most callers reach with the columns absent. Nor does it
 decide transfer: §4a's gate does, on the shipped pipeline.
 
-What it does not yet do is serve two models. If the refit ships, callers who
-*can* describe the board — the ranking mode — lose the four columns too. The
-honest next step there is not a rule but a product change: an explicit
-board-snapshot mode in which the service derives the board context from the
-batch it was given, rather than accepting four numbers a caller must type.
-Recorded as the next decision, not folded into this one.
+What it does not do is serve two models. If the refit ships, callers who
+*can* describe the board — the ranking mode — lose the four columns too; the
+product change below does not change that, and serving two artifacts stays
+the option named in "would change my mind" above.
+
+### Two modes — **DECIDED 2026-09-12: `/predict` takes what a person can know; `/rank` derives the rest from a declared snapshot**
+
+Two questions had lived under one contract. Someone holding one advert asks
+*will this be gone soon?* and cannot know the four board fields — yet
+`/predict` accepted them, almost always imputed them, and a caller who did
+type them in was scoring a posting with numbers the model expects to describe
+a whole board. Someone holding the board asks *which should I read first?*,
+and for them the four are not unknowable: they are arithmetic over the very
+batch being sent — which `/rank` refused to do, on the correct grounds that
+an *undeclared* batch is not the board.
+
+- **`/predict` — individual-posting mode.** The four board fields are not
+  fields of its request. Sent, they are a 422 that names the other mode.
+  `board_context_supplied` is always false and the response says so.
+- **`/rank` — board-ranking mode.** `is_board_snapshot: true` declares the
+  batch is one board, whole, as of `as_of`; the service then derives the
+  four by the panel's own definitions (`src/inference/board_snapshot.py`,
+  held equal to `assemble._board_context` by a test): rows in the batch,
+  rows sharing the exact title, rows sharing `requisition_id` — accepted in
+  this mode for the count and nothing else, an identifier never a feature —
+  and growth against `previous_board_size`. A posting may not also carry the
+  four (one source of truth); a batch naming two boards is refused; the
+  response says `board_context_source` and the `board_size` the model was
+  handed, so a partial board declared whole is visible as the caller's error.
+  Undeclared, a batch is treated as before: supplied per posting, or imputed.
+
+**Paging.** A snapshot larger than the service's batch cap cannot be
+declared per page — a page's size is not the board's. So `app/client.py`
+`rank_board` does the same arithmetic over the whole board client-side and
+sends the result per posting; a test holds the client's copy equal to the
+service's function, and the one-page case equal through both paths. The UI's
+board mode has the switch; its one-posting form no longer has a board-context
+expander, because that was the mixing made visible.
+
+**Would change my mind:** a caller with a legitimate partial view of a board
+— a department's postings, say — for whom neither "impute" nor "this is the
+whole board" is honest. That needs a third answer (supply the board's size,
+derive the rest), and it is not built until someone has that view.
 
 **Would change my mind:** a rule that fires on the day on a difference whose
 interval spans zero — the fold spread is one noise scale, the posting-clustered
