@@ -1451,6 +1451,49 @@ but to serve two models and say so — one for callers who have board context an
 one for callers who do not. That is a real option and it is deliberately not
 being taken now, on a 0.0019 delta with no error bar.
 
+### The rule at the freeze — **DECIDED 2026-09-12: imputed against a refit, not supplied against a refit**
+
+"Would change my mind" above is a threshold with no number, decided by whoever
+reads the serve-time table on the day. So the number is fixed now, in
+`src/models/board_context.py`, while the only serve-time gaps on record are
+H=1 and synthetic. Three validation PR-AUCs for the chosen candidate:
+
+| regime | what it is |
+|---|---|
+| `supplied` | the full model, board context present — what `/rank` gets from a caller who can describe the board |
+| `imputed` | the same model, board context withheld — what `/predict` gets from everyone else |
+| `without` | a refit with the four columns removed — the alternative default |
+
+> Ship the refit as the default public model iff `imputed + fold_sd < without`.
+
+The full model, once its board columns are imputed to the training fold's
+constants, does worse than a model that never had them by more than the
+candidate's own fold-to-fold spread — the noise scale §14 already uses. Then
+the caller this project actually has, someone holding one advert with no
+board context, is better served by the refit, and it ships. Otherwise this
+section stands and the full model ships with imputation. `evaluate` states
+the verdict for the chosen candidate in the comparison report; `freeze`
+applies it, runs the transfer gate (§4a) on *whichever pipeline ships*, and
+records the three numbers and the decision on the artifact as `board_context`.
+
+The comparison this rule deliberately does not make is `supplied` against
+`without`. That asks whether the columns are worth having when present, which
+this section answered on 2026-09-09 and which is the wrong question for a
+default model that most callers reach with the columns absent. Nor does it
+decide transfer: §4a's gate does, on the shipped pipeline.
+
+What it does not yet do is serve two models. If the refit ships, callers who
+*can* describe the board — the ranking mode — lose the four columns too. The
+honest next step there is not a rule but a product change: an explicit
+board-snapshot mode in which the service derives the board context from the
+batch it was given, rather than accepting four numbers a caller must type.
+Recorded as the next decision, not folded into this one.
+
+**Would change my mind:** a rule that fires on the day on a difference whose
+interval spans zero — the fold spread is one noise scale, the posting-clustered
+interval on validation (§5) is another, and if they disagree the wider one
+should win.
+
 ---
 
 ### The original argument, kept because the decision rests on it

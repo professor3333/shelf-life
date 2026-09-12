@@ -59,8 +59,12 @@ age calculations. Imputation, scaling and category encoding are fitted inside
 the training fold only. Missing numerics use per-column median/zero/one rules;
 missing categoricals get explicit levels, and unseen categories are supported.
 There is no blanket numeric missingness-indicator step. Optional board context
-is currently accepted and imputed when absent; its two serving regimes need
-separate final results.
+is currently accepted and imputed when absent; its two serving regimes get
+separate final results, and which pipeline ships as the default is decided by
+the rule fixed 2026-09-12 in `src/models/board_context.py` (design §12): the
+refit without the four columns ships iff the full model, with them imputed,
+scores below the refit by more than the candidate's fold spread. The decision
+and its three validation numbers travel on the artifact as `board_context`.
 
 **Excluded inputs:** direct board identity (`source`, `company`,
 `company_posting_volume`); identifiers and split axes (`source_id`, `url`,

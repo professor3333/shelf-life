@@ -95,6 +95,11 @@ class Metadata:
     #: overridden. A model whose verdict is not `intact` is not described as
     #: applicable to boards it has not seen. Empty on an older artifact.
     transfer: dict = field(default_factory=dict)
+    #: Which pipeline shipped as the default public model — the candidate as
+    #: specified or its refit without the four board-context columns — and the
+    #: validation numbers the rule in `src/models/board_context.py` decided on.
+    #: Empty on an older artifact.
+    board_context: dict = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
     versions: dict[str, str] = field(
         default_factory=lambda: {

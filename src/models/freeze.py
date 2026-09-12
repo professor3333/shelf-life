@@ -71,8 +71,13 @@ from src.data.split import (
 from src.features.assemble import horizon_banner
 from src.features.preprocessing import features_and_target, fit_on_frame
 from src.inference import artifact as artifact_module
-from src.models import calibration, ledger, provenance
-from src.models.evaluate import calibration_summary, wave_forward_folds
+from src.models import board_context, calibration, ledger, provenance
+from src.models.evaluate import (
+    calibration_summary,
+    cross_validate,
+    summarise_folds,
+    wave_forward_folds,
+)
 from src.models.experiments import (
     SYNTHETIC_PANEL_SOURCE,
     default_cuts,
@@ -128,6 +133,10 @@ class FrozenModel:
     #: computed before the test block was opened: verdict, per-board lifts, and
     #: whether a collapse was overridden in writing.
     transfer: dict
+    #: Which pipeline shipped — the candidate as specified or its refit without
+    #: the four board-context columns — and the three validation numbers the
+    #: rule in `src/models/board_context.py` read to decide.
+    board_context: dict
     #: The model's performance on the incumbent stock against the incident
     #: flow, on the test block. The cohort audit asks whether the *label* is
     #: indifferent to cohort; this asks whether the *model* is.
@@ -176,6 +185,7 @@ def freeze(
     fitted_on: str = "train",
     params: dict | None = None,
     transfer: dict | None = None,
+    board_context_decision: dict | None = None,
 ) -> FrozenModel:
     """Fit, fix the threshold on validation, then read test exactly once.
 
@@ -196,12 +206,21 @@ def freeze(
         )
 
     resolved = spec.resolve(split) if params is None else dict(params)
+    if board_context_decision is None:
+        board_context_decision = board_context.decide(
+            split, lambda: spec.build(split, resolved), float("nan"), leaky=spec.leaky
+        ).as_dict()
+
+    def build():
+        pipeline = spec.build(split, resolved)
+        if board_context_decision["ship"] == board_context.WITHOUT:
+            return board_context.without_board_context_pipeline(pipeline, spec.leaky)
+        return pipeline
+
     if transfer is None:
-        folds, skipped = leave_one_board_out(
-            split, lambda: spec.build(split, resolved), budget_per_day, serve_time=True
-        )
+        folds, skipped = leave_one_board_out(split, build, budget_per_day, serve_time=True)
         transfer = {**assess(folds, skipped).as_dict(), "accepted_collapse": False}
-    model = spec.build(split, resolved)
+    model = build()
     fit_on_frame(model, _fit_block(split, fitted_on))
 
     validation_scores = _score(model, split.val)
@@ -245,6 +264,7 @@ def freeze(
         validation_intervals=bootstrap_block(split.val, validation_scores, float(threshold)),
         recalibration=decision.as_dict(),
         transfer=transfer,
+        board_context=board_context_decision,
         by_cohort=evaluate_by(
             cohort_audit.attach_cohort(test_block, split.frame),
             test_scores,
@@ -271,9 +291,36 @@ def freeze(
         reliability=reliability_curve(test_block["y"], test_scores),
         test_days=int(prediction_days(test_block)),
         params=resolved,
-        features=tuple(spec_features(spec, split)),
+        features=tuple(model.named_steps["select"].kw_args["columns"]),
         fitted_on=fitted_on,
     )
+
+
+def _board_context_section(decision: dict) -> list[str]:
+    """Which pipeline shipped as the default, and the three numbers that decided it."""
+    shipped = (
+        "the candidate **refitted without the four board-context columns**"
+        if decision["ship"] == board_context.WITHOUT
+        else "the candidate **as specified, with board context imputed when absent**"
+    )
+    return [
+        "## Board context: what the default public model carries",
+        "",
+        "Someone holding one job advert cannot know `board_size_at_t`, `board_growth`,",
+        "`n_same_title_on_board` or `n_same_req_on_board`, so for most callers those",
+        "four are imputed. Rule (`src/models/board_context.py`, fixed 2026-09-12):",
+        f"`{decision['rule']}`. On validation, for this candidate:",
+        "",
+        "| regime | val PR-AUC |",
+        "|---|---|",
+        f"| board context supplied (full model) | {decision['val_pr_auc_supplied']:.4f} |",
+        f"| board context imputed (same model) | {decision['val_pr_auc_imputed']:.4f} |",
+        f"| refit without the four columns | {decision['val_pr_auc_without']:.4f} |",
+        f"| fold spread used as the noise scale | {decision['fold_sd']:.4f} |",
+        "",
+        f"Shipped: {shipped}. {decision['reason']}.",
+        "",
+    ]
 
 
 def _transfer_section(transfer: dict) -> list[str]:
@@ -395,6 +442,7 @@ def build_metadata(
         seed=RANDOM_STATE,
         recalibration=frozen.recalibration,
         transfer=frozen.transfer,
+        board_context=frozen.board_context,
     )
 
 
@@ -723,6 +771,7 @@ def write_report(
                 ["cohort", "n", "positives", "base_rate", "pr_auc", "precision", "recall"],
             ),
             "",
+            *_board_context_section(frozen.board_context),
             *_transfer_section(frozen.transfer),
             "## Calibration on test",
             "",
@@ -817,15 +866,33 @@ def main() -> None:
                 "selected a model to test."
             )
 
-        # Transfer, on the candidate being frozen, with board context withheld
+        # Which pipeline ships as the default public model: the candidate as
+        # specified, or the same candidate refitted without the four
+        # board-context columns. Decided by the rule in
+        # `src/models/board_context.py` (fixed 2026-09-12) on train and
+        # validation, with the candidate's own fold spread as the noise scale.
+        spec = spec_by_name(args.run)
+        resolved = spec.resolve(split)
+        fold_frames = wave_forward_folds(split.train, split.embargo)
+        fold_sd = summarise_folds(
+            cross_validate(lambda: spec.build(split, resolved), split.train, fold_frames)
+        )["cv_pr_auc_sd"]
+        context = board_context.decide(
+            split, lambda: spec.build(split, resolved), fold_sd, leaky=spec.leaky
+        ).as_dict()
+        if context["ship"] == board_context.WITHOUT:
+            build = lambda: board_context.without_board_context_pipeline(  # noqa: E731
+                spec.build(split, resolved), spec.leaky
+            )
+        else:
+            build = lambda: spec.build(split, resolved)  # noqa: E731
+
+        # Transfer, on the pipeline that will ship, with board context withheld
         # as at serve time. A modelling activity on train and validation only —
         # nothing here touches the test block — and the third evidence refusal:
         # a model that cannot score a board it has not seen has learned the
         # boards, not the postings (`design.md` §4a, rule fixed 2026-09-12).
-        spec = spec_by_name(args.run)
-        folds, skipped = leave_one_board_out(
-            split, lambda: spec.build(split, spec.resolve(split)), args.budget, serve_time=True
-        )
+        folds, skipped = leave_one_board_out(split, build, args.budget, serve_time=True)
         transfer = assess(folds, skipped).as_dict()
         transfer["accepted_collapse"] = bool(args.accept_transfer_collapse)
         if transfer["collapsed"] and not args.accept_transfer_collapse:
@@ -844,7 +911,15 @@ def main() -> None:
                 "the artifact would not reproduce it. Commit (or stash) everything — "
                 "the regenerated reports included — and run freeze again."
             )
-        frozen = freeze(split, args.run, args.budget, args.fit, transfer=transfer)
+        frozen = freeze(
+            split,
+            args.run,
+            args.budget,
+            args.fit,
+            params=resolved,
+            transfer=transfer,
+            board_context_decision=context,
+        )
         metadata = build_metadata(
             frozen, args.run, panel, panel_path, dataset, args.budget, n_folds
         )

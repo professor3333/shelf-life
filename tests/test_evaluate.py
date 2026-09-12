@@ -820,3 +820,23 @@ def test_the_comparison_says_what_the_freeze_will_do_about_calibration():
     section = "\n".join(_cohort_section(table))
     assert "## Incumbent stock against incident flow" in section and "incident" in section
     assert _cohort_section(None) == []
+
+
+def test_the_comparison_says_what_the_freeze_will_ship_as_the_default():
+    from src.models.evaluate import _board_context_verdict
+
+    decision = {
+        "ship": "without_board_context",
+        "rule": "r",
+        "val_pr_auc_supplied": 0.5,
+        "val_pr_auc_imputed": 0.2,
+        "val_pr_auc_without": 0.4,
+        "fold_sd": 0.01,
+        "reason": "imputed is worse than a refit without",
+    }
+    text = "\n".join(_board_context_verdict(decision))
+    assert "will ship the refit without the four board-context columns" in text
+    assert "imputed\n0.2000" in text
+    decision["ship"] = "full"
+    assert "as specified" in "\n".join(_board_context_verdict(decision))
+    assert _board_context_verdict(None) == []
