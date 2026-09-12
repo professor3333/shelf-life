@@ -96,6 +96,13 @@ class PostingRequest(BaseModel):
         "is the moment `age_days` is measured from, and it is exposed so that a "
         "prediction can be reproduced exactly.",
     )
+    client_id: str | None = Field(
+        default=None,
+        max_length=200,
+        description="Your handle for this posting, echoed unchanged on its result. "
+        "Never a feature. Join on it rather than on array position: a CSV row, a "
+        "retry, a page of a board all want a handle.",
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -122,7 +129,7 @@ class PostingRequest(BaseModel):
         `exclude_none` matters: an omitted field and an explicit null must reach
         the pipeline the same way, as a value the training fold's imputer fills.
         """
-        return self.model_dump(exclude_none=True, exclude={"as_of"})
+        return self.model_dump(exclude_none=True, exclude={"as_of"})  # client_id rides along
 
 
 class BoardPosting(PostingRequest):
@@ -183,6 +190,7 @@ class PredictionResponse(BaseModel):
     model: str
     dataset: str
     t: str
+    client_id: str | None = None
 
 
 class RankRequest(BaseModel):
@@ -220,6 +228,9 @@ class RankedPosting(BaseModel):
     probability: float = Field(ge=0.0, le=1.0)
     watch: bool
     board_context_supplied: bool
+    #: The caller's handle, echoed. Results still come back in input order;
+    #: this is the join key that survives a CSV, a retry or a paged board.
+    client_id: str | None = None
 
 
 class RankResponse(BaseModel):

@@ -752,6 +752,13 @@ Three properties worth stating, because each is a decision:
   `predict_proba` call, which at 1,000 postings costs 4.8 s against 18.4 s for a
   loop. The two agree to about 6e-17 — the order of floating-point reductions,
   nothing else — and a test pins that.
+- **`client_id` round-trips.** An opaque handle on each posting, echoed on its
+  result on `/predict`, `/rank` and `/boards/{id}/rank`, never a feature (it is
+  stripped before a row is built, and the contract would refuse it otherwise).
+  Results still come back in input order, but position is a contract that
+  survives one synchronous call and little else — a CSV row, a retry, a page of
+  a board want a handle. The UI joins its table on it and assigns row numbers
+  when a board carries none.
 - **`threshold_source` is always reported.** `frozen` is the model's calibrated
   operating point; `batch_budget` is this batch's budget-th score, a property of
   what was submitted rather than of the model. They differ, and neither is

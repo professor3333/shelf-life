@@ -273,14 +273,20 @@ if mode == RANK:
             st.error(str(error))
             st.stop()
 
+        # Joined on `client_id`, the handle every parsed posting carries, not on
+        # array position — the position contract holds for one synchronous call
+        # and nothing else, and this table should not depend on it.
+        by_id = {posting["client_id"]: posting for posting in board}
+        results = ranking["postings"]
         table = pd.DataFrame(
             {
-                "rank": [row["rank"] for row in ranking["postings"]],
-                "flagged": [row["watch"] for row in ranking["postings"]],
-                "probability": [row["probability"] for row in ranking["postings"]],
-                "title": [posting.get("title") for posting in board],
-                "company": [posting.get("company") for posting in board],
-                "location": [posting.get("location") for posting in board],
+                "rank": [row["rank"] for row in results],
+                "flagged": [row["watch"] for row in results],
+                "probability": [row["probability"] for row in results],
+                "title": [by_id[row["client_id"]].get("title") for row in results],
+                "company": [by_id[row["client_id"]].get("company") for row in results],
+                "location": [by_id[row["client_id"]].get("location") for row in results],
+                "client_id": [row["client_id"] for row in results],
             }
         ).sort_values("rank")
         flagged = table[table["flagged"]]

@@ -298,12 +298,16 @@ def parse_board(text: str, allowed: set[str]) -> list[dict]:
         frame = pd.read_csv(io.StringIO(stripped))
         rows = frame.astype(object).where(frame.notna(), None).to_dict("records")
     postings = []
-    for row in rows:
+    for index, row in enumerate(rows):
         if not isinstance(row, dict):
             raise ValueError("every posting must be an object")
-        kept = build_payload({k: v for k, v in row.items() if k in allowed})
+        kept = build_payload({k: v for k, v in row.items() if k in allowed or k == "client_id"})
         if "title" not in kept:
             raise ValueError("every posting needs a title")
+        # The join key. A board's own `client_id` column is kept; without one,
+        # the row number stands in — so results are matched by handle, never
+        # by array position, even for a pasted CSV.
+        kept.setdefault("client_id", f"row-{index + 1}")
         postings.append(kept)
     return postings
 
