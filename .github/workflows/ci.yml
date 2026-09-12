@@ -49,8 +49,36 @@ jobs:
 
       # Coverage with a floor, not a target: a change that deletes tests or
       # adds a module nothing exercises fails; the number itself is not a goal.
+      # Line and branch, with the per-file table in the job summary and the
+      # HTML report as an artifact, so "which paths are untested" is readable
+      # without cloning.
       - name: Test
-        run: uv run pytest -q --cov --cov-report=term-missing:skip-covered --cov-fail-under=85
+        run: >
+          uv run pytest -q --cov --cov-branch
+          --cov-report=term-missing:skip-covered
+          --cov-report=xml --cov-report=html
+          --cov-fail-under=85
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          {
+            echo "### Coverage (line + branch)"
+            echo
+            uv run coverage report --format=markdown --skip-covered --show-missing || true
+            echo
+            echo "Files at 100% are omitted. The floor is 85%; the HTML report is an artifact of this run."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Coverage report (artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            htmlcov/
+            coverage.xml
+          retention-days: 30
 
       # The environment that is installed — the same lock the image installs —
       # against the OSV/PyPI advisory databases. A vulnerable pin fails the
