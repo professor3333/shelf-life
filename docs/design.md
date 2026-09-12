@@ -834,8 +834,31 @@ on a tenth of a CPU — and throwing it away, since the process cannot write to
 site-packages. Confirmed locally under a hard `--cpus 0.1` quota: the same
 imports take **341 s** from source and **177 s** from `.pyc`.
 
-Fixed with one line, `UV_COMPILE_BYTECODE=1`, pinned by a test, and the
-baseline is to be re-run after it deploys. Two things worth saying about it:
+Fixed with one line, `UV_COMPILE_BYTECODE=1`, pinned by a test. **Re-measured
+2026-09-12 on the fixed image**, three cycles, all of which went cold
+(`reports/cold_start_baseline.md`, the baseline of record):
+
+| cycle | cold `/health` | ready after (inside) | peak RSS |
+|---|---|---|---|
+| 1 | 52.51 s | 18.85 s | 204 MB |
+| 2 | 43.64 s | 19.58 s | 208 MB |
+| 3 | 52.43 s | 19.05 s | 200 MB |
+
+The process now becomes ready in **19 s** against 38–46 s — the import cost
+halved, as the local quota test said it would. The totals moved less, because
+the platform wake in this run was 24–34 s against 20–26 s the day before: that
+term is the platform's and varies by the hour, which is one more reason the
+criterion is applied to the worst cycle. The 2026-09-06 single sample of
+32.65 s is not reproduced by either run and should be read as one draw from a
+wide distribution, not as the number this instance "really" does.
+
+What the definitive run has to fit into: ~52 s worst-case baseline plus the
+locally measured ~25 s load cost gives an estimate near **77 s** against 90 —
+a margin of thirteen seconds on a platform whose wake alone varied by ten
+between cycles. Whether it passes is the measurement's to say; the estimate's
+only use is that it no longer says "comfortably".
+
+Two things worth saying about the regression itself:
 
 - **The estimate would have been wrong by the whole margin.** 58 s was the
   baseline plus the locally measured load cost. On the regressed image the
