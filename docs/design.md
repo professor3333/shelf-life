@@ -1521,7 +1521,41 @@ service's function, and the one-page case equal through both paths. The UI's
 board mode has the switch; its one-posting form no longer has a board-context
 expander, because that was the mixing made visible.
 
-**Would change my mind:** a caller with a legitimate partial view of a board
+### The board as one logical collection — **DECIDED 2026-09-12: the server owns the pages**
+
+The whole-board ranking cannot be one request on the free instance — a
+day's board is ~106 s of scoring against a 90 s rule, warm — so it is
+several, and the first version of the ranking mode put everything between
+them in the client: page, merge by the service's rule, apply the budget once,
+and in snapshot mode derive board context over the whole board before any
+page. That was a second copy of the ranking rule and of the derivation, held
+to the server's by tests, which is a way of saying the server did not own its
+own product. Three shapes were considered:
+
+- **Raise the cap to a whole board.** Out on measurement, not taste: 250
+  postings is ~23 s on 0.1 vCPU and 1,150 is over the rule before any cold
+  start. `MAX_BATCH` stays a measurement.
+- **Score pages, finalise server-side over the scores.** Merges rankings, but
+  cannot repair scores computed under per-page board context: size and
+  same-title counts have to see the whole board *before* any page is scored.
+- **A board as a stored collection, scored incrementally.** `POST /boards`
+  opens it with its instant and snapshot declaration; pages are appended;
+  `score` scores the next page, deriving board context over the whole stored
+  board first, once; `rank` refuses until every page is scored and then orders
+  the whole board by the rule `/rank` applies to a batch (`Predictor.order`,
+  the same function). Chosen: the derivation and the rule live in
+  `src/inference` once, and the client pages and loops.
+
+What the free tier makes true is stated in the API rather than discovered:
+boards live in memory on one instance for an hour and are gone when it
+sleeps or redeploys — `404 … re-upload` — and the reference client retries
+once from the top. Caps: 250 per page, 5,000 per board, 32 live boards.
+`app/client.py` now holds neither the derivation nor the merge, and a test
+says so.
+
+**Would change my mind:** a second instance, at which point in-memory boards
+become a bug rather than a shape and the store moves to something shared. Or
+a caller with a legitimate partial view of a board
 — a department's postings, say — for whom neither "impute" nor "this is the
 whole board" is honest. That needs a third answer (supply the board's size,
 derive the rest), and it is not built until someone has that view.

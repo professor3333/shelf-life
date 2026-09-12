@@ -231,6 +231,43 @@ print(f"  snapshot of {body['board_size']}: board context {body['board_context_s
 PY
 echo "ok  /rank (board snapshot)"
 
+# --- the board flow: one logical collection, uploaded and scored in pages --------
+# The whole-board ranking on the free instance is several requests, and the
+# server owns what happens between them. The same five postings, through
+# POST /boards -> postings -> score until done -> rank, must rank exactly as
+# the one-shot /rank did on the same batch declared a snapshot.
+board_id=$(curl -fsS --max-time 60 -X POST "${BASE_URL}/boards" \
+  -H 'content-type: application/json' \
+  -d '{"as_of": "2026-09-14T03:45:00Z", "is_board_snapshot": true}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["board_id"])') \
+  || fail "POST /boards did not open a board"
+rank_body | python3 -c 'import json,sys; print(json.dumps({"postings": json.load(sys.stdin)["postings"]}))' \
+  | curl -fsS --max-time 60 -X POST "${BASE_URL}/boards/${board_id}/postings" \
+      -H 'content-type: application/json' -d @- > /dev/null \
+  || fail "the board refused its page of postings"
+for attempt in 1 2 3 4 5; do
+  curl -fsS --max-time 60 -X POST "${BASE_URL}/boards/${board_id}/score" > "${WORK}/progress.json" \
+    || fail "scoring the board failed"
+  python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["done"] else 1)' "${WORK}/progress.json" && break
+done
+curl -fsS --max-time 60 -X POST "${BASE_URL}/boards/${board_id}/rank" \
+  -H 'content-type: application/json' -d '{"budget": 2}' > "${WORK}/board_rank.json" \
+  || fail "ranking the board failed"
+python3 - "${WORK}/board_rank.json" "${WORK}/snapshot.json" <<'PY' || fail "the board flow disagreed with /rank on the same snapshot"
+import json, sys
+
+board, oneshot = (json.load(open(path)) for path in sys.argv[1:])
+if not board.get("done", True) and board.get("pages_scored") is None:
+    sys.exit("no pages_scored in the board ranking")
+if [p["probability"] for p in board["postings"]] != [p["probability"] for p in oneshot["postings"]]:
+    sys.exit("the board flow and /rank scored the same snapshot differently")
+if sum(p["watch"] for p in board["postings"]) != 2:
+    sys.exit("budget 2 on the board flow did not flag exactly two")
+print(f"  board {board['board_id']}: {board['pages_scored']} page(s), same scores as /rank")
+PY
+curl -fsS --max-time 30 -X DELETE "${BASE_URL}/boards/${board_id}" > /dev/null || true
+echo "ok  /boards (upload, score, rank)"
+
 # --- bad input is a 4xx, never a 500 ----------------------------------------
 code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -X POST "${BASE_URL}/predict" \
   -H 'content-type: application/json' -d '{"title": "", "salary": "nonsense"}')

@@ -7,9 +7,10 @@
 a person can actually read — and get back the ones most likely to be gone
 within the horizon. The single-posting form is the second mode, kept because it
 is the form of the question a person holding one job ad asks. The board is
-sent to `/rank` in pages the service will accept and merged here by the
-service's own rule (`app/client.py` `rank_board`), so a board larger than one
-request is still ranked once, under one budget.
+uploaded to the service as one board (`POST /boards`, in pages the service
+will accept), scored there page by page and ranked there once, under one
+budget — the client pages and loops, and holds no copy of the ranking rule
+(`app/client.py` `rank_board`).
 
 Three rules this file keeps, and each one is a line it would be easy to cross:
 
@@ -171,9 +172,9 @@ if mode == RANK:
     st.caption(
         'Paste or upload the postings — JSON (a list, or `{"postings": [...]}`) or CSV '
         "with one column per field. Fields the API does not accept are dropped; "
-        "`/contract` lists the ones it does. The service ranks at most "
-        f"{health.get('rank_max_batch', '?')} postings per request, so a larger board is "
-        "sent in pages and merged here by the same rule, under one budget."
+        "`/contract` lists the ones it does. The board is uploaded to the service in "
+        f"pages of {health.get('rank_max_batch', '?')}, scored there page by page, and "
+        "ranked there once, under one budget."
     )
     uploaded = st.file_uploader("Upload a board", type=("csv", "json"))
     pasted = st.text_area(
@@ -246,6 +247,7 @@ if mode == RANK:
                     as_of=_iso(as_of_date),
                     is_board_snapshot=bool(is_snapshot),
                     previous_board_size=int(previous_size) if previous_size is not None else None,
+                    on_progress=lambda scored, total: st.toast(f"scored {scored} of {total}"),
                 )
         except (ApiError, ValueError) as error:
             st.error(str(error))
@@ -270,13 +272,14 @@ if mode == RANK:
         columns = st.columns(3)
         columns[0].metric("Budget", ranking["budget"])
         columns[1].metric("Threshold on this board", f"{ranking['threshold_applied']:.3f}")
-        columns[2].metric("Frozen threshold", f"{ranking['frozen_threshold']:.3f}")
+        columns[2].metric("Frozen threshold", f"{health['threshold']:.3f}")
+        pages = ranking["pages_scored"]
         st.caption(
             "The board threshold is the budget-th score of what you sent — a property of "
             "this board. The frozen threshold is the model's own operating point, chosen "
             "on validation at the stated budget. They are different decisions, and "
-            f"this ranking used the first (source: `{ranking['threshold_source']}`, "
-            f"{ranking['pages']} request{'s' if ranking['pages'] != 1 else ''})."
+            f"this ranking used the first (source: `{ranking['threshold_source']}`; "
+            f"scored by the service in {pages} page{'s' if pages != 1 else ''})."
         )
         st.dataframe(
             flagged.drop(columns="flagged").style.format({"probability": "{:.1%}"}),

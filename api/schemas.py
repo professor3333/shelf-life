@@ -250,6 +250,58 @@ class RankResponse(BaseModel):
     board_size: int | None = None
 
 
+class BoardCreateRequest(BaseModel):
+    """Open a board: one logical collection, uploaded and scored in pages.
+
+    The whole-board ranking is several requests on the free instance — a day's
+    board is about 1,150 postings and a request is capped at 250 — and this is
+    the object the requests are about. Its prediction instant and its snapshot
+    declaration are fixed here, once, for every page that follows.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    as_of: datetime | None = None
+    is_board_snapshot: bool = False
+    previous_board_size: int | None = Field(default=None, ge=0)
+
+
+class BoardCreated(BaseModel):
+    board_id: str
+    #: Boards live in memory on one instance and are forgotten after this
+    #: many seconds, or sooner if the service sleeps or restarts.
+    ttl_seconds: float
+    page_size: int
+
+
+class BoardPage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    postings: list[BoardPosting] = Field(min_length=1, max_length=MAX_BATCH)
+
+
+class BoardProgress(BaseModel):
+    """Where the board is: how many postings it holds, how many are scored."""
+
+    board_id: str
+    total: int
+    scored: int
+    done: bool
+
+
+class BoardRankRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    budget: int | None = Field(default=None, ge=1)
+
+
+class BoardRankResponse(RankResponse):
+    """The ranking over the whole board, plus how it got there."""
+
+    board_id: str
+    pages_scored: int
+
+
 class HealthResponse(BaseModel):
     """Is the process up, and does it have a model?
 

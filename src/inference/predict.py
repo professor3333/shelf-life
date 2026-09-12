@@ -234,22 +234,58 @@ class Predictor:
         if len(payloads) > MAX_BATCH:
             raise ValueError(
                 f"{len(payloads)} postings exceeds the {MAX_BATCH}-posting limit; "
-                "send them in pages"
+                "send them in pages, or as a board (POST /boards)"
             )
 
-        moment = pd.Timestamp(t) if t is not None else pd.Timestamp(datetime.now(UTC))
-        if moment.tzinfo is None:
-            moment = moment.tz_localize("UTC")
-
+        moment = self.moment(t)
         if board_snapshot:
             payloads = derive_board_context(payloads, previous_board_size)
             context_source = DERIVED
         else:
             context_source = SUPPLIED_OR_IMPUTED
 
-        frame = pd.concat([build_row(payload, moment) for payload in payloads], ignore_index=True)
-        probabilities = self.artifact.pipeline.predict_proba(frame)[:, 1]
+        probabilities = self.score(payloads, moment)
+        return self.order(
+            payloads,
+            probabilities,
+            moment,
+            budget,
+            context_source,
+            len(payloads) if board_snapshot else None,
+        )
 
+    @staticmethod
+    def moment(t: pd.Timestamp | str | None) -> pd.Timestamp:
+        """The prediction instant, UTC, now by default."""
+        moment = pd.Timestamp(t) if t is not None else pd.Timestamp(datetime.now(UTC))
+        return moment.tz_localize("UTC") if moment.tzinfo is None else moment
+
+    def score(self, payloads: Sequence[dict], moment: pd.Timestamp) -> np.ndarray:
+        """Probabilities for a page of payloads — one frame, one `predict_proba`.
+
+        The cap is the page's, not a board's: a board larger than it is scored
+        page by page by `src/inference/boards.py`, which calls this.
+        """
+        if len(payloads) > MAX_BATCH:
+            raise ValueError(f"{len(payloads)} postings exceeds the {MAX_BATCH}-posting page")
+        frame = pd.concat([build_row(payload, moment) for payload in payloads], ignore_index=True)
+        return self.artifact.pipeline.predict_proba(frame)[:, 1]
+
+    def order(
+        self,
+        payloads: Sequence[dict],
+        probabilities: np.ndarray,
+        moment: pd.Timestamp,
+        budget: int | None,
+        context_source: str,
+        board_size: int | None,
+    ) -> RankedBatch:
+        """The ranking rule over already-scored postings, however many.
+
+        Separate from `score` so a board scored in pages is ordered once, here,
+        by the same rule a single batch is — descending probability, ties by
+        input order, the budget applied to the whole.
+        """
         # The budget decides how many are flagged; the *threshold* is then
         # whichever operating point that implies, and the response says which.
         if budget is None:
@@ -284,7 +320,7 @@ class Predictor:
             dataset=self.metadata.dataset,
             t=moment.isoformat(),
             board_context_source=context_source,
-            board_size=len(payloads) if board_snapshot else None,
+            board_size=board_size,
         )
 
 

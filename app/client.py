@@ -122,161 +122,73 @@ class Api:
         return _unwrap(response)  # type: ignore[return-value]
 
 
-#: The four fields the service derives from a declared board snapshot, and
-#: that a person holding one advert cannot know. Named here because the
-#: client has to know which fields a snapshot may not also carry.
-BOARD_CONTEXT_FIELDS = (
-    "board_size_at_t",
-    "board_growth",
-    "n_same_title_on_board",
-    "n_same_req_on_board",
-)
-
-#: Accepted in a snapshot for the requisition-group count and then dropped —
-#: an identifier, never a feature. Mirrors `src/inference/board_snapshot.py`.
-REQUISITION_ID = "requisition_id"
-
-DERIVED_ACROSS_PAGES = "derived from the snapshot (by the client, across pages)"
-
-
-def board_context_for(postings: list[dict], previous_board_size: int | None = None) -> list[dict]:
-    """The four board fields for every posting, computed over the whole board.
-
-    The service derives these itself for a batch declared a snapshot — but a
-    batch is at most one page, and a board is often larger. `board_size_at_t`
-    of a page is not the board's size, so for a paged board the client has to
-    do the arithmetic over the whole board and send the result per posting.
-    The arithmetic is the panel's (`src/features/assemble.py:_board_context`)
-    and the service's (`src/inference/board_snapshot.py`), and a test holds
-    this copy equal to the service's: rows in the board; rows sharing the
-    exact title; rows sharing `requisition_id`, absent when the posting has
-    none; growth against yesterday's size when given.
-    """
-    if not postings:
-        raise ValueError("a board snapshot holds at least one posting")
-    for index, posting in enumerate(postings):
-        present = [name for name in BOARD_CONTEXT_FIELDS if posting.get(name) is not None]
-        if present:
-            raise ValueError(
-                f"posting {index} supplies {present}; a snapshot derives board context "
-                "from the board itself — send one or the other"
-            )
-    sources = {p.get("source") for p in postings if p.get("source")}
-    if len(sources) > 1:
-        raise ValueError(f"a board snapshot is one board; this batch names {sorted(sources)}")
-
-    from collections import Counter
-
-    size = len(postings)
-    titles = Counter(p.get("title") for p in postings)
-    requisitions = Counter(p.get(REQUISITION_ID) for p in postings if p.get(REQUISITION_ID))
-    growth = None if previous_board_size is None else float(size - int(previous_board_size))
-    out = []
-    for posting in postings:
-        row = {k: v for k, v in posting.items() if k != REQUISITION_ID}
-        row["board_size_at_t"] = float(size)
-        row["n_same_title_on_board"] = float(titles[posting.get("title")])
-        if posting.get(REQUISITION_ID):
-            row["n_same_req_on_board"] = float(requisitions[posting[REQUISITION_ID]])
-        if growth is not None:
-            row["board_growth"] = growth
-        out.append(row)
-    return out
-
-
-#: What `/rank` calls the operating point when a batch's own budget set it. The
-#: merged, whole-board ranking below reports its own name for the same idea, so
-#: a reader can tell "the service ranked this batch" from "the client merged
-#: several batches" — they agree by construction, but they are not the same call.
-BOARD_BUDGET = "board_budget"
-
-
 def rank_board(
     api: Api,
     postings: list[dict],
     budget: int,
     as_of: str | None = None,
-    page_size: int | None = None,
     is_board_snapshot: bool = False,
     previous_board_size: int | None = None,
+    on_progress=None,
 ) -> dict:
-    """Rank a whole board under one budget, in pages the service will accept.
+    """Rank a whole board through the server's board flow, whatever its size.
 
-    `/rank` caps a request at `rank_max_batch` postings (250 on the free
-    instance — `src.inference.predict.MAX_BATCH`, a measurement, not a round
-    number), and a day's board is about 1,150. So the board is sent in pages.
-    Paging is only honest if the merged answer is the answer one big call would
-    have given, and with a budget it is not automatically so: the budget-th
-    score of each *page* is not the board's budget-th score. What makes the
-    merge exact is that `/rank` returns every posting's probability, so the
-    pages can be ranked here by the same rule the service uses on a batch —
-    descending probability, ties by input order — and the budget applied once,
-    to the union. `tests/test_app.py` holds this equal to the service's own
-    unpaged ranking on a board larger than a page.
+    `/rank` caps a request at the service's page (250 on the free instance,
+    `src.inference.predict.MAX_BATCH`, a measurement), and a day's board is
+    about 1,150 — so the whole-board ranking is several requests. The server
+    owns everything between them: `POST /boards` opens the collection with
+    its instant and its snapshot declaration; pages are appended; `score` is
+    called until `done`, the server deriving board context over the *whole*
+    board first when it is a snapshot; `rank` orders the whole board by the
+    same rule `/rank` applies to a batch. This client pages and loops. It
+    holds no copy of the ranking rule and none of the derivation — until
+    2026-09-12 it held both, which was the reimplementation `/rank` existed
+    to make unnecessary.
 
-    Each page is sent *without* a budget, so the service applies its frozen
-    threshold to it; that threshold is returned as `frozen_threshold` beside
-    the board's budget-th score, which is `threshold_applied` here, because the
-    two are different operating points and a caller should see both.
+    A board that fits in one page still goes this way, so there is one path.
+    Boards live in memory on the instance and are gone when it sleeps: a 404
+    mid-flow is retried from the start, once.
     """
     if budget < 1:
         raise ValueError("budget must be at least 1")
     if not postings:
         raise ValueError("no postings to rank")
-    # Snapshot mode, over the whole board rather than per page — see
-    # `board_context_for`. The pages then carry the context per posting and
-    # the service is not told they are snapshots, because they are not.
-    board_size = len(postings) if is_board_snapshot else None
-    if is_board_snapshot:
-        postings = board_context_for(postings, previous_board_size)
-    size = page_size or int(api.health().get("rank_max_batch") or 1)
-    if size < 1:
-        raise ValueError("page size must be at least 1")
 
-    scored: list[tuple[int, float, dict]] = []
-    frozen_threshold: float | None = None
-    meta: dict = {}
-    pages = 0
-    for start in range(0, len(postings), size):
-        page = postings[start : start + size]
-        response = api.rank(page, as_of=as_of)
-        pages += 1
-        if frozen_threshold is None:
-            frozen_threshold = float(response["threshold_applied"])
-            meta = {
-                key: response[key]
-                for key in ("horizon_days", "model", "dataset", "t", "board_context_source")
-            }
-        for offset, item in enumerate(response["postings"]):
-            scored.append((start + offset, float(item["probability"]), item))
+    for attempt in (1, 2):
+        try:
+            return _drive(
+                api, postings, budget, as_of, is_board_snapshot, previous_board_size, on_progress
+            )
+        except ApiError as error:
+            if attempt == 1 and "re-upload" in str(error):
+                continue  # the board expired mid-flow; once more from the top
+            raise
+    raise AssertionError("unreachable")
 
-    # The service's rule, applied once to the whole board: descending
-    # probability, ties broken by the order the postings were sent in.
-    service_source = meta.pop("board_context_source", "supplied per posting or imputed")
-    context_source = DERIVED_ACROSS_PAGES if is_board_snapshot else service_source
-    order = sorted(scored, key=lambda row: (-row[1], row[0]))
-    effective = min(budget, len(order))
-    threshold_applied = order[effective - 1][1]
-    ranked: list[dict | None] = [None] * len(postings)
-    for position, (index, probability, item) in enumerate(order, start=1):
-        ranked[index] = {
-            "rank": position,
-            "probability": probability,
-            "watch": position <= effective,
-            "board_context_supplied": bool(item["board_context_supplied"]),
-        }
-    return {
-        "postings": ranked,
-        "threshold_applied": threshold_applied,
-        "threshold_source": BOARD_BUDGET,
-        "frozen_threshold": frozen_threshold,
-        "budget": effective,
-        "pages": pages,
-        "page_size": size,
-        "board_context_source": context_source,
-        "board_size": board_size,
-        **meta,
-    }
+
+def _drive(api, postings, budget, as_of, is_board_snapshot, previous_board_size, on_progress):
+    create: dict = {"is_board_snapshot": bool(is_board_snapshot)}
+    if as_of is not None:
+        create["as_of"] = as_of
+    if previous_board_size is not None:
+        create["previous_board_size"] = previous_board_size
+    opened = api._post("/boards", create)
+    board_id, page_size = opened["board_id"], int(opened["page_size"])
+
+    for start in range(0, len(postings), page_size):
+        api._post(f"/boards/{board_id}/postings", {"postings": postings[start : start + page_size]})
+    while True:
+        progress = api._post(f"/boards/{board_id}/score", {})
+        if on_progress is not None:
+            on_progress(progress["scored"], progress["total"])
+        if progress["done"]:
+            break
+    ranking = api._post(f"/boards/{board_id}/rank", {"budget": budget})
+    try:
+        requests.delete(f"{api.base_url}/boards/{board_id}", timeout=TIMEOUT)
+    except requests.RequestException:
+        pass  # it expires on its own
+    return ranking
 
 
 def _unwrap(response: requests.Response) -> object:

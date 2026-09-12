@@ -461,3 +461,74 @@ def test_the_snapshot_scores_as_supplied_context_would(client, synthetic_artifac
     assert [i["probability"] for i in derived["postings"]] == pytest.approx(
         [i["probability"] for i in supplied["postings"]]
     )
+
+
+# --- a board as one logical collection, over HTTP ------------------------------------
+
+
+def _drive_board(client, postings, budget, **create):
+    from src.inference.predict import MAX_BATCH
+
+    created = client.post("/boards", json={"as_of": FIXED_T, **create})
+    assert created.status_code == 201
+    board_id = created.json()["board_id"]
+    assert created.json()["page_size"] == MAX_BATCH
+    for start in range(0, len(postings), MAX_BATCH):
+        page = client.post(
+            f"/boards/{board_id}/postings", json={"postings": postings[start : start + MAX_BATCH]}
+        )
+        assert page.status_code == 200, page.text
+    calls = 0
+    while True:
+        progress = client.post(f"/boards/{board_id}/score").json()
+        calls += 1
+        if progress["done"]:
+            break
+    return board_id, calls, client.post(f"/boards/{board_id}/rank", json={"budget": budget})
+
+
+def test_a_board_uploaded_in_pages_ranks_as_one_batch_would(client, monkeypatch):
+    from src.inference import predict as predict_module
+    from src.inference.predict import MAX_BATCH, Predictor
+
+    postings = _postings(2 * MAX_BATCH + 30)
+    board_id, calls, ranked = _drive_board(client, postings, budget=20)
+    assert ranked.status_code == 200, ranked.text
+    body = ranked.json()
+    assert calls == 3 and body["pages_scored"] == 3 and body["board_id"] == board_id
+    assert sum(item["watch"] for item in body["postings"]) == 20
+
+    monkeypatch.setattr(predict_module, "MAX_BATCH", len(postings))
+    whole = Predictor.load(client.app.state.artifact_path).rank(postings, t=FIXED_T, budget=20)
+    assert [i["rank"] for i in body["postings"]] == [p.rank for p in whole.postings]
+    assert body["threshold_applied"] == pytest.approx(whole.threshold_applied)
+
+
+def test_a_snapshot_board_derives_context_over_every_page(client):
+    from src.inference.predict import MAX_BATCH
+
+    postings = _postings(MAX_BATCH + 20)
+    postings[0]["title"] = postings[-1]["title"] = "Same Title"
+    _, _, ranked = _drive_board(client, postings, budget=3, is_board_snapshot=True)
+    body = ranked.json()
+    assert body["board_context_source"] == "derived from the snapshot"
+    assert body["board_size"] == len(postings)
+
+
+def test_rank_before_scoring_is_a_422_that_says_what_to_do(client):
+    board_id = client.post("/boards", json={"as_of": FIXED_T}).json()["board_id"]
+    client.post(f"/boards/{board_id}/postings", json={"postings": _postings(3)})
+    response = client.post(f"/boards/{board_id}/rank", json={})
+    assert response.status_code == 422 and "call score until done" in response.text
+
+
+def test_a_forgotten_board_is_a_404_that_says_to_start_over(client):
+    response = client.post("/boards/nope/score")
+    assert response.status_code == 404 and "re-upload" in response.text
+    board_id = client.post("/boards", json={}).json()["board_id"]
+    assert client.delete(f"/boards/{board_id}").status_code == 204
+    assert client.post(f"/boards/{board_id}/score").status_code == 404
+
+
+def test_boards_need_a_model(modelless_client):
+    assert modelless_client.post("/boards", json={}).status_code == 503
