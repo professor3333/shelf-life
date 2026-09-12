@@ -47,6 +47,20 @@ import streamlit as st
 # because everything else is launched with `python -m`.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# The host re-runs *this* script when the repository changes, but it does not
+# necessarily re-import the modules this script imports: on 2026-09-12 a push
+# that added names to `app/client.py` left Community Cloud's process holding
+# the old module, and every visitor saw an ImportError on the line below until
+# the process was replaced. So if the helper module is already loaded and is
+# missing a name this script needs, reload it before importing from it. Locally
+# the branch is never taken; on the host it is what turns a push into a deploy.
+import importlib  # noqa: E402
+
+import app.client as _client  # noqa: E402
+
+if not hasattr(_client, "rank_board"):
+    _client = importlib.reload(_client)
+
 from app.client import (  # noqa: E402
     API_URL_ENV,
     CAVEAT,

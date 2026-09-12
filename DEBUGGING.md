@@ -4,6 +4,31 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-12 — a push that added names to a helper module broke the deployed UI
+
+- **Problem:** #85 added `rank_board`, `parse_board` and `EXAMPLE_BOARD_CSV`
+  to `app/client.py` and imported them in `app/streamlit_app.py`. Locally and
+  in CI, fine. On Community Cloud, every visitor saw `ImportError` at the
+  `from app.client import (...)` line, and the `verify-ui` job on `main` went
+  red with the page's traceback in its log — the first time the check caught
+  a break that a passing test suite had shipped.
+- **Root cause:** the host re-runs the main script when the repository
+  changes but keeps the process, and the already-imported `app.client` stayed
+  in `sys.modules` as the old module. A name that exists in the file did not
+  exist in the module the process was holding. The check that found it is the
+  one written the day before for exactly this class — deployment-specific
+  failure with green tests.
+- **Solution:** `app/streamlit_app.py` checks the loaded helper for a name it
+  needs and `importlib.reload`s it before importing. Locally the branch is
+  never taken; on the host it is what turns a push into a deploy. A reboot
+  from the dashboard would also have fixed it, once.
+- **Lesson:** "the script re-ran" is not "the code deployed". Any module the
+  main script imports is deployed only when the process re-imports it, and
+  whether that happens is the host's decision, not the repository's. Verify
+  the deployed page after every UI change — which is what the job is for.
+
+---
+
 ## 2026-09-12 — the depth ledger overstated what missing records mean
 
 - **Problem:** an empty ledger claimed no run had produced metrics despite H=1
