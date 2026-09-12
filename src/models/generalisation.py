@@ -41,11 +41,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 from src.data.split import SplitResult
 from src.features.preprocessing import features_and_target, fit_on_frame
+from src.inference.contract import BOARD_CONTEXT
 from src.models.metrics import DEFAULT_ALERT_BUDGET, average_precision
+
+#: Fewer held-out boards than this and the transfer question is unanswered —
+#: one board is an observation, not a pattern — so the gate cannot fire.
+MIN_BOARDS_FOR_VERDICT = 2
+
+INTACT, BOARD_SPECIFIC, REVERSED, UNMEASURED = (
+    "intact",
+    "board_specific",
+    "reversed",
+    "unmeasured",
+)
 
 #: A held-out board needs at least this many positives in the evaluation block
 #: before its fold is scored. Ten is already thin — it buys an interval wide
@@ -92,12 +105,29 @@ def _score(model, block: pd.DataFrame) -> float:
     return average_precision(target, model.predict_proba(features)[:, 1])
 
 
+def without_board_context(block: pd.DataFrame) -> pd.DataFrame:
+    """The block as a caller who supplies no board context would send it.
+
+    `float64` NaN rather than each column's own dtype: the board columns arrive
+    as `Int64` from the panel but as plain `int64` from any frame that never
+    had a null, and a non-nullable integer column cannot hold the absence this
+    represents. Every board column is numeric, so `select_columns` routes it
+    to the same branch either way and the imputer sees exactly what an omitted
+    field looks like at serve time.
+    """
+    withheld = block.copy()
+    for column in BOARD_CONTEXT:
+        withheld[column] = pd.Series(np.nan, index=withheld.index, dtype="float64")
+    return withheld
+
+
 def leave_one_board_out(
     split: SplitResult,
     build,
     budget_per_day: int = DEFAULT_ALERT_BUDGET,
     min_positives: int = MIN_HELD_OUT_POSITIVES,
     min_train_share: float = MIN_TRAIN_SHARE,
+    serve_time: bool = False,
 ) -> tuple[list[BoardFold], list[Skipped]]:
     """Hold each board out of the fit in turn; return the folds and the refusals.
 
@@ -108,8 +138,17 @@ def leave_one_board_out(
     Both arms are fitted on the **training block only** and scored on the
     validation block, so the temporal discipline is unchanged: holding a board
     out removes rows from the fit, it does not license training on the future.
+
+    `serve_time` scores the held-out board with its board context withheld —
+    the way a posting from a board the service has never seen arrives, since
+    a batch cannot describe a board (`design.md` §4a makes §12's board-context
+    decision conditional on transfer holding under exactly this regime). Both
+    arms are scored the same way, so the gap still isolates what seeing the
+    board at fit time was worth.
     """
     train, validation = split.train, split.val
+    if serve_time:
+        validation = without_board_context(validation)
     boards = sorted(set(validation["source"]) & set(train["source"]))
     total_positives = int((train["y"] == 1).sum())
 
@@ -156,6 +195,89 @@ def leave_one_board_out(
         )
 
     return folds, skipped
+
+
+@dataclass(frozen=True)
+class Transfer:
+    """The pre-registered reading of a leave-one-board-out table.
+
+    Two questions, answered separately because they gate different things:
+
+    **Did it collapse?** On the boards it has not seen, is the model no better
+    than each board's own base rate? `mean_lift` is the mean over held-out
+    boards of (transfer PR-AUC − base rate); at or below zero the model has
+    nothing to say about a board it has not seen, and that is a reason not to
+    freeze it — `freeze` refuses on `collapsed` unless told, in writing, to
+    accept it. Needs `MIN_BOARDS_FOR_VERDICT` boards; one is an observation.
+
+    **Is it board-specific?** The older reading, kept: seeing a board at fit
+    time is worth more than the spread of that worth across boards. Not a
+    refusal — the model may still be the best one for these boards — but the
+    artifact carries the verdict, and a model marked `board_specific` is not
+    described as applicable to boards it has not seen. `intact` licenses that
+    description only for boards of the kind these seven are; never "arbitrary".
+    """
+
+    verdict: str
+    collapsed: bool
+    boards: tuple[str, ...]
+    mean_gap: float
+    spread: float
+    mean_lift: float
+    lifts: dict[str, float]
+    skipped: dict[str, str]
+
+    def as_dict(self) -> dict:
+        return {
+            "verdict": self.verdict,
+            "collapsed": self.collapsed,
+            "rule": (
+                f"collapsed iff mean(transfer_pr_auc - base_rate) <= 0 over >= "
+                f"{MIN_BOARDS_FOR_VERDICT} held-out boards; board_specific iff mean gap > spread"
+            ),
+            "boards": list(self.boards),
+            "mean_gap": self.mean_gap,
+            "spread": self.spread,
+            "mean_lift": self.mean_lift,
+            "lifts": dict(self.lifts),
+            "skipped": dict(self.skipped),
+        }
+
+
+def assess(folds: list[BoardFold], skipped: list[Skipped]) -> Transfer:
+    """Apply the rule fixed in `design.md` §4a (2026-09-12) to the folds."""
+    refused = {s.board: s.reason for s in skipped}
+    if len(folds) < MIN_BOARDS_FOR_VERDICT:
+        return Transfer(
+            UNMEASURED,
+            False,
+            tuple(f.board for f in folds),
+            float("nan"),
+            float("nan"),
+            float("nan"),
+            {f.board: f.transfer_pr_auc - f.base_rate for f in folds},
+            refused,
+        )
+    gaps = pd.Series([f.gap for f in folds])
+    lifts = {f.board: f.transfer_pr_auc - f.base_rate for f in folds}
+    mean_lift = float(np.mean(list(lifts.values())))
+    mean, spread = float(gaps.mean()), float(gaps.std(ddof=1))
+    if abs(mean) <= spread:
+        verdict_ = INTACT
+    elif mean > 0:
+        verdict_ = BOARD_SPECIFIC
+    else:
+        verdict_ = REVERSED
+    return Transfer(
+        verdict_,
+        mean_lift <= 0.0,
+        tuple(f.board for f in folds),
+        mean,
+        spread,
+        mean_lift,
+        lifts,
+        refused,
+    )
 
 
 def verdict(folds: list[BoardFold]) -> str:

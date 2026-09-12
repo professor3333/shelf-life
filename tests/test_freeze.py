@@ -220,6 +220,7 @@ REQUIRED_SECTIONS = (
     "## Per source",  # is it one board's model
     "## Carried over from training, or not",  # memorisation check
     "## Incumbent stock against incident flow",  # the model by cohort, not only the label
+    "## Would it work on a board it has never seen?",  # the release gate's reading
     "## Calibration on test",  # brier, ece, and the binned curve
     "**Validation block, same threshold, same resampler**",  # intervals on both sides
     "Rule, fixed 2026-09-12 in `src/models/calibration.py`",  # the decision, stated first
@@ -294,6 +295,7 @@ def test_a_model_no_better_than_the_board_reports_a_lift_of_one():
         test_intervals={},
         validation_intervals={},
         recalibration={},
+        transfer={},
         by_cohort=pd.DataFrame(),
         test_fragility=None,
         by_source=pd.DataFrame(),
@@ -371,3 +373,72 @@ def test_the_artifact_names_everything_it_is_traceable_to(tmp_path, monkeypatch)
 
     sidecar = json.loads(paths["artifact"].with_suffix(".json").read_text())
     assert sidecar["artifact_sha256"] == hashlib.sha256(paths["artifact"].read_bytes()).hexdigest()
+
+
+# --- the third evidence refusal: transfer -------------------------------------------
+
+
+def _force_collapse(monkeypatch):
+    """Make the gate see a collapse without a panel that produces one."""
+    from src.models import generalisation
+
+    def collapsed(folds, skipped):
+        return generalisation.Transfer(
+            generalisation.BOARD_SPECIFIC,
+            True,
+            ("greenhouse:a", "greenhouse:b"),
+            0.1,
+            0.01,
+            -0.02,
+            {"greenhouse:a": -0.01, "greenhouse:b": -0.03},
+            {},
+        )
+
+    monkeypatch.setattr(freeze_module, "assess", collapsed)
+
+
+def test_a_candidate_that_collapses_on_unseen_boards_is_refused(tmp_path, monkeypatch, capsys):
+    """The fingerprint diagnostic made `source`'s exclusion prove nothing; only
+    holding a board out does, and a collapse there is a reason not to freeze."""
+    _force_collapse(monkeypatch)
+    paths = _run_freeze(tmp_path, monkeypatch, DEEP_ENOUGH_TO_CHOOSE)
+    assert paths["exit_code"] == 3
+    assert not paths["artifact"].exists(), "the artifact must not be written"
+    report = paths["report"].read_text()
+    assert "## Nothing below has run" in report
+    assert "boards it has not seen" in report and "--accept-transfer-collapse" in report
+    assert "learned which board a posting is from" in capsys.readouterr().out
+
+
+def test_the_transfer_override_exists_works_and_is_recorded(tmp_path, monkeypatch):
+    from src.inference import artifact as artifact_module
+
+    _force_collapse(monkeypatch)
+    paths = _run_freeze(tmp_path, monkeypatch, DEEP_ENOUGH_TO_CHOOSE, "--accept-transfer-collapse")
+    assert paths["exit_code"] == 0
+    meta = artifact_module.load(paths["artifact"]).metadata
+    assert meta.transfer["collapsed"] is True
+    assert meta.transfer["accepted_collapse"] is True
+    report = paths["report"].read_text()
+    assert "## Would it work on a board it has never seen?" in report
+    assert "fitted to these boards and nothing wider" in report
+
+
+def test_the_transfer_check_never_opens_the_test_block(tmp_path, monkeypatch):
+    """The gate runs on train and validation; a refusal happens before `freeze()`,
+    which is the only function here that reads `split.test`."""
+    _force_collapse(monkeypatch)
+    paths = _run_freeze(tmp_path, monkeypatch, DEEP_ENOUGH_TO_CHOOSE)
+    assert paths["exit_code"] == 3
+    assert paths["frozen"] is None, "freeze() itself was never called"
+
+
+def test_every_frozen_model_carries_the_transfer_assessment(tmp_path, monkeypatch):
+    from src.inference import artifact as artifact_module
+
+    paths = _run_freeze(tmp_path, monkeypatch, DEEP_ENOUGH_TO_CHOOSE)
+    assert paths["exit_code"] == 0
+    meta = artifact_module.load(paths["artifact"]).metadata
+    assert meta.transfer["verdict"] in {"intact", "board_specific", "reversed", "unmeasured"}
+    assert meta.transfer["rule"].startswith("collapsed iff")
+    assert meta.transfer["accepted_collapse"] is False

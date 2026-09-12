@@ -696,13 +696,23 @@ The control matters: base rates run from 0.0090 on figma to 0.0173 on discord,
 so a low transfer score alone could be the board being harder rather than the
 model failing to carry over.
 
-**It cannot run yet, and the refusals are stated rather than hidden.** Positives
-per board are anthropic 52, gitlab 24, figma 10, discord 6, duolingo 5,
-python_org 3, airtable 0 — so testing on duolingo means five positives and
-airtable's fold is undefined, while holding out anthropic removes half the
-training positives and changes the fit and the board together. A board is scored
-only when it keeps enough positives to measure and leaves enough behind to fit
-on; every other board appears in a table of refusals with its reason.
+**It cannot run yet, and the refusals are stated rather than hidden.** A board
+is scored only when it keeps enough positives to measure and leaves enough
+behind to fit on; every other board appears in a table of refusals with its
+reason (the per-board counts are in the report).
+
+**It is a release gate, not a diagnostic.** The fingerprint report shows the
+board is recoverable from the production features at 100% — `board_size_at_t`
+alone does it — so excluding `source` does not make a model board-independent,
+and a model can learn *this looks like anthropic* as a proxy for hazard.
+`freeze` therefore runs leave-one-board-out on the candidate being frozen, with
+board context withheld the way a posting from an unknown board arrives, and
+**refuses** (exit 3) when the candidate collapses — mean lift over each held-out
+board's base rate at or below zero, on two or more boards. The override,
+`--accept-transfer-collapse`, is recorded on the artifact. Whatever the verdict,
+it travels on the artifact as `transfer`, and only `intact` licenses describing
+the model as applicable to a board it has not seen — of the kind these seven
+are, never *arbitrary* boards. Rule and date: `docs/design.md` §4a.
 
 ### `POST /rank` — the shape the operating point was designed for
 

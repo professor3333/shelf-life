@@ -58,6 +58,8 @@ from src.models import ledger, provenance
 # the model-selection verdict, and two different verdicts under one name in one
 # module is a bug waiting for someone to move a line.
 from src.models.generalisation import (
+    UNMEASURED,
+    assess,
     leave_one_board_out,
     report_tables,
 )
@@ -713,6 +715,21 @@ def _generalisation_section(generalisation) -> list[str]:
 
     folds, skipped, scored, refused = generalisation
     lines += [transfer_verdict(folds), ""]
+    gate = assess(folds, skipped)
+    if gate.verdict != UNMEASURED:
+        lines += [
+            f"**The release gate reads this as `{gate.verdict}`"
+            f"{', collapsed' if gate.collapsed else ''}.** Mean lift over the base rate on "
+            f"held-out boards: {gate.mean_lift:+.4f}. `freeze` "
+            + (
+                "will **refuse** this candidate unless told `--accept-transfer-collapse`: on "
+                "boards it has not seen it is no better than the prior."
+                if gate.collapsed
+                else "will proceed; the verdict travels on the artifact, and only `intact` "
+                "licenses describing the model as applicable to a board it has not seen."
+            ),
+            "",
+        ]
     if not scored.empty:
         lines += [
             _table(
@@ -1309,8 +1326,14 @@ def main() -> None:
                 ),
             )
             # Refits per board, so it is a modelling activity and stays on the
-            # validation block.
-            folds, skipped = leave_one_board_out(split, lambda: build_xgboost(split), args.budget)
+            # validation block. On the *chosen* candidate — until 2026-09-12
+            # this always built XGBoost, so the transfer table could describe
+            # a model the rule had not selected — and with board context
+            # withheld the way a posting from an unknown board arrives, which
+            # is the regime the release gate in `freeze` reads it under.
+            folds, skipped = leave_one_board_out(
+                split, candidate_models(split)[chosen], args.budget, serve_time=True
+            )
             generalisation = (folds, skipped, *report_tables(folds, skipped))
 
             row = summary[summary["model"] == chosen].iloc[0]

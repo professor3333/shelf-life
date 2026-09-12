@@ -343,6 +343,43 @@ leave-one-board-out check above passes with board context imputed the way the
 service imputes it — `train.serve_time_regime` — and §12's decision is
 conditional on that from now on.
 
+### The gate — **DECIDED 2026-09-12: transfer collapse is a freeze refusal**
+
+"Read before `freeze --run`" was a sentence, and two things made even the
+reading weaker than it looked: the transfer driver in `evaluate` always
+built XGBoost, whatever candidate the rule selected, and the fingerprint had
+only ever been run at H=1. Both are fixed, and the check is now enforced in
+code as the third evidence refusal, after depth and before the clean-tree
+check, on the candidate being frozen, with board context withheld the way a
+posting from an unknown board arrives (`generalisation.leave_one_board_out`,
+`serve_time=True` — the regime §12 is conditional on).
+
+The rule, fixed now while every leave-one-board-out table in the repository
+is H=1 or refused for depth:
+
+- **Collapsed** — over the held-out boards that clear the fold guards, the
+  mean of (transfer PR-AUC − that board's base rate) is at or below zero, on
+  at least two boards. On boards it has not seen the model is no better than
+  the prior. **`freeze` refuses**, exit 3. `--accept-transfer-collapse`
+  overrides it and is recorded on the artifact; the model is then described
+  as fitted to these boards and nothing wider.
+- **Board-specific** — the existing reading (mean gap larger than its spread
+  across boards): measurably better on boards it has seen. Not a refusal —
+  it may still be the best model for these seven — but the verdict travels on
+  the artifact and the model is *not* described as applicable to boards it
+  has not seen.
+- **Unmeasured** — fewer than two boards could be held out. Depth, not a
+  result; recorded; no claim about unseen boards.
+- **Intact** — recorded, and the claim is allowed, scoped to a board *of the
+  kind these seven are*. Never "arbitrary boards": seven employer boards on
+  two platforms are not a sample of job boards.
+
+`Metadata.transfer` carries the verdict, the per-board lifts, the skipped
+boards with reasons and whether a collapse was overridden; `test_results.md`
+has the table; `evaluate` states the gate's reading for the chosen candidate
+beside the verdict prose, so the day's comparison says in advance what the
+freeze will do. `rehearse.sh` now runs the fingerprint at H=7 too.
+
 **Would change my mind:** a leave-one-board-out gap that is large once there
 are enough positives per board to measure one, which would say the model is
 spending the fingerprint and the §12 columns are the first to remove. Or an

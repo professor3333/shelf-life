@@ -32,7 +32,6 @@ import argparse
 from dataclasses import dataclass
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 from xgboost import XGBClassifier
 
@@ -49,6 +48,7 @@ from src.features.preprocessing import (
 )
 from src.inference.contract import BOARD_CONTEXT
 from src.models import provenance, tracking
+from src.models.generalisation import without_board_context
 from src.models.metrics import DEFAULT_ALERT_BUDGET, evaluate
 from src.models.train_baseline import (
     DEFAULT_PANEL,
@@ -215,15 +215,7 @@ def serve_time_regime(
     model = build_xgboost(split)
     fit_on_training_fold(model, split)
 
-    withheld = split.val.copy()
-    for column in BOARD_CONTEXT:
-        # `float64` NaN rather than the column's own dtype: these arrive as
-        # `Int64` from the panel but a plain `int64` from any frame that never
-        # had a null, and a non-nullable integer column cannot hold the absence
-        # this is trying to represent. Every board column is numeric, so
-        # `select_columns` routes it to the same branch either way and the
-        # imputer sees exactly what a caller who omitted the field would send.
-        withheld[column] = pd.Series(np.nan, index=withheld.index, dtype="float64")
+    withheld = without_board_context(split.val)
 
     rows = []
     for name, block in (("board context supplied", split.val), ("absent, imputed", withheld)):
