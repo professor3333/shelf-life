@@ -43,6 +43,7 @@ import numpy as np
 import pandas as pd
 
 from src.models.metrics import (
+    DEFAULT_ALERT_BUDGET,
     average_precision,
     brier_score,
     confusion_at,
@@ -128,7 +129,16 @@ def interval(
     samples: np.ndarray,
     level: float = 0.95,
 ) -> Interval:
-    """Percentile interval. `nan` endpoints when nothing could be resampled."""
+    """Percentile interval. `nan` endpoints when nothing could be resampled.
+
+    A resample on which the statistic is undefined — precision with nothing
+    above the threshold, say — is dropped the way a resample with no positives
+    is, rather than poisoning the percentile: one `nan` in the samples made
+    `np.percentile` return `nan` for the whole interval, which read as "no
+    interval" for a metric that had one. Found 2026-09-12 on a per-board
+    table; the headline path had the same exposure.
+    """
+    samples = samples[~np.isnan(samples)] if samples.size else samples
     if samples.size == 0:
         return Interval(metric, point, float("nan"), float("nan"), 0)
     tail = (1.0 - level) / 2.0
@@ -217,3 +227,75 @@ def format_table(intervals: dict[str, Interval], level: float = 0.95) -> list[st
                 f"| {item.width:.4f} |"
             )
     return lines
+
+
+#: Resamples per group in a breakdown table. Fewer than the headline's 2,000
+#: because a table has several groups and a report has several tables; at
+#: this count a percentile endpoint moves by less than the third decimal.
+GROUP_RESAMPLES = 500
+
+
+def evaluate_by_with_evidence(
+    frame: pd.DataFrame,
+    y_score,
+    group: str,
+    n_days: int = 1,
+    budget_per_day: int = DEFAULT_ALERT_BUDGET,
+    resamples: int = GROUP_RESAMPLES,
+    seed: int = 0,
+) -> pd.DataFrame:
+    """`metrics.evaluate_by`, plus what a per-group number needs beside it.
+
+    Per-board and per-cohort positive rates on this panel run from 0% to
+    13.5%, and several groups hold a handful of positives. A PR-AUC on five
+    events is a number set by which five, and printed beside a real one it
+    invites a comparison that cannot be made. So every row of a breakdown
+    carries: `n` rows, `postings` — the independent units, since a posting
+    contributes about six rows — `positives`, a posting-clustered 95%
+    interval on `pr_auc` and on `precision_at_budget`, and `fragile`, true
+    under `FRAGILE_POSITIVES` events. The interval is the evidence; the point
+    estimate on a fragile row is an order of magnitude, not a bound.
+    """
+    from src.models.metrics import evaluate_by  # noqa: PLC0415 - metrics imports this module
+
+    table = evaluate_by(frame, y_score, group, n_days=n_days, budget_per_day=budget_per_day)
+    scores = pd.Series(np.asarray(y_score, dtype=float), index=frame.index)
+    extra = []
+    for value, block in frame.groupby(group, sort=True, dropna=False):
+        truth = block["y"].astype(int).to_numpy()
+        score = scores.loc[block.index].to_numpy()
+        groups = posting_ids(block)
+        row: dict = {group: value, "postings": int(len(set(groups)))}
+        row["fragile"] = bool(truth.sum() < FRAGILE_POSITIVES)
+        threshold = float(table.loc[table[group] == value, "threshold"].iloc[0])
+        for name, statistic in (
+            ("pr_auc", average_precision),
+            ("precision_at_budget", _precision_at(threshold)),
+        ):
+            samples = cluster_resample(truth, score, groups, statistic, resamples, seed)
+            band = interval(name, float("nan"), samples)
+            row[f"{name}_low"], row[f"{name}_high"] = band.low, band.high
+        extra.append(row)
+    return table.merge(pd.DataFrame(extra), on=group, how="left")
+
+
+def _precision_at(threshold: float) -> Callable[[np.ndarray, np.ndarray], float]:
+    return lambda t, s: confusion_at(t, s, threshold)["precision"]
+
+
+def evidence_columns(group: str) -> list[str]:
+    """The columns a breakdown table prints, in the order a reader needs them."""
+    return [
+        group,
+        "n",
+        "postings",
+        "positives",
+        "base_rate",
+        "pr_auc",
+        "pr_auc_low",
+        "pr_auc_high",
+        "precision_at_budget",
+        "precision_at_budget_low",
+        "precision_at_budget_high",
+        "fragile",
+    ]

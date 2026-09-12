@@ -205,3 +205,13 @@ def test_the_bootstrap_is_deterministic_for_a_given_seed():
     second = bootstrap_block(block, scores, threshold=0.5, resamples=100, seed=7)
     assert first["pr_auc"].low == second["pr_auc"].low
     assert first["pr_auc"].high == second["pr_auc"].high
+
+
+def test_a_resample_on_which_the_statistic_is_undefined_does_not_erase_the_interval():
+    """One resample with nothing above the threshold gives `nan` precision;
+    it is dropped like a resample with no positives, not averaged in as the
+    whole interval. Found on a per-board table on 2026-09-12."""
+    samples = np.array([0.25, np.nan, 0.26, 0.27, 0.25])
+    result = interval("precision", 0.25, samples)
+    assert not np.isnan(result.low) and not np.isnan(result.high)
+    assert result.resamples == 4

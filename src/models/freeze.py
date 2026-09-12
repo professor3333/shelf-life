@@ -89,13 +89,18 @@ from src.models.metrics import (
     alert_budget,
     confusion_at,
     evaluate,
-    evaluate_by,
     expected_calibration_error,
     reliability_curve,
     threshold_for_budget,
 )
 from src.models.train_baseline import DEFAULT_PANEL, RANDOM_STATE, _table, prediction_days
-from src.models.uncertainty import bootstrap_block, format_table, fragility_note
+from src.models.uncertainty import (
+    bootstrap_block,
+    evaluate_by_with_evidence,
+    evidence_columns,
+    format_table,
+    fragility_note,
+)
 
 DEFAULT_REPORT = Path("reports/test_results.md")
 
@@ -273,7 +278,7 @@ def freeze(
             "validation": provenance.period(split.val),
             "test": provenance.period(test_block),
         },
-        by_cohort=evaluate_by(
+        by_cohort=evaluate_by_with_evidence(
             cohort_audit.attach_cohort(test_block, split.frame),
             test_scores,
             "cohort",
@@ -281,14 +286,14 @@ def freeze(
             budget_per_day=budget_per_day,
         ),
         test_fragility=fragility_note(test_block),
-        by_source=evaluate_by(
+        by_source=evaluate_by_with_evidence(
             test_block,
             test_scores,
             "source",
             n_days=prediction_days(test_block),
             budget_per_day=budget_per_day,
         ),
-        by_seen_in_train=evaluate_by(
+        by_seen_in_train=evaluate_by_with_evidence(
             test_block,
             test_scores,
             "seen_in_train",
@@ -327,6 +332,19 @@ def _board_context_section(decision: dict) -> list[str]:
         f"| fold spread used as the noise scale | {decision['fold_sd']:.4f} |",
         "",
         f"Shipped: {shipped}. {decision['reason']}.",
+        "",
+    ]
+
+
+def _evidence_note() -> list[str]:
+    """What every breakdown row carries, said once above the first table."""
+    return [
+        "Every row below carries its evidence: `n` rows, `postings` — the independent",
+        "units, at about six rows each — `positives`, and a posting-clustered 95%",
+        "interval on `pr_auc` and on `precision_at_budget`. `fragile` marks a row with",
+        "fewer than thirty positives, where the point estimate is an order of magnitude",
+        "and not a bound. Per-board positive rates on this panel run from 0% to 13.5%,",
+        "and a number on five events is a number set by which five.",
         "",
     ]
 
@@ -828,10 +846,8 @@ def write_report(
             "",
             "A model that only works on one board is a per-board model.",
             "",
-            _table(
-                frozen.by_source,
-                ["source", "n", "positives", "base_rate", "pr_auc", "precision", "recall"],
-            ),
+            *_evidence_note(),
+            _table(frozen.by_source, evidence_columns("source")),
             "",
             "## Carried over from training, or not",
             "",
@@ -839,10 +855,7 @@ def write_report(
             "earlier wave. A model scoring well on those and badly on the rest has",
             "memorised postings rather than learned duration dependence.",
             "",
-            _table(
-                frozen.by_seen_in_train,
-                ["seen_in_train", "n", "positives", "base_rate", "pr_auc", "precision", "recall"],
-            ),
+            _table(frozen.by_seen_in_train, evidence_columns("seen_in_train")),
             "",
             "## Incumbent stock against incident flow",
             "",
@@ -853,10 +866,7 @@ def write_report(
             "came from, not how long postings last. The incident cohort is small at",
             "every depth this panel has reached; read `n` and `positives` first.",
             "",
-            _table(
-                frozen.by_cohort,
-                ["cohort", "n", "positives", "base_rate", "pr_auc", "precision", "recall"],
-            ),
+            _table(frozen.by_cohort, evidence_columns("cohort")),
             "",
             *_board_context_section(frozen.board_context),
             *_transfer_section(frozen.transfer),

@@ -484,3 +484,27 @@ def test_the_claim_is_scoped_to_a_period_and_the_period_travels(tmp_path, monkey
     report = paths["report"].read_text()
     assert meta.validated_on.capitalize() in report
     assert "not demonstrated by it and are not claimed" in report
+
+
+def test_every_breakdown_row_carries_its_evidence(tmp_path, monkeypatch):
+    """Per-board, per-cohort and seen/unseen rows each carry rows, independent
+    postings, positives, a posting-clustered interval on PR-AUC and on
+    precision@budget, and a fragility flag — not a bare PR-AUC."""
+    paths = _run_freeze(tmp_path, monkeypatch, DEEP_ENOUGH_TO_CHOOSE)
+    frozen = paths["frozen"]
+    for table in (frozen.by_source, frozen.by_cohort, frozen.by_seen_in_train):
+        for column in (
+            "postings",
+            "pr_auc_low",
+            "pr_auc_high",
+            "precision_at_budget_low",
+            "precision_at_budget_high",
+            "fragile",
+        ):
+            assert column in table.columns, column
+        assert (table["postings"] <= table["n"]).all()
+        assert table["fragile"].dtype == bool
+    report = paths["report"].read_text()
+    per_source = report.split("## Per source")[1].split("## ")[0]
+    assert "| postings |" in per_source or "postings" in per_source
+    assert "pr_auc_low" in per_source and "fragile" in per_source
