@@ -21,7 +21,7 @@ about to come down?*
 
 That question is worth asking because a job board shows you a list of things
 that all look equally available, and they are not. Some of those postings will
-be closed within the week. Some have been sitting there for 860 days and will
+be gone within the week. Some have been sitting there for 860 days and will
 still be there next spring. A board sorted by "new" cannot tell you which is
 which, and neither can any single scrape — the information lives in the
 *difference* between scrapes, which is the thing this project has been
@@ -236,7 +236,7 @@ Two clauses in that sentence have histories. *Never re-appeared* was dropped on
 2026-09-09 (`design.md` §11): a label is final at corroboration, whatever the
 posting does afterwards. *After `j` was first seen* was added on 2026-09-11,
 because without it the runs before a posting was listed count as absences,
-and two of them date its closure before its own first row — every row of every
+and two of them date its removal before its own first row — every row of every
 late-arriving posting became a positive (`DEBUGGING.md`, 2026-09-11).
 
 That is the project's `ABSENCE_CORROBORATION = 2` rule (the scraper's
