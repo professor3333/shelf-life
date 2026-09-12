@@ -69,7 +69,7 @@ it describes — and this README links to them rather than restating them:
 | Can the features name the board without `source` | [`board_fingerprint.md`](reports/board_fingerprint.md) |
 | The ladder, folds, threshold, calibration, per-board and transfer | [`model_comparison.md`](reports/model_comparison.md) |
 | The held-out result, or the refusal to produce one | [`test_results.md`](reports/test_results.md) |
-| Every run that has ever been kept | [`depth_ledger.md`](reports/depth_ledger.md) |
+| Selected validation results and completed held-out runs | [`depth_ledger.md`](reports/depth_ledger.md) |
 
 Where a number in this README carries a date, it is the value on that date and
 is kept as the record of a decision, not as the current state.
@@ -790,10 +790,22 @@ first contact with the real panel is where a dtype or an empty group shows up,
 and meeting that on a split whose numbers do not matter yet is much better than
 meeting it on the one afternoon the test block is available.
 
-**Every run is kept, not overwritten.** `reports/depth_ledger.md` — rendered
-from a committed `depth_ledger.jsonl` — holds one row per run: the snapshot, the
-commit, the labelled waves, the positives, the folds, and the metric with its
-fold spread. `evaluate` and `freeze` append to it automatically.
+**The depth ledger keeps selected validation results and completed held-out
+runs.** `reports/depth_ledger.md`, rendered from the committed
+`depth_ledger.jsonl`, records the snapshot, commit, labelled waves, positives,
+folds and metric with its available uncertainty. `evaluate` appends only after
+selection succeeds, currently requiring three scored rolling-origin folds.
+`freeze` appends after successfully saving an artifact, including synthetic
+rehearsals and explicit `--accept-no-folds` runs. An entry is therefore not by
+itself evidence of a final release or fold-qualified selection.
+
+This is not an inventory of all experiments, and it is not restricted to H=7.
+H=1 follows the same recording rules: candidate scores can appear in
+[`model_results.md`](reports/model_results.md) and
+[`model_comparison.md`](reports/model_comparison.md) even when nothing is
+selected and no ledger row is appended. `train` and `experiments` do not append
+here; their reports and experiment tracking retain those results. An empty
+real-data ledger does not mean no real-data metrics exist.
 
 It exists because of a fact this project cannot argue its way out of. The panel
 accrues about **19 removals a day** against 100 today, so the first honest result
@@ -803,10 +815,11 @@ keep the earlier runs and let a reader watch the interval narrow against a
 sample size printed beside it. A metric at one depth is a claim; the same metric
 at four depths is evidence about what the claim is worth.
 
-Re-running on the same snapshot with the same commit replaces a row rather than
-adding one, so the ledger measures what the pipeline scored and not how often it
-was run. Synthetic runs are tabled separately and labelled, because a history
-that mixed them with real ones would be worse than no history.
+The key is `(stage, dataset, panel_sha256, git_sha)`. Re-running that combination
+replaces its row; changing the candidate or budget alone does not add a row.
+Synthetic runs are tabled separately and labelled. A missing CV spread means it
+was not recorded, not necessarily that too few folds exist: held-out rows store
+a posting-clustered bootstrap interval instead of CV summaries.
 
 ### The two gates, and they are not the same day
 

@@ -109,6 +109,36 @@ def test_a_dirty_tree_is_flagged_as_provisional():
 def test_an_empty_ledger_renders_without_pretending_to_have_results():
     text = ledger.render([])
     assert "Nothing recorded yet" in text
+    assert "No run has produced a metric" not in text
+    assert "This does not mean no experiment has produced metrics" in text
+    assert "model_comparison.md" in text
+
+
+def test_synthetic_only_history_does_not_imply_no_real_candidate_metrics():
+    text = ledger.render([_entry(provenance={"dataset": "synthetic"})])
+    real_section = text.split("## Real panel")[1].split("## Synthetic panel")[0]
+    assert "No selected real-data validation result" in real_section
+    assert "H=1 candidate metrics" in real_section
+    assert "| snapshot_date |" not in real_section
+
+
+def test_held_out_interval_survives_missing_cv_summary_with_five_folds():
+    text = ledger.render(
+        [
+            _entry(
+                stage=ledger.HELD_OUT,
+                folds=5,
+                cv_pr_auc_mean=None,
+                cv_pr_auc_sd=None,
+                pr_auc_low=0.10,
+                pr_auc_high=0.31,
+            )
+        ]
+    )
+    assert "[0.1000, 0.3100]" in text
+    assert "do not store CV summaries even when folds exist" in text
+    assert "means fewer than two folds scored" not in text
+    assert "the run has a metric and no error bar" not in text
 
 
 def test_the_stage_must_be_one_of_the_two():
