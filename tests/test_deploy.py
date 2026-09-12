@@ -870,6 +870,28 @@ def test_the_deployed_ui_is_verified_after_app_changes(workflow_text: str) -> No
     assert os.access(ROOT / "scripts" / "smoke_ui.sh", os.X_OK)
 
 
+# --- regenerating the evidence from a clean tree ---------------------------------
+
+
+def test_the_regeneration_runs_only_modules_that_exist() -> None:
+    script = (ROOT / "scripts" / "regenerate_reports.sh").read_text()
+    for module in sorted(_invoked_modules(script)):
+        assert importlib.util.find_spec(module) is not None, (
+            f"scripts/regenerate_reports.sh runs `python -m {module}`, which does not exist"
+        )
+
+
+def test_the_regeneration_refuses_dirty_source_and_never_opens_the_block_itself() -> None:
+    """It refuses uncommitted source outside reports/, and the only freeze it
+    runs is the H=7 one, which refuses on depth until the gate clears — the
+    same freeze the day-of sequence runs, not a shortcut around it."""
+    script = (ROOT / "scripts" / "regenerate_reports.sh").read_text()
+    assert "git status --porcelain -- . ':!reports'" in script
+    assert "exit 3" in script
+    assert "--synthetic" not in script and "--accept-no-folds" not in script
+    assert os.access(ROOT / "scripts" / "regenerate_reports.sh", os.X_OK)
+
+
 # --- the release chain, and where it stops --------------------------------------
 
 

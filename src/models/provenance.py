@@ -128,6 +128,29 @@ def sha256_of(path: Path, chunk_size: int = 1 << 20) -> str:
     return digest.hexdigest()
 
 
+def _snapshot_date_for(panel_path: Path, raw_root: Path = Path("data/raw")) -> str | None:
+    """The snapshot a report is about.
+
+    A report that reads a specific pinned snapshot — the dated data profiles
+    do, by manifest path — is about *that* snapshot, not the newest one on
+    disk: until 2026-09-12 the profile of 2026-09-04, regenerated later, said
+    it described the 2026-09-12 snapshot. So a path under `data/raw/<date>/`
+    names its own snapshot, and everything else (a derived panel) is about
+    the newest, which is the one it was built from.
+    """
+    try:
+        parts = Path(panel_path).resolve().relative_to(raw_root.resolve()).parts
+    except ValueError:
+        return _snapshot_date(raw_root)
+    if parts:
+        manifest = raw_root / parts[0] / "manifest.json"
+        try:
+            return str(json.loads(manifest.read_text())["snapshot_date"])
+        except (OSError, ValueError, KeyError):
+            return parts[0]
+    return _snapshot_date(raw_root)
+
+
 def _snapshot_date(raw_root: Path = Path("data/raw")) -> str | None:
     """The date of the most recent pinned snapshot, if one exists.
 
@@ -182,6 +205,22 @@ def period(frame, column: str = "t") -> dict[str, str]:
     }
 
 
+def source_is_dirty() -> bool:
+    """Is anything *other than a generated report* uncommitted?
+
+    What a report's `Code` row claims is that the source at that SHA, on that
+    snapshot, produced it. Regenerating the reports in a batch writes twenty
+    files under `reports/` before any is committed, and counting those as
+    dirt made every file after the first say `dirty tree` about itself — a
+    header that was noise on the one day it mattered most (2026-09-12: every
+    committed report said it). So a report's dirtiness excludes `reports/`:
+    the outputs of the run are not inputs to it. `worktree_is_clean`, which
+    gates the freeze, stays strict — there the reports must be committed too,
+    because they are the evidence the artifact is read against.
+    """
+    return bool(_git("status", "--porcelain", "--", ".", ":!reports"))
+
+
 def worktree_is_clean() -> bool:
     """Is there anything uncommitted — tracked or untracked — in the tree?
 
@@ -207,10 +246,10 @@ def collect(panel_path: Path, n_rows: int, dataset: str = REAL) -> Provenance:
     return Provenance(
         git_sha=_git("rev-parse", "HEAD"),
         git_branch=_git("rev-parse", "--abbrev-ref", "HEAD"),
-        git_dirty=bool(_git("status", "--porcelain")),
+        git_dirty=source_is_dirty(),
         dataset=dataset,
         panel_path=str(panel_path),
         panel_sha256=sha256_of(panel_path) if panel_path.exists() else None,
         panel_rows=int(n_rows),
-        snapshot_date=_snapshot_date(),
+        snapshot_date=_snapshot_date_for(panel_path),
     )

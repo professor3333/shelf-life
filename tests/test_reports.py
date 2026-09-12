@@ -187,3 +187,18 @@ def test_the_calibration_superlative_is_checked_against_the_table_not_asserted()
     not_best = in_my_own_words(_table(0.1, 0.9, ece_leaked=0.05, ece_other=0.01))
     assert "best calibration in the whole table" not in not_best
     assert "as well calibrated as the honest run" in not_best
+
+
+def test_a_report_about_a_pinned_snapshot_names_that_snapshot_not_the_newest(tmp_path, monkeypatch):
+    """The profile of 2026-09-04, regenerated on 2026-09-12, is about 2026-09-04."""
+    import json
+
+    raw = tmp_path / "raw"
+    for date in ("2026-09-04", "2026-09-12"):
+        (raw / date).mkdir(parents=True)
+        (raw / date / "manifest.json").write_text(json.dumps({"snapshot_date": date}))
+    monkeypatch.chdir(tmp_path)
+    older = provenance._snapshot_date_for(raw / "2026-09-04" / "manifest.json", raw)
+    derived = provenance._snapshot_date_for(tmp_path / "processed" / "panel.parquet", raw)
+    assert older == "2026-09-04"
+    assert derived == "2026-09-12"
