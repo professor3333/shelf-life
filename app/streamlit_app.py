@@ -131,34 +131,47 @@ except ApiError as error:
     st.error(f"{error}\n\nStart the API with `uvicorn api.main:app`, or set `SHELF_LIFE_API`.")
     st.stop()
 
-if not health["model_loaded"]:
+# No model is the deliberate state until the panel is deep enough to freeze one
+# (`docs/design.md` §13), and it used to stop the page here — so a visitor to
+# the public URL saw a warning and nothing of what the product does. The page
+# now draws both modes anyway, with the buttons disabled and the warning kept,
+# so the workflow is visible before there is a model to run it. Nothing below
+# calls the API for a prediction while `MODEL_LOADED` is false.
+MODEL_LOADED = bool(health["model_loaded"])
+if not MODEL_LOADED:
     st.warning(
         f"The API is up but has no model loaded: {health.get('detail')}\n\n"
-        "Build one with `python -m src.models.freeze --run <spec>`."
+        "Build one with `python -m src.models.freeze --run <spec>`. Until then the "
+        "page below shows the workflow and runs nothing."
     )
-    st.stop()
 
 for note in warnings_for(health):
     st.warning(note)
 
 with st.sidebar:
     st.subheader("The model behind this form")
-    st.write(
-        pd.Series(
-            {
-                "run": health["model"],
-                "fitted on": f"{health['fitted_on']} block, {health['dataset']} data",
-                "horizon": f"{health['horizon_days']} day(s)",
-                "threshold": f"{health['threshold']:.4f}",
-                "frozen": health["created_at"],
-            }
+    if MODEL_LOADED:
+        st.write(
+            pd.Series(
+                {
+                    "run": health["model"],
+                    "fitted on": f"{health['fitted_on']} block, {health['dataset']} data",
+                    "horizon": f"{health['horizon_days']} day(s)",
+                    "threshold": f"{health['threshold']:.4f}",
+                    "frozen": health["created_at"],
+                }
+            )
         )
-    )
-    st.caption(
-        "The threshold was chosen on the validation block at a fixed alert "
-        "budget — the number of postings a person can actually read in a day — "
-        "not left at 0.5."
-    )
+        st.caption(
+            "The threshold was chosen on the validation block at a fixed alert "
+            "budget — the number of postings a person can actually read in a day — "
+            "not left at 0.5."
+        )
+    else:
+        st.caption(
+            "None yet. The panel is not deep enough to select and freeze a model "
+            "honestly; the readiness report in the repository says how far off that is."
+        )
 
 # --- which question ----------------------------------------------------------
 
@@ -222,18 +235,25 @@ if mode == RANK:
         step=1,
         disabled=not is_snapshot,
     )
-    rank_it = st.button("Rank", type="primary")
+    rank_it = st.button("Rank", type="primary", disabled=not MODEL_LOADED)
 
-    if rank_it:
-        text = uploaded.getvalue().decode("utf-8") if uploaded is not None else pasted
+    # Read the board as soon as there is one, so the count is on screen
+    # before anything is ranked — and so a malformed board fails at paste
+    # time, not after a minute of waiting on the free tier.
+    text = uploaded.getvalue().decode("utf-8") if uploaded is not None else pasted
+    board: list[dict] = []
+    if text.strip():
         try:
             allowed = {row["field"] for row in api.contract()}
             if is_snapshot:
                 allowed = allowed | {"requisition_id"}
             board = parse_board(text, allowed)
+            st.caption(f"{len(board)} posting{'s' if len(board) != 1 else ''} read.")
         except (ApiError, ValueError) as error:
             st.error(f"could not read the board: {error}")
             st.stop()
+
+    if rank_it:
         if not board:
             st.error("No postings. Paste a board, upload one, or use the example.")
             st.stop()
@@ -259,6 +279,7 @@ if mode == RANK:
                 "flagged": [row["watch"] for row in ranking["postings"]],
                 "probability": [row["probability"] for row in ranking["postings"]],
                 "title": [posting.get("title") for posting in board],
+                "company": [posting.get("company") for posting in board],
                 "location": [posting.get("location") for posting in board],
             }
         ).sort_values("rank")
@@ -345,7 +366,7 @@ with st.form("posting"):
         "board, *Rank a board* derives them from it."
     )
 
-    submitted = st.form_submit_button("Predict", type="primary")
+    submitted = st.form_submit_button("Predict", type="primary", disabled=not MODEL_LOADED)
 
 # --- the answer -------------------------------------------------------------
 

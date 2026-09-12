@@ -43,10 +43,11 @@ import time
 #: how "the app rendered" is decided — the host's own pages never contain it.
 CAPTION = "Will this job posting come off the board soon?"
 
-#: The page opens on the board-ranking mode — the product (`design.md` §15).
-#: Its absence, when a model is serving, would mean the deployed UI is the
-#: single-posting demo again. With no model the page stops at the warning
-#: before either mode, deliberately, so the mode is only required then.
+#: The page opens on the board-ranking mode — the product (`design.md` §15) —
+#: with or without a model: without one the buttons are disabled and the
+#: workflow is still on screen, which is what a visitor to the public URL
+#: should see while the panel accrues. Its absence would mean the deployed
+#: UI is the single-posting demo again, or has stopped at a warning.
 RANK_MODE = "Rank a board"
 
 #: What the app says when the API is unreachable (`app/client.py`).
@@ -120,15 +121,12 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
+    if RANK_MODE not in text:
+        print("UI SMOKE FAIL: the page has no 'Rank a board' mode", file=sys.stderr)
+        return 1
     if MODEL_LESS in text:
-        print("ok  reached the API — it is up with no model loaded (the deliberate state)")
+        print("ok  reached the API — no model loaded (the deliberate state); workflow shown")
     elif MODEL_SERVING in text:
-        if RANK_MODE not in text:
-            print(
-                "UI SMOKE FAIL: a model is serving but the page has no 'Rank a board' mode",
-                file=sys.stderr,
-            )
-            return 1
         print("ok  reached the API — a model is serving; the page opens on 'Rank a board'")
     else:
         print(

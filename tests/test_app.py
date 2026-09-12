@@ -367,6 +367,7 @@ def test_ranking_the_example_board_flags_the_budget_and_shows_both_thresholds(re
 
     assert not result.exception
     assert any(sub.value.startswith("2 of 5 flagged") for sub in result.subheader)
+    assert "company" in result.dataframe[0].value.columns
     labels = {metric.label for metric in result.metric}
     assert {"Budget", "Threshold on this board", "Frozen threshold"} <= labels
     assert any("not the same as filled" in info.value for info in result.info)
@@ -392,6 +393,46 @@ def test_the_one_posting_form_takes_no_board_context(rendered):
     labels = {widget.label for widget in rendered.number_input}
     assert not any("board" in label.lower() for label in labels)
     assert not any("requisition" in label.lower() for label in labels)
+
+
+@pytest.fixture
+def rendered_without_a_model(monkeypatch):
+    """The page against an API that has no model — the public URL's state."""
+    pytest.importorskip("streamlit", reason="the UI extra is not installed")
+    from streamlit.testing.v1 import AppTest
+
+    client = TestClient(create_app("/nonexistent/shelf_life.joblib"))
+    client.__enter__()
+    monkeypatch.setattr(requests, "get", lambda url, **k: client.get(url.replace("http://api", "")))
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda url, json=None, **k: client.post(url.replace("http://api", ""), json=json),
+    )
+    monkeypatch.setenv("SHELF_LIFE_API", "http://api")
+    yield AppTest.from_file(APP_SCRIPT, default_timeout=30).run()
+    client.__exit__(None, None, None)
+
+
+def test_the_workflow_is_visible_before_there_is_a_model(rendered_without_a_model):
+    """Until 2026-09-12 the page stopped at the no-model warning, so a visitor
+    to the public URL saw nothing of the product. Now both modes draw, with
+    their buttons disabled, and the warning stays."""
+    page = rendered_without_a_model
+    assert not page.exception
+    assert any("no model loaded" in w.value for w in page.warning)
+    assert page.radio[0].value == "Rank a board"
+    rank = next(button for button in page.button if button.label == "Rank")
+    assert rank.disabled
+    assert any(widget.label.startswith("Budget") for widget in page.number_input)
+
+
+def test_the_count_is_shown_as_soon_as_a_board_is_read(rendered):
+    from app.client import EXAMPLE_BOARD_CSV
+
+    rendered.text_area[0].set_value(EXAMPLE_BOARD_CSV)
+    page = rendered.run()
+    assert any(c.value == "5 postings read." for c in page.caption)
 
 
 def test_the_form_renders_without_error(rendered):
