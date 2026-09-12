@@ -72,6 +72,8 @@ COLUMNS = (
     "chosen",
     "pr_auc",
     "pr_auc_ci",
+    "precision_at_budget",
+    "lift_at_budget",
     "cv_pr_auc_mean",
     "cv_pr_auc_sd",
     "stage",
@@ -92,6 +94,8 @@ def record(
     block_positives: int | None = None,
     pr_auc_low: float | None = None,
     pr_auc_high: float | None = None,
+    precision_at_budget: float | None = None,
+    lift_at_budget: float | None = None,
 ) -> dict:
     """One row. Plain values only — no frames, and in particular no split.
 
@@ -118,6 +122,8 @@ def record(
         "folds": int(folds),
         "chosen": chosen,
         "pr_auc": None if pr_auc is None else float(pr_auc),
+        "precision_at_budget": None if precision_at_budget is None else float(precision_at_budget),
+        "lift_at_budget": None if lift_at_budget is None else float(lift_at_budget),
         "cv_pr_auc_mean": None if cv_pr_auc_mean is None else float(cv_pr_auc_mean),
         "cv_pr_auc_sd": None if cv_pr_auc_sd is None else float(cv_pr_auc_sd),
         # The posting-clustered interval, so a reader can watch it narrow as the
@@ -169,7 +175,14 @@ def _cell(entry: dict, column: str) -> str:
     value = entry.get(column)
     if value is None or (isinstance(value, float) and math.isnan(value)):
         return "—"
-    if column in ("pr_auc", "cv_pr_auc_mean", "cv_pr_auc_sd", "base_rate"):
+    if column in (
+        "pr_auc",
+        "cv_pr_auc_mean",
+        "cv_pr_auc_sd",
+        "base_rate",
+        "precision_at_budget",
+        "lift_at_budget",
+    ):
         return f"{value:.4f}"
     return str(value)
 

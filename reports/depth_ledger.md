@@ -33,9 +33,9 @@ reports above do not require a selected model or a ledger row.
 
 Machinery checks on `tests/panels.py`, whose label is drawn independently of every feature. **No number here is a finding about job postings.**
 
-| snapshot_date | waves | positives | base_rate | folds | chosen | pr_auc | pr_auc_ci | cv_pr_auc_mean | cv_pr_auc_sd | stage |
-|---|---|---|---|---|---|---|---|---|---|---|
-| 2026-09-11 | 18 | 143 | 0.1230 | 5 | 05-xgboost_engineered | 0.1830 | [0.1012, 0.3102] | — | — | held_out |
+| snapshot_date | waves | positives | base_rate | folds | chosen | pr_auc | pr_auc_ci | precision_at_budget | lift_at_budget | cv_pr_auc_mean | cv_pr_auc_sd | stage |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-09-11 | 18 | 143 | 0.1230 | 5 | 05-xgboost_engineered | 0.1830 | [0.1012, 0.3102] | — | — | — | — | held_out |
 
 A dash in `cv_pr_auc_sd` means CV spread was not recorded for that row.
 It can be unavailable when fewer than two folds scored; `held_out` rows

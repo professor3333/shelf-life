@@ -146,3 +146,42 @@ def test_evaluate_by_reports_one_row_per_group():
     assert list(result["source"]) == ["a", "b"]
     assert list(result["n"]) == [3.0, 3.0]
     assert all(result["pr_auc"] == 1.0)  # the positive ranks first within each group
+
+
+# --- the product's own numbers ---------------------------------------------------
+
+
+def test_at_budget_names_what_the_shortlist_buys():
+    from src.models.metrics import at_budget
+
+    truth = np.array([1, 1, 0, 0, 1, 0, 0, 0, 0, 0], dtype=float)  # base rate 0.3
+    score = np.array([0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.05])
+    out = at_budget(truth, score, threshold=0.6, n_days=2)  # four flagged: 1,1,0,0
+    assert out["precision_at_budget"] == pytest.approx(0.5)
+    assert out["recall_at_budget"] == pytest.approx(2 / 3)
+    assert out["captured_per_day"] == pytest.approx(1.0)
+    assert out["false_alarms_per_day"] == pytest.approx(1.0)
+    assert out["lift_at_budget"] == pytest.approx(0.5 / 0.3)
+    assert out["ndcg_at_budget"] == pytest.approx(1.0), "both removals sit at the top"
+
+
+def test_ndcg_falls_when_the_removals_sit_at_the_bottom_of_the_shortlist():
+    from src.models.metrics import at_budget
+
+    score = np.array([0.9, 0.8, 0.7, 0.6, 0.2, 0.1])  # four flagged at 0.6
+    bottom = at_budget(np.array([0, 0, 1, 1, 0, 0.0]), score, threshold=0.6)["ndcg_at_budget"]
+    top = at_budget(np.array([1, 1, 0, 0, 0, 0.0]), score, threshold=0.6)["ndcg_at_budget"]
+    assert top == pytest.approx(1.0) and bottom < 1.0
+
+
+def test_evaluate_leads_with_the_product_metrics_and_they_agree_with_the_confusion():
+    from src.models.metrics import evaluate
+
+    truth = np.array([1, 0, 1, 0, 0, 0, 0, 0, 1, 0], dtype=float)
+    score = np.linspace(0.95, 0.05, 10)
+    out = evaluate(truth, score, n_days=1, budget_per_day=3)
+    keys = list(out)
+    assert keys.index("precision_at_budget") < keys.index("pr_auc")
+    assert out["precision_at_budget"] == out["precision"]
+    assert out["recall_at_budget"] == out["recall"]
+    assert out["lift_at_budget"] == pytest.approx(out["precision"] / out["base_rate"])

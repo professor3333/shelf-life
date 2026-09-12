@@ -588,6 +588,73 @@ class NoFoldEvidence(RuntimeError):
     """
 
 
+def _shortlist_section(frozen: FrozenModel, budget_per_day: int) -> list[str]:
+    """The headline: what reading the shortlist buys, with its intervals.
+
+    First on purpose. The product is a ranked shortlist of `budget_per_day`
+    postings a day (`design.md` §15), so the number a reader meets first is
+    the product's — precision and recall at the budget, the lift over reading
+    the board unaided, removals caught per day — and PR-AUC follows as the
+    threshold-free companion. An interviewer who reads only the first table
+    reads the ranking metric, not the classification one.
+    """
+    test, val = frozen.test, frozen.validation
+    ci = frozen.test_intervals
+    vci = frozen.validation_intervals
+
+    def cell(block, key, fmt="{:.3f}"):
+        value = block.get(key, float("nan"))
+        return "—" if value != value else fmt.format(value)
+
+    def with_interval(intervals, key, fmt="{:.3f}"):
+        item = intervals.get(key)
+        if item is None or item.low != item.low:
+            return "—"
+        return f"[{fmt.format(item.low)}, {fmt.format(item.high)}]"
+
+    reading = what_the_user_gets(frozen, budget_per_day)
+    return [
+        f"## The shortlist: what {budget_per_day} a day buys",
+        "",
+        "The product is a ranked shortlist read under a daily budget, so these are",
+        "the headline numbers — at the operating point chosen on validation and",
+        "applied unchanged to test, with 95% posting-clustered intervals. PR-AUC,",
+        "below, is the threshold-free companion: whether the ranking is good",
+        "everywhere, not only at the cut.",
+        "",
+        "| per day of reading | validation | test | test 95% interval |",
+        "|---|---|---|---|",
+        f"| precision@{budget_per_day} — share of the shortlist actually removed | "
+        f"{cell(val, 'precision_at_budget')} | {cell(test, 'precision_at_budget')} | "
+        f"{with_interval(ci, 'precision_at_budget')} |",
+        f"| recall@{budget_per_day} — share of all removals the shortlist caught | "
+        f"{cell(val, 'recall_at_budget')} | {cell(test, 'recall_at_budget')} | "
+        f"{with_interval(ci, 'recall_at_budget')} |",
+        f"| lift over reading the board unaided | {cell(val, 'lift_at_budget', '{:.2f}×')} | "
+        f"{cell(test, 'lift_at_budget', '{:.2f}×')} | "
+        f"{with_interval(ci, 'lift_at_budget', '{:.2f}×')} |",
+        f"| removals caught per day | {cell(val, 'captured_per_day', '{:.1f}')} | "
+        f"{cell(test, 'captured_per_day', '{:.1f}')} | — |",
+        f"| false alarms per day | {cell(val, 'false_alarms_per_day', '{:.1f}')} | "
+        f"{cell(test, 'false_alarms_per_day', '{:.1f}')} | — |",
+        f"| NDCG@{budget_per_day} — are the removals near the top of the list | "
+        f"{cell(val, 'ndcg_at_budget')} | {cell(test, 'ndcg_at_budget')} | — |",
+        "",
+        f"On the test block the list ran to **{reading['alerts_per_day']:.0f} postings a "
+        f"day**; **{reading['real_closures_caught_per_day']:.1f}** of them were genuinely "
+        f"about to be removed, against **{reading['unaided_closures_caught_per_day']:.1f}** "
+        "for the same reading with no model — the lift is the whole case for the "
+        "model, and below about 1.5× a person would do nearly as well reading the "
+        "board directly, whatever the PR-AUC says. NDCG is secondary: a person who "
+        "reads all of the list does not care about the order within it.",
+        "",
+        f"Validation intervals: precision {with_interval(vci, 'precision_at_budget')}, "
+        f"recall {with_interval(vci, 'recall_at_budget')}, "
+        f"lift {with_interval(vci, 'lift_at_budget', '{:.2f}×')}.",
+        "",
+    ]
+
+
 def _what_it_means_section(frozen: FrozenModel, budget_per_day: int) -> list[str]:
     """The last section on purpose. Every number above is an input to it."""
     reading = what_the_user_gets(frozen, budget_per_day)
@@ -663,6 +730,7 @@ def write_report(
             f"Fitted on: `{frozen.fitted_on}`. "
             f"Horizon: {metadata.horizon_days} day(s), {metadata.horizon_basis} basis.",
             "",
+            *_shortlist_section(frozen, budget_per_day),
             "## Validation and test, side by side",
             "",
             _table(
@@ -672,6 +740,9 @@ def write_report(
                     "n",
                     "positives",
                     "base_rate",
+                    "precision_at_budget",
+                    "recall_at_budget",
+                    "lift_at_budget",
                     "pr_auc",
                     "roc_auc",
                     "brier",
@@ -936,6 +1007,8 @@ def main() -> None:
                     folds=len(wave_forward_folds(split.train, split.embargo)),
                     chosen=args.run,
                     pr_auc=frozen.test["pr_auc"],
+                    precision_at_budget=frozen.test["precision_at_budget"],
+                    lift_at_budget=frozen.test["lift_at_budget"],
                     pr_auc_low=frozen.test_intervals["pr_auc"].low,
                     pr_auc_high=frozen.test_intervals["pr_auc"].high,
                     block_positives=int(split.frame.loc[split.frame["split"] == "test", "y"].sum()),

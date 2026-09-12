@@ -214,6 +214,7 @@ def test_the_fixture_depths_are_what_this_file_claims(n_waves):
 #: validation set. This list is the acceptance criterion for the final run,
 #: pinned while it is still cheap to fix.
 REQUIRED_SECTIONS = (
+    "## The shortlist: what 20 a day buys",  # the product metric, first
     "## Validation and test, side by side",  # pr_auc, brier, roc_auc, ece, both blocks
     "## How much of this is signal",  # bootstrap intervals on every headline
     "## The operating point, applied as frozen",  # precision/recall at the shipped threshold
@@ -444,3 +445,23 @@ def test_every_frozen_model_carries_the_transfer_assessment(tmp_path, monkeypatc
     assert meta.transfer["verdict"] in {"intact", "board_specific", "reversed", "unmeasured"}
     assert meta.transfer["rule"].startswith("collapsed iff")
     assert meta.transfer["accepted_collapse"] is False
+
+
+def test_the_shortlist_is_the_first_section_and_carries_the_product_metrics(tmp_path, monkeypatch):
+    """An interviewer who reads only the first table reads precision@20,
+    recall@20 and the lift — not PR-AUC."""
+    paths = _run_freeze(tmp_path, monkeypatch, DEEP_ENOUGH_TO_CHOOSE)
+    report = paths["report"].read_text()
+    first = report.index("## The shortlist")
+    assert first < report.index("## Validation and test, side by side")
+    shortlist = report[first : report.index("## Validation and test")]
+    for row in (
+        "precision@20",
+        "recall@20",
+        "lift over reading the board unaided",
+        "removals caught per day",
+        "NDCG@20",
+    ):
+        assert row in shortlist
+    frozen = paths["frozen"]
+    assert "precision_at_budget" in frozen.test and "lift_at_budget" in frozen.test_intervals

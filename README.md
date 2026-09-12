@@ -540,7 +540,25 @@ test split is read anywhere but there and in the property that defines it.
 
 ### The metric
 
-**PR-AUC, with precision and recall at a chosen threshold.**
+**The product's number first: precision@20/day, recall@20/day, and the lift
+over reading the board unaided — with PR-AUC as the threshold-free companion.**
+
+The product is a ranked shortlist of about twenty postings a person reads each
+day, so the headline is what that reading buys: the share of the shortlist
+that was genuinely about to be removed (precision@20), the share of all
+removals it caught (recall@20), the removals caught per day, and precision
+over the base rate — how many times better than reading the same number of
+postings off the top of the board with no model. Below about 1.5× the honest
+report is that the model is not worth the trouble, whatever the PR-AUC says.
+These lead the held-out report (`reports/test_results.md`, first table, with
+95% posting-clustered intervals), the comparison table, and the depth ledger.
+NDCG@20 is reported as a secondary — whether removals sit near the top of the
+list — because a person who reads all twenty does not care about the order
+within them.
+
+PR-AUC is the companion, and the selection rule still compares on it: it says
+whether the ranking is good everywhere and not only at the cut, which is what
+makes a model transfer to a different budget without refitting.
 
 *Not accuracy.* At a base rate of 1.40%, predicting "stays open" for every
 posting scores **98.6%** and has told you nothing.

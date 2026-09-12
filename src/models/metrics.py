@@ -195,13 +195,76 @@ def confusion_at(y_true, y_score, threshold: float) -> dict[str, float]:
     }
 
 
+def at_budget(
+    y_true, y_score, threshold: float, n_days: int = 1, budget_per_day: int = DEFAULT_ALERT_BUDGET
+) -> dict[str, float]:
+    """The product's own numbers: what reading the shortlist buys, per day.
+
+    The product is a ranked shortlist of `budget_per_day` postings a person
+    reads each day (`docs/design.md` §15), so the headline is not a
+    classification metric but what that reading returns. At the operating
+    point `threshold` — the budget-th score on the block it was chosen on —
+    over a block of `n_days` prediction days:
+
+        precision_at_budget   share of the shortlist that was actually removed
+                              within the horizon — precision@20/day
+        recall_at_budget      share of all removals the shortlist caught —
+                              recall@20/day
+        captured_per_day      removals caught per day of reading
+        false_alarms_per_day  shortlist entries per day that stayed up
+        lift_at_budget        precision over the base rate: how many times
+                              better than reading the same number of postings
+                              off the top of the board unaided
+        ndcg_at_budget        whether the removals sit near the top of the
+                              shortlist, if the reader stops early — secondary,
+                              since a person who reads all twenty does not
+                              care about the order within them
+
+    `precision_at_budget` and `recall_at_budget` are the same quantities as
+    `confusion_at`'s `precision` and `recall` at that threshold, named for
+    what they are so a reader of a table does not have to know that.
+    """
+    truth = np.asarray(y_true, dtype=float)
+    score = np.asarray(y_score, dtype=float)
+    days = max(1, int(n_days))
+    confusion = confusion_at(truth, score, threshold)
+    base_rate = truth.mean() if truth.size else float("nan")
+    precision = confusion["precision"]
+    lift = precision / base_rate if base_rate and not np.isnan(precision) else float("nan")
+
+    flagged = score >= threshold
+    k = int(flagged.sum())
+    if k and truth[flagged].sum() > 0:
+        order = np.argsort(-score, kind="stable")[:k]
+        gains = truth[order]
+        discounts = 1.0 / np.log2(np.arange(2, k + 2))
+        ideal = np.sort(gains)[::-1]
+        ndcg = float((gains * discounts).sum() / (ideal * discounts).sum())
+    else:
+        ndcg = float("nan")
+
+    return {
+        "precision_at_budget": precision,
+        "recall_at_budget": confusion["recall"],
+        "captured_per_day": confusion["tp"] / days,
+        "false_alarms_per_day": confusion["fp"] / days,
+        "lift_at_budget": lift,
+        "ndcg_at_budget": ndcg,
+    }
+
+
 def evaluate(
     y_true,
     y_score,
     n_days: int = 1,
     budget_per_day: int = DEFAULT_ALERT_BUDGET,
 ) -> dict[str, float]:
-    """The full suite at the budget-derived operating point."""
+    """The full suite at the budget-derived operating point.
+
+    The ranking-native numbers (`at_budget`) come first in the dict, because
+    they are the product's; PR-AUC is the threshold-free companion that says
+    whether the ranking is good everywhere and not only at the cut.
+    """
     truth = np.asarray(y_true, dtype=float)
     score = np.asarray(y_score, dtype=float)
     positives = float(truth.sum())
@@ -218,6 +281,7 @@ def evaluate(
         "n": float(truth.size),
         "positives": positives,
         "base_rate": positives / truth.size if truth.size else float("nan"),
+        **at_budget(truth, score, threshold, n_days, budget_per_day),
         "pr_auc": average_precision(truth, score),
         "brier": brier_score(truth, score),
         "roc_auc": roc,
