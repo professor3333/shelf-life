@@ -1,4 +1,16 @@
-"""A record of what the pipeline scored, at what panel depth, across runs.
+"""A depth history of selected validation results and completed held-out runs.
+
+This is not an inventory of every metric-producing experiment. `evaluate`
+records its chosen candidate only when selection succeeds (currently requiring
+at least three scored rolling-origin folds). It can write candidate metrics to
+`model_comparison.md` without recording a ledger row. `train` and `experiments`
+do not append here either; their results live in their reports and MLflow.
+
+`freeze` records after successfully saving an artifact, including synthetic
+rehearsals and explicit `--accept-no-folds` runs. Consequently a ledger entry
+is not by itself proof of fold-qualified selection or a final model release.
+Neither writer restricts this ledger to H=7: an H=1 run is eligible under the
+same writer rules. No selected real-data row does not mean no real-data metrics.
 
 Every other report in `reports/` is regenerated in place: run `evaluate` twice
 and the second run erases what the first said. That is right for a description
@@ -6,7 +18,7 @@ of *the current snapshot* — a stale table is worse than none — and wrong for
 one question this project cannot answer from a single run.
 
 **The question is whether the numbers are believable yet.** The panel accrues
-about 19 removals a day, so the first honest result will carry
+about 19 closures a day against 96 today, so the first honest result will carry
 an interval wide enough to swallow most differences between models. That is not
 a defect to hide; it is the finding, and the only way to show it is finding
 rather than excuse is to keep the earlier runs and let a reader watch the
@@ -148,11 +160,9 @@ def _pr_auc_ci(entry: dict) -> str:
 def _cell(entry: dict, column: str) -> str:
     """One cell. `None` and `NaN` both render as an em dash, never as "nan".
 
-    A missing standard deviation is not a formatting accident, it is a fact
-    about the run — `summarise_folds` returns `NaN` when fewer than two folds
-    scored, because the spread of one number is not a spread. Printing "nan" in
-    a table someone reads as a result makes that look like breakage; the dash
-    plus the footnote says what it means.
+    A missing standard deviation may be unavailable from too few scored folds,
+    or simply unrecorded: held-out rows store a bootstrap interval rather than
+    CV summaries. A dash alone cannot distinguish those cases.
     """
     if column == "pr_auc_ci":
         return _pr_auc_ci(entry)
@@ -173,19 +183,36 @@ def render(entries: list[dict]) -> str:
         "Appended by `python -m src.models.evaluate` and `python -m src.models.freeze`.",
         "Generated from `reports/depth_ledger.jsonl`; edit neither by hand.",
         "",
-        "One row per run, keyed by the code and the data it ran on. Read the metric",
-        "**against its interval and the positives column**, never on its own: this",
-        "panel accrues about 19 removals a day, so an early row is a number with an",
-        "interval wide enough to swallow most differences between models, and saying",
-        "so is the finding.",
+        "## What is recorded",
+        "",
+        "This is a depth history of **selected validation results and completed",
+        "held-out runs**, not an inventory of every metric-producing experiment.",
+        "",
+        "- `evaluate` appends only when it selects a candidate, currently requiring",
+        "  at least three scored rolling-origin folds. Candidate metrics can appear",
+        "  in [model_comparison.md](model_comparison.md) without a ledger row.",
+        "- `freeze` appends after successfully saving an artifact, including",
+        "  synthetic rehearsals and explicit `--accept-no-folds` runs. An entry",
+        "  alone does not establish fold-qualified selection or a final release.",
+        "- H=1 and H=7 follow the same recording rules. Unselected H=1 rehearsals",
+        "  remain in [model_results.md](model_results.md), the comparison report",
+        "  and experiment tracking; `train` and `experiments` do not append here.",
+        "",
+        "One row per `(stage, dataset, panel_sha256, git_sha)`: rerunning that",
+        "combination replaces its row. Different candidates or budgets alone do",
+        "not create separate rows. Read each metric against the available fold",
+        "spread or bootstrap interval and its sample size.",
         "",
     ]
     if not entries:
         lines += [
             "## Nothing recorded yet",
             "",
-            "No run has produced a metric. `reports/test_results.md` records the",
-            "shortfall and `scripts/rehearse.sh` is the readiness check.",
+            "No selected validation result or completed held-out run has been",
+            "recorded here. This does not mean no experiment has produced metrics:",
+            "H=1 candidate scores may already be present in the reports linked above.",
+            "See [readiness.md](readiness.md) for current H=7 depth and",
+            "[test_results.md](test_results.md) for the held-out run status.",
             "",
         ]
         return "\n".join(lines)
@@ -201,6 +228,15 @@ def render(entries: list[dict]) -> str:
     ):
         rows = [e for e in entries if e.get("dataset") == dataset]
         if not rows:
+            if dataset == "real":
+                lines += [
+                    f"## {title}",
+                    "",
+                    "No selected real-data validation result or completed real-data",
+                    "held-out run has been recorded here. H=1 candidate metrics in the",
+                    "reports above do not require a selected model or a ledger row.",
+                    "",
+                ]
             continue
         lines += [f"## {title}", "", note, ""]
         lines.append("| " + " | ".join(COLUMNS) + " |")
@@ -215,9 +251,11 @@ def render(entries: list[dict]) -> str:
 
     if any(_missing(e) for e in entries):
         lines += [
-            "A dash in `cv_pr_auc_sd` means fewer than two folds scored, so there is no",
-            "spread to report — the run has a metric and no error bar, which is the",
-            "state this ledger exists to make visible rather than to hide.",
+            "A dash in `cv_pr_auc_sd` means CV spread was not recorded for that row.",
+            "It can be unavailable when fewer than two folds scored; `held_out` rows",
+            "do not store CV summaries even when folds exist. Their posting-clustered",
+            "bootstrap interval is reported separately in `pr_auc_ci`. A missing CV",
+            "spread does not imply that the run has no uncertainty estimate.",
             "",
         ]
 

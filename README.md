@@ -40,10 +40,7 @@ the posting left, the role did not. [`reports/label_check.md`](reports/label_che
 > <https://shelf-life-2l8tanmdatboms9mhxh3rj.streamlit.app/> — both public, both
 > free tier, both live as you read this. `/health` reports `degraded` and
 > `/predict` returns 503, because `MODEL_TAG` names no release yet. That is the
-> intended state, not an outage: see [Deployment](#deployment). One thing there
-> is *not* intended: on 2026-09-11 the first automated look at the UI found it
-> unable to reach the API — its `SHELF_LIFE_API` secret was never set on the
-> host — and the `verify-ui` job stays red until it is.
+> intended state, not an outage: see [Deployment](#deployment).
 >
 > **No model has been fitted at H = 7 yet.** An honest three-way split needs
 > more labelled crawl waves than the panel has, and choosing a model needs more
@@ -72,8 +69,7 @@ it describes — and this README links to them rather than restating them:
 | Can the features name the board without `source` | [`board_fingerprint.md`](reports/board_fingerprint.md) |
 | The ladder, folds, threshold, calibration, per-board and transfer | [`model_comparison.md`](reports/model_comparison.md) |
 | The held-out result, or the refusal to produce one | [`test_results.md`](reports/test_results.md) |
-| Every run that has ever been kept | [`depth_ledger.md`](reports/depth_ledger.md) |
-| What the free instance's cold start measures, cycle by cycle | [`cold_start_baseline.md`](reports/cold_start_baseline.md) (the definitive `cold_start.md` does not exist yet) |
+| Selected validation results and completed held-out runs | [`depth_ledger.md`](reports/depth_ledger.md) |
 
 Where a number in this README carries a date, it is the value on that date and
 is kept as the record of a decision, not as the current state.
@@ -228,7 +224,7 @@ P( posting j is absent from the board throughout (t, t + H]  |  information at t
 | **Inputs** | 44 audited panel columns → 24 features once the leakage verdict is applied |
 | **Output** | A probability, plus the threshold it is compared against |
 | **Horizon** | `H = 7` days for the decision, chosen against a measured 1.69%/day hazard; `H = 1` retained as a pipeline smoke test |
-| **Base rate** | Measured, not planned: **7.76%** at `H = 7` on the 2026-09-09 snapshot ([`docs/design.md`](docs/design.md) §2, where the ≈11% planning estimate it replaced is also recorded); about 1% at `H = 1`. The live figures are in the generated reports — [`reports/model_comparison.md`](reports/model_comparison.md) for the panel a comparison ran on — and are not restated here |
+| **Base rate** | **1.40%** at `H = 1`, measured on today's labelled rows — the panel the numbers below come from. At `H = 7` a constant hazard implies ≈11%, which is a planning estimate and not yet a measurement |
 | **Constraint** | Every feature must exist at `t`, and be suppliable by a caller holding one posting |
 | **Success** | Beat three baselines — the base rate, `age_days` alone, and a per-board hazard — by a margin that survives fold variance |
 
@@ -794,24 +790,36 @@ first contact with the real panel is where a dtype or an empty group shows up,
 and meeting that on a split whose numbers do not matter yet is much better than
 meeting it on the one afternoon the test block is available.
 
-**Every run is kept, not overwritten.** `reports/depth_ledger.md` — rendered
-from a committed `depth_ledger.jsonl` — holds one row per run: the snapshot, the
-commit, the labelled waves, the positives, the folds, and the metric with its
-fold spread. `evaluate` and `freeze` append to it automatically.
+**The depth ledger keeps selected validation results and completed held-out
+runs.** `reports/depth_ledger.md`, rendered from the committed
+`depth_ledger.jsonl`, records the snapshot, commit, labelled waves, positives,
+folds and metric with its available uncertainty. `evaluate` appends only after
+selection succeeds, currently requiring three scored rolling-origin folds.
+`freeze` appends after successfully saving an artifact, including synthetic
+rehearsals and explicit `--accept-no-folds` runs. An entry is therefore not by
+itself evidence of a final release or fold-qualified selection.
+
+This is not an inventory of all experiments, and it is not restricted to H=7.
+H=1 follows the same recording rules: candidate scores can appear in
+[`model_results.md`](reports/model_results.md) and
+[`model_comparison.md`](reports/model_comparison.md) even when nothing is
+selected and no ledger row is appended. `train` and `experiments` do not append
+here; their reports and experiment tracking retain those results. An empty
+real-data ledger does not mean no real-data metrics exist.
 
 It exists because of a fact this project cannot argue its way out of. The panel
-accrues removals at a rate of tens a day — the ledger states it — so the first
-honest result will carry an interval wide enough to swallow most differences
-between models.
+accrues removals at a rate of tens a day, so the first honest result will carry
+an interval wide enough to swallow most differences between models.
 That is the finding, not an excuse — and the only way to show it as one is to
 keep the earlier runs and let a reader watch the interval narrow against a
 sample size printed beside it. A metric at one depth is a claim; the same metric
 at four depths is evidence about what the claim is worth.
 
-Re-running on the same snapshot with the same commit replaces a row rather than
-adding one, so the ledger measures what the pipeline scored and not how often it
-was run. Synthetic runs are tabled separately and labelled, because a history
-that mixed them with real ones would be worse than no history.
+The key is `(stage, dataset, panel_sha256, git_sha)`. Re-running that combination
+replaces its row; changing the candidate or budget alone does not add a row.
+Synthetic runs are tabled separately and labelled. A missing CV spread means it
+was not recorded, not necessarily that too few folds exist: held-out rows store
+a posting-clustered bootstrap interval instead of CV summaries.
 
 ### The two gates, and they are not the same day
 
@@ -973,7 +981,7 @@ shelf-life/
 ├── render.yaml       the API service, as configuration rather than clicks
 ├── MODEL_TAG         which release is deployed; empty until one exists
 ├── requirements.txt  what the UI's host installs — and nothing that loads a model
-├── tests/            the suite — no network, no data files
+├── tests/            288 tests, no network, no data files
 ├── docs/             problem_definition.md design.md leakage_audit.md
 │                     data_dictionary.md deploy.md
 ├── reports/          generated: profile, baselines, model results, comparison,
@@ -1292,7 +1300,7 @@ code, decisions and aggregate numbers.
 ## Testing
 
 ```bash
-pytest                 # the whole suite; about four minutes
+pytest                 # 273 tests
 ruff check .
 ruff format --check .
 ```

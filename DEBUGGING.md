@@ -4,6 +4,23 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-12 — the depth ledger overstated what missing records mean
+
+- **Problem:** an empty ledger claimed no run had produced metrics despite H=1
+  candidate reports; a held-out row with five folds and a bootstrap interval
+  was described as having too few folds and no error bar.
+- **Root cause:** the renderer assumed every scored experiment appended a row
+  and every missing CV spread meant insufficient folds. Evaluation records only
+  a selected candidate; successful freezes omit CV summaries.
+- **Solution:** clarify the writer-specific inclusion rules in
+  `src/models/ledger.py` and `README.md`, correct empty and synthetic-only
+  states and the uncertainty footnote, and regenerate the report from unchanged
+  JSONL records. Regression tests cover those rendering cases.
+- **Lesson:** document a ledger's inclusion rules before interpreting missing
+  rows, and distinguish an unrecorded statistic from an unavailable estimate.
+
+---
+
 ## 2026-09-11 — the cold start doubled, and the image was the only thing that had changed
 
 - **Problem:** the first three-cycle baseline against the live service
