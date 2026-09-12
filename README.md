@@ -556,6 +556,14 @@ probability that is not calibrated is a score wearing a percent sign — and
 because a constant predictor is perfectly calibrated and completely useless,
 calibration is never reported on its own.
 
+**Calibration has a rule, not a mood.** Whether the frozen model is recalibrated
+is decided by `src/models/calibration.py`, written before any real validation
+curve existed: isotonic on validation iff validation ECE exceeds a quarter of
+the base rate and the block holds thirty positives. Monotone, so it cannot
+reorder postings or drop one from the alert list — it changes what the
+percentage means, not who is flagged — and the decision is on the artifact
+either way ([`docs/design.md`](docs/design.md) §5).
+
 ### The threshold
 
 Not 0.5. The operating point is set by the **alert budget**: 20 postings per

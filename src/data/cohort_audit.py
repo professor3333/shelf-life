@@ -102,6 +102,21 @@ def attach_first_observation(block: pd.DataFrame, panel: pd.DataFrame) -> pd.Dat
     return block.assign(first_observation=flags.fillna(False).to_numpy(dtype=bool))
 
 
+def attach_cohort(block: pd.DataFrame, panel: pd.DataFrame) -> pd.DataFrame:
+    """`block` with a `cohort` column — incumbent stock or incident flow.
+
+    Same keyed join as `attach_first_observation`, for the same reason: the
+    cohort is a property of the posting's whole history and the block does
+    not hold it. It exists so the *model's* performance can be sliced by
+    cohort, not only the label's rate — the cohort audit says whether the
+    label is indifferent to cohort; this says whether the model is.
+    """
+    keys = ["source", "source_id", "run_index"]
+    lookup = annotate(panel)[keys + ["cohort"]].drop_duplicates(keys)
+    cohorts = block[keys].merge(lookup, on=keys, how="left")["cohort"]
+    return block.assign(cohort=cohorts.fillna(INCUMBENT).to_numpy())
+
+
 def labelled(panel: pd.DataFrame) -> pd.DataFrame:
     rows = panel[panel["label_observable"]].copy()
     rows["y"] = rows["y"].astype(int)

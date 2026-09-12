@@ -86,6 +86,10 @@ class Metadata:
     rules_version: int = -1
     lock_sha256: str | None = None
     seed: int | None = None
+    #: What `src/models/calibration.py` decided at the freeze — whether an
+    #: isotonic map was wrapped around the estimator, by which rule, on which
+    #: validation numbers. Empty on an artifact frozen before the rule existed.
+    recalibration: dict = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
     versions: dict[str, str] = field(
         default_factory=lambda: {
