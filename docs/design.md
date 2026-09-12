@@ -1993,7 +1993,7 @@ none could be reproduced from the commit it named. Two changes:
   commit the reports → `freeze`. The reports are committed at the SHA the
   artifact will name.
 
-Regenerated on 2026-09-12 from `530be544d`, clean, on the 2026-09-12 snapshot.
+Regenerated on 2026-09-12 from `f8e3c4dd7`, clean, on the 2026-09-12 snapshot — every report but the cold-start baseline, which is a measurement of the live instance and is clean at the commit that measured it.
 
 ### What the artifact is traceable to
 
