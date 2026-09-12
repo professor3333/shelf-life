@@ -1617,6 +1617,23 @@ last check is why the placeholder currently in `models/` cannot reach a public
 URL by accident. Setup, release ritual, rollback and teardown:
 [`docs/deploy.md`](docs/deploy.md).
 
+**Behaviour under load is measured, not assumed.** `python -m benchmarks.service <url>`
+runs six sections against a running service — warm sequential `/predict`
+(p50/p95), concurrent `/predict`, concurrent maximum-size `/rank`, peak RSS
+across repeated maximum-size rankings, malformed and oversized requests, and a
+burst with no rate limit — each a behaviour with a pass condition, and writes
+`reports/benchmark_<label>.md`. Against a container capped at one core and the
+instance's 512 MB
+([`reports/benchmark_local_container.md`](reports/benchmark_local_container.md)):
+no 5xx anywhere, memory flat at 256 MB across five full rankings, every abuse
+case a 422 — including a 5 MB title, which the first run found the service
+*accepting and scoring*; text fields are now capped at ten times the longest
+real value. The finding to carry to the free instance: four concurrent
+250-posting rankings took 8.4 s each on one core, so on a tenth of a CPU two
+callers ranking full batches at once would push each other past the 90 s rule.
+The cap is calibrated for one caller at a time, and there is no rate limit by
+design; the same functions run in-process in the test suite on every push.
+
 **What the free tier costs, stated before the demo rather than during it.** The
 API instance has **512 MB of memory and 0.1 of a CPU**, spins down after 15 idle
 minutes, and takes about a minute to come back. Measured locally, the container
