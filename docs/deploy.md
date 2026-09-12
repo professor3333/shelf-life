@@ -99,7 +99,8 @@ previous arrangement, where the UI was deployed without `src/` present at all.
 Without the secret the UI defaults to `http://localhost:8000` and shows the
 error saying so — **to every visitor, indefinitely, with every test green**,
 which is what the public UI was doing on 2026-09-11 when the first automated
-look at it was taken (`DEBUGGING.md`). So the secret is verified, not assumed:
+look at it was taken; set on 2026-09-12 (`DEBUGGING.md`). So the secret is
+verified, not assumed:
 
 4. Copy the app URL and tell the repository about it, so the workflow can
    check the deployed UI after every change to `app/` or `requirements.txt`:

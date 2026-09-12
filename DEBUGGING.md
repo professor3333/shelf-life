@@ -64,8 +64,9 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
   `RUNNING`, the Streamlit server answers) and `scripts/smoke_ui_browser.py`
   (the page rendered; what it says about the API is one of the two honest
   states), run by a `verify-ui` job on every change to `app/` or
-  `requirements.txt`. The secret itself has to be set in the Community Cloud
-  dashboard (`docs/deploy.md` §1).
+  `requirements.txt`. The secret itself had to be set in the Community Cloud
+  dashboard (`docs/deploy.md` §1) — done 2026-09-12; the browser check and the
+  `verify-ui` job went green on the same page that had been red.
 - **Lesson:** a deployment has two halves and each needs its own check; a
   green API says nothing about the UI in front of it. And configuration that
   lives only in a vendor's dashboard is invisible to every test — the only

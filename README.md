@@ -40,7 +40,10 @@ the posting left, the role did not. [`reports/label_check.md`](reports/label_che
 > <https://shelf-life-2l8tanmdatboms9mhxh3rj.streamlit.app/> — both public, both
 > free tier, both live as you read this. `/health` reports `degraded` and
 > `/predict` returns 503, because `MODEL_TAG` names no release yet. That is the
-> intended state, not an outage: see [Deployment](#deployment).
+> intended state, not an outage: see [Deployment](#deployment). The UI reaches
+> the API and shows that state — verified from a browser by the `verify-ui`
+> job, which on 2026-09-11 was what found the UI's `SHELF_LIFE_API` secret had
+> never been set (fixed 2026-09-12; `DEBUGGING.md`).
 >
 > **No model has been fitted at H = 7 yet.** An honest three-way split needs
 > more labelled crawl waves than the panel has, and choosing a model needs more
@@ -70,6 +73,7 @@ it describes — and this README links to them rather than restating them:
 | The ladder, folds, threshold, calibration, per-board and transfer | [`model_comparison.md`](reports/model_comparison.md) |
 | The held-out result, or the refusal to produce one | [`test_results.md`](reports/test_results.md) |
 | Selected validation results and completed held-out runs | [`depth_ledger.md`](reports/depth_ledger.md) |
+| What the free instance's cold start measures, cycle by cycle | [`cold_start_baseline.md`](reports/cold_start_baseline.md) (the definitive `cold_start.md` does not exist yet) |
 
 Where a number in this README carries a date, it is the value on that date and
 is kept as the record of a decision, not as the current state.
@@ -224,7 +228,7 @@ P( posting j is absent from the board throughout (t, t + H]  |  information at t
 | **Inputs** | 44 audited panel columns → 24 features once the leakage verdict is applied |
 | **Output** | A probability, plus the threshold it is compared against |
 | **Horizon** | `H = 7` days for the decision, chosen against a measured 1.69%/day hazard; `H = 1` retained as a pipeline smoke test |
-| **Base rate** | **1.40%** at `H = 1`, measured on today's labelled rows — the panel the numbers below come from. At `H = 7` a constant hazard implies ≈11%, which is a planning estimate and not yet a measurement |
+| **Base rate** | Measured, not planned: **7.76%** at `H = 7` on the 2026-09-09 snapshot ([`docs/design.md`](docs/design.md) §2, where the ≈11% planning estimate it replaced is also recorded); about 1% at `H = 1`. The live figures are in the generated reports — [`reports/model_comparison.md`](reports/model_comparison.md) for the panel a comparison ran on — and are not restated here |
 | **Constraint** | Every feature must exist at `t`, and be suppliable by a caller holding one posting |
 | **Success** | Beat three baselines — the base rate, `age_days` alone, and a per-board hazard — by a margin that survives fold variance |
 
@@ -981,7 +985,7 @@ shelf-life/
 ├── render.yaml       the API service, as configuration rather than clicks
 ├── MODEL_TAG         which release is deployed; empty until one exists
 ├── requirements.txt  what the UI's host installs — and nothing that loads a model
-├── tests/            288 tests, no network, no data files
+├── tests/            the suite — no network, no data files
 ├── docs/             problem_definition.md design.md leakage_audit.md
 │                     data_dictionary.md deploy.md
 ├── reports/          generated: profile, baselines, model results, comparison,
@@ -1300,7 +1304,7 @@ code, decisions and aggregate numbers.
 ## Testing
 
 ```bash
-pytest                 # 273 tests
+pytest                 # the whole suite; about four minutes
 ruff check .
 ruff format --check .
 ```
@@ -1404,7 +1408,7 @@ kind it is, is stated wherever it matters.
 |     | URL                                                     | what it does today                                                |
 | --- | ------------------------------------------------------- | ----------------------------------------------------------------- |
 | API | <https://shelf-life-5hin.onrender.com>                  | `/health` → `degraded` · `/docs` browsable · `/predict` → **503**  |
-| UI  | <https://shelf-life-2l8tanmdatboms9mhxh3rj.streamlit.app/> | loads; reports the API's state before showing a form — or, as found on 2026-09-11, that it cannot reach the API until the `SHELF_LIFE_API` secret is set on the host |
+| UI  | <https://shelf-life-2l8tanmdatboms9mhxh3rj.streamlit.app/> | loads, reaches the API, and reports its state — "up, no model loaded" — before showing a form |
 
 **What is absent is the model, not the deployment.** The service, the container,
 the UI and the release-fetching build all went up on 2026-09-06, before there was
@@ -1445,7 +1449,7 @@ The chain between the two, link by link, with what has actually executed:
 | container: `await_release.sh` then `smoke.sh` | run, locally, with `ALLOW_SYNTHETIC=1` | rehearsal |
 | `MODEL_TAG` commit → Render rebuild → CI verification against the public URL | **never executed** — every `Verify deployment` run so far has exited in seconds with "no release to verify" | `gh run list --workflow=verify-deployment.yml` |
 | the public URL answering from the H=7 artifact | **not done** | — |
-| the UI on Community Cloud, verified as deployed | run — `./scripts/smoke_ui.sh` (exists, `RUNNING`, server answers) and `scripts/smoke_ui_browser.py` (rendered, reached the API); the second **found the `SHELF_LIFE_API` secret unset** and the public UI saying "cannot reach the API at localhost" | the `verify-ui` job, on every change to `app/` |
+| the UI on Community Cloud, verified as deployed | run and green — `./scripts/smoke_ui.sh` (exists, `RUNNING`, server answers) and `scripts/smoke_ui_browser.py` (rendered, reached the API). Its first run found the `SHELF_LIFE_API` secret unset and the public UI saying "cannot reach the API at localhost"; set 2026-09-12 | the `verify-ui` job, on every change to `app/` |
 
 Everything above the bracket is one command, `./scripts/release.sh --rehearse`,
 and the same script with `--run <spec>` is the real thing: it stops before
