@@ -160,6 +160,28 @@ def lock_sha256(path: Path = LOCK_FILE) -> str | None:
     return sha256_of(path) if path.exists() else None
 
 
+def period(frame, column: str = "t") -> dict[str, str]:
+    """The first and last prediction instant a block covers, as dates.
+
+    Every claim this project makes is about a period, and a claim without one
+    reads as a claim about all time. A one-month test block validates a
+    one-month period — weekday, season, holiday, hiring-cycle and board-policy
+    effects longer than that are not demonstrated by it, and the depth ledger
+    across successive snapshots is where they would show, or not. So the
+    period travels with the number: on the artifact, in the report header, on
+    `/health`.
+    """
+    if frame is None or len(frame) == 0:
+        return {"start": None, "end": None, "days": 0}
+    stamps = frame[column]
+    start, end = stamps.min(), stamps.max()
+    return {
+        "start": str(start.date()),
+        "end": str(end.date()),
+        "days": int((end.normalize() - start.normalize()).days) + 1,
+    }
+
+
 def worktree_is_clean() -> bool:
     """Is there anything uncommitted — tracked or untracked — in the tree?
 

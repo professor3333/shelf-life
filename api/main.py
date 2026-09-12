@@ -214,6 +214,7 @@ def create_app(artifact: Path | str | None = None) -> FastAPI:
             threshold=metadata.threshold,
             fitted_on=metadata.fitted_on,
             created_at=metadata.created_at,
+            validated_on=metadata.validated_on,
         )
 
     @app.post("/predict", response_model=PredictionResponse)

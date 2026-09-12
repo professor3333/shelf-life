@@ -70,6 +70,7 @@ COLUMNS = (
     "base_rate",
     "folds",
     "chosen",
+    "period",
     "pr_auc",
     "pr_auc_ci",
     "precision_at_budget",
@@ -96,6 +97,7 @@ def record(
     pr_auc_high: float | None = None,
     precision_at_budget: float | None = None,
     lift_at_budget: float | None = None,
+    period: str | None = None,
 ) -> dict:
     """One row. Plain values only — no frames, and in particular no split.
 
@@ -122,6 +124,7 @@ def record(
         "folds": int(folds),
         "chosen": chosen,
         "pr_auc": None if pr_auc is None else float(pr_auc),
+        "period": period,
         "precision_at_budget": None if precision_at_budget is None else float(precision_at_budget),
         "lift_at_budget": None if lift_at_budget is None else float(lift_at_budget),
         "cv_pr_auc_mean": None if cv_pr_auc_mean is None else float(cv_pr_auc_mean),

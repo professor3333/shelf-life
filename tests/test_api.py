@@ -566,3 +566,8 @@ def test_client_ids_come_back_on_the_matching_ranked_posting(client):
         "/rank", json={"postings": postings[:5], "as_of": FIXED_T, "budget": 2}
     ).json()
     assert [i["client_id"] for i in one_shot["postings"]] == [p["client_id"] for p in postings[:5]]
+
+
+def test_health_says_which_period_the_model_is_validated_on(client):
+    body = client.get("/health").json()
+    assert body["validated_on"] is not None and body["validated_on"].startswith("validated on ")

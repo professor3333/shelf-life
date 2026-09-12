@@ -1757,6 +1757,17 @@ employer-published listings; no personal data is collected, and nothing under
 training by an embargo wide enough that no training label was computed from it.
 Opened once. Rolling-origin folds inside the training window for everything else.
 
+**Validated on a period, and only that period.** The held-out block will
+cover a few weeks of autumn 2026, and every number here is a number about
+those weeks: the artifact carries the dates of each block, the held-out report
+opens with them, and `/health` reports `validated_on` so a caller learns which
+weeks before reading the number. Weekday and month effects over a longer span,
+hiring seasons, holidays, macro changes, board-policy and schema changes are
+not demonstrated and not claimed. The crawler keeps running and the depth
+ledger keeps every re-run with its period; whether the numbers hold across
+those rows is the evidence of stability, and it accrues rather than being
+asserted ([`docs/design.md`](docs/design.md) §18).
+
 **Metrics.** PR-AUC as the headline; Brier score and expected calibration error
 alongside it; precision and recall at an alert budget of 20 postings per day;
 every one of them also broken down per source and by whether the posting was seen

@@ -137,6 +137,9 @@ class FrozenModel:
     #: the four board-context columns — and the three validation numbers the
     #: rule in `src/models/board_context.py` read to decide.
     board_context: dict
+    #: The dates each block covers. The claim is scoped to them: a model
+    #: validated on one month is validated on that month.
+    periods: dict
     #: The model's performance on the incumbent stock against the incident
     #: flow, on the test block. The cohort audit asks whether the *label* is
     #: indifferent to cohort; this asks whether the *model* is.
@@ -265,6 +268,11 @@ def freeze(
         recalibration=decision.as_dict(),
         transfer=transfer,
         board_context=board_context_decision,
+        periods={
+            "train": provenance.period(split.train),
+            "validation": provenance.period(split.val),
+            "test": provenance.period(test_block),
+        },
         by_cohort=evaluate_by(
             cohort_audit.attach_cohort(test_block, split.frame),
             test_scores,
@@ -443,6 +451,7 @@ def build_metadata(
         recalibration=frozen.recalibration,
         transfer=frozen.transfer,
         board_context=frozen.board_context,
+        periods=frozen.periods,
     )
 
 
@@ -730,6 +739,13 @@ def write_report(
             f"Fitted on: `{frozen.fitted_on}`. "
             f"Horizon: {metadata.horizon_days} day(s), {metadata.horizon_basis} basis.",
             "",
+            f"**{(metadata.validated_on or 'validated on: no period').capitalize()}.** "
+            "Every number",
+            "below is a number about that period. Weekday and month effects over a longer",
+            "span, hiring seasons, holidays, macro changes, board-policy and schema changes",
+            "are not demonstrated by it and are not claimed; `reports/depth_ledger.md`",
+            "across successive snapshots is where they would show, or not.",
+            "",
             *_shortlist_section(frozen, budget_per_day),
             "## Validation and test, side by side",
             "",
@@ -1009,6 +1025,7 @@ def main() -> None:
                     pr_auc=frozen.test["pr_auc"],
                     precision_at_budget=frozen.test["precision_at_budget"],
                     lift_at_budget=frozen.test["lift_at_budget"],
+                    period=f"{frozen.periods['test']['start']} – {frozen.periods['test']['end']}",
                     pr_auc_low=frozen.test_intervals["pr_auc"].low,
                     pr_auc_high=frozen.test_intervals["pr_auc"].high,
                     block_positives=int(split.frame.loc[split.frame["split"] == "test", "y"].sum()),
