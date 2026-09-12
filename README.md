@@ -775,15 +775,27 @@ The batch cap is **250 postings**, from measurement rather than taste: 1.42 s on
 a full core, ~23 s at the free instance's 0.1 vCPU, and with the measured
 52 s worst-case cold start ([`reports/cold_start_baseline.md`](reports/cold_start_baseline.md))
 ~75 s worst case if the request also wakes a sleeping container, against the
-90 s stop rule. A day's board is ~1,150 postings, so a full day is deliberately
-several pages — and paging is only honest if the merged answer equals the one
-big call's, which under a budget it is not automatically: the budget-th score
-of a page is not the board's. `/health` reports the cap as `rank_max_batch`,
-and `app/client.py`'s `rank_board` is the reference paging client: it sends
-pages, ranks the union by the service's own rule (descending probability, ties
-by input order), applies the budget once, and reports both the board's
-threshold and the frozen one. A test holds it equal to the service's unpaged
-ranking on a 600-posting board.
+90 s stop rule. A day's board is ~1,150 postings — about 106 s of scoring on
+that instance, over the rule *warm* — so **the whole-board ranking is
+necessarily several requests, and the server owns what happens between them**:
+
+```
+POST /boards                      {as_of, is_board_snapshot, previous_board_size} → board_id
+POST /boards/{id}/postings        a page of ≤250, appended; refused once scoring begins
+POST /boards/{id}/score           scores the next page; derives board context over the
+                                  whole board first, once, when a snapshot → {scored, total, done}
+POST /boards/{id}/rank            {budget} — refused until done; the ranking over the whole board
+```
+
+A caller pages uploads and loops `score`; it never rebuilds the ranking and
+never sees a probability until the ranking. Paging per `/rank` call would not
+do — the budget-th score of a page is not the board's, and in snapshot mode the
+same-title counts have to see every page before any is scored. A test holds
+the board flow equal to the service's own unpaged ranking on a 600-posting
+board. Boards live in memory on the one free instance for an hour and are gone
+when it sleeps or redeploys — a 404 that says to start over, which
+`app/client.py`'s `rank_board` (the reference client) does once. `/rank`
+remains the one-shot for a board that fits in a page.
 
 **When the headline number arrives it will carry an interval.** PR-AUC,
 precision, recall, Brier and ECE each get a 95% interval from resampling
@@ -1247,8 +1259,9 @@ today's postings (JSON or CSV, one column per `/contract` field; unknown
 columns are dropped), set the budget — how many you will actually read — and
 get back exactly that many, ranked, with the board's threshold and the frozen
 one shown side by side because they are different decisions. Boards larger
-than the service's cap are paged and merged by the service's own rule; a
-600-posting board is three requests and one ranking. **One posting**: the form,
+than the service's page are uploaded to it as one board, scored there in
+pages and ranked there once; a 600-posting board is three pages and one
+ranking, and the client holds no copy of the rule. **One posting**: the form,
 a probability, the threshold it was compared against. The caveat is on screen
 in both, not in a footnote. An example five-posting board is downloadable from
 the page.

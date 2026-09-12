@@ -24,13 +24,10 @@ from test_inference import EXPECTED_PROBABILITY, FIXED_POSTING, FIXED_T
 
 from api.main import create_app
 from app.client import (
-    BOARD_BUDGET,
-    DERIVED_ACROSS_PAGES,
     Api,
     ApiError,
     _detail,
     api_url_from,
-    board_context_for,
     build_payload,
     rank_board,
     verdict,
@@ -149,8 +146,12 @@ def wired_api(monkeypatch, synthetic_artifact):
     def post(url, json=None, **kwargs):
         return client.post(url.replace("http://api", ""), json=json)
 
+    def delete(url, **kwargs):
+        return client.delete(url.replace("http://api", ""))
+
     monkeypatch.setattr(requests, "get", get)
     monkeypatch.setattr(requests, "post", post)
+    monkeypatch.setattr(requests, "delete", delete)
     yield Api("http://api")
     client.__exit__(None, None, None)
 
@@ -187,72 +188,89 @@ def _board(n: int) -> list[dict]:
     ]
 
 
-def test_ranking_a_board_in_pages_equals_ranking_it_at_once(
+def test_ranking_a_board_through_the_server_equals_ranking_it_at_once(
     wired_api, synthetic_artifact, monkeypatch
 ):
-    """The property that makes paging honest.
-
-    The service caps a batch at `MAX_BATCH`, a day's board is larger, and the
-    budget-th score of a page is not the board's budget-th score. `rank_board`
-    merges the pages by the service's own rule and applies the budget once;
-    this holds the result equal to `Predictor.rank` on the whole board — the
-    unpaged answer the service would give if it accepted the batch.
-    """
+    """The property the design rests on, now with the server owning the pages:
+    a board larger than a page, uploaded and scored in pages and ranked once
+    by the service, equals `Predictor.rank` on the whole board with the cap
+    lifted. The client holds no copy of the rule."""
     from src.inference import predict as predict_module
     from src.inference.predict import MAX_BATCH, Predictor
 
     board = _board(2 * MAX_BATCH + 100)
-    budget = 20
-    paged = rank_board(wired_api, board, budget=budget, as_of=FIXED_T)
-    # The oracle is the service's own rule with the cap lifted — what one big
-    # call would answer if the instance could afford it.
+    progress = []
+    paged = rank_board(
+        wired_api, board, budget=20, as_of=FIXED_T, on_progress=lambda s, t: progress.append(s)
+    )
     monkeypatch.setattr(predict_module, "MAX_BATCH", len(board))
-    whole = Predictor.load(synthetic_artifact).rank(board, t=FIXED_T, budget=budget)
+    whole = Predictor.load(synthetic_artifact).rank(board, t=FIXED_T, budget=20)
 
-    assert paged["pages"] == 3 and paged["page_size"] == MAX_BATCH
-    assert paged["budget"] == whole.budget == budget
+    assert paged["pages_scored"] == 3 and progress[-1] == len(board)
+    assert paged["budget"] == whole.budget == 20
     assert paged["threshold_applied"] == pytest.approx(whole.threshold_applied)
     assert [p["rank"] for p in paged["postings"]] == [p.rank for p in whole.postings]
     assert [p["watch"] for p in paged["postings"]] == [p.watch for p in whole.postings]
-    assert [p["probability"] for p in paged["postings"]] == pytest.approx(
-        [p.probability for p in whole.postings]
-    )
-    assert sum(p["watch"] for p in paged["postings"]) == budget
-    assert paged["threshold_source"] == BOARD_BUDGET
-    assert paged["frozen_threshold"] == pytest.approx(wired_api.health()["threshold"])
+    assert sum(p["watch"] for p in paged["postings"]) == 20
 
 
-def test_the_page_size_comes_from_the_service_not_a_copy(wired_api):
+def test_a_snapshot_larger_than_a_page_is_derived_by_the_server_over_the_whole_board(wired_api):
     from src.inference.predict import MAX_BATCH
 
-    assert wired_api.health()["rank_max_batch"] == MAX_BATCH
+    board = _board(MAX_BATCH + 50)
+    out = rank_board(wired_api, board, budget=5, as_of=FIXED_T, is_board_snapshot=True)
+    assert out["board_size"] == len(board)
+    assert out["board_context_source"] == "derived from the snapshot"
+    assert out["pages_scored"] == 2
 
 
-def test_ties_are_broken_by_input_order_across_pages(monkeypatch):
-    """Two identical postings on different pages: the earlier one ranks first,
-    exactly as the service would rank them in one batch."""
+def test_the_client_holds_no_copy_of_the_ranking_rule_or_the_derivation():
+    """What `/boards` exists to remove. A test, because the copies were there."""
+    import ast
 
-    class Stub:
-        def health(self):
-            return {"rank_max_batch": 2}
+    source = (Path("app") / "client.py").read_text()
+    tree = ast.parse(source)
+    names = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
+    assert "board_context_for" not in names
+    assert "argsort" not in source and "sorted(scored" not in source
+    assert "n_same_title_on_board" not in source
 
-        def rank(self, postings, budget=None, as_of=None):
+
+def test_an_expired_board_mid_flow_is_retried_once_from_the_top(monkeypatch):
+    calls = []
+
+    class Flaky(Api):
+        def _post(self, path, body):
+            calls.append(path)
+            if path == "/boards":
+                return {"board_id": f"b{len(calls)}", "page_size": 250}
+            if path.endswith("/postings"):
+                return {"total": 1, "scored": 0, "done": False}
+            if path.endswith("/score"):
+                if len([c for c in calls if c.endswith("/score")]) == 1:
+                    raise ApiError("no board 'b1': it expired ... create it again and re-upload")
+                return {"total": 1, "scored": 1, "done": True}
             return {
                 "postings": [
-                    {"probability": 0.5, "board_context_supplied": False} for _ in postings
+                    {"rank": 1, "probability": 0.5, "watch": True, "board_context_supplied": False}
                 ],
-                "threshold_applied": 0.3,
+                "threshold_applied": 0.5,
+                "threshold_source": "batch_budget",
+                "budget": 1,
                 "horizon_days": 7,
                 "model": "m",
                 "dataset": "synthetic",
                 "t": "t",
                 "board_context_source": "supplied per posting or imputed",
+                "board_size": None,
+                "board_id": "b",
+                "pages_scored": 1,
             }
 
-    out = rank_board(Stub(), [{"title": str(i)} for i in range(5)], budget=2)  # type: ignore[arg-type]
-    assert [p["rank"] for p in out["postings"]] == [1, 2, 3, 4, 5]
-    assert [p["watch"] for p in out["postings"]] == [True, True, False, False, False]
-    assert out["pages"] == 3 and out["threshold_applied"] == 0.5
+    monkeypatch.setattr(requests, "delete", lambda *a, **k: None)
+    out = rank_board(Flaky("http://api"), [{"title": "x"}], budget=1)
+    assert out["budget"] == 1
+    assert calls.count("/boards") == 2, "opened twice: once before the expiry, once after"
 
 
 def test_a_board_is_read_from_json_or_csv_and_unknown_columns_are_dropped():
@@ -438,50 +456,3 @@ def test_an_empty_secret_does_not_shadow_the_environment(monkeypatch):
     """A blank secret box is 'unset', not 'use the empty string'."""
     monkeypatch.setenv("SHELF_LIFE_API", "http://localhost:9000")
     assert api_url_from("", "") == "http://localhost:9000"
-
-
-# --- the board-ranking mode proper, through the client -------------------------------
-
-
-def test_client_side_snapshot_context_equals_the_services_own():
-    """The client copies the derivation so a paged board can be a snapshot; the
-    copy is held to the service's function, which is held to the panel's."""
-    from src.inference.board_snapshot import derive_board_context
-
-    postings = [
-        {"title": "Engineer", "requisition_id": "R1"},
-        {"title": "Engineer", "requisition_id": "R1"},
-        {"title": "Engineer"},
-        {"title": "Designer", "requisition_id": "R2"},
-    ]
-    assert board_context_for(postings, previous_board_size=6) == derive_board_context(
-        postings, previous_board_size=6
-    )
-
-
-def test_a_paged_snapshot_carries_the_whole_boards_context(wired_api):
-    """Three pages, one board: every posting sees the board's size, not its page's."""
-    from src.inference.predict import MAX_BATCH
-
-    board = _board(2 * MAX_BATCH + 50)
-    out = rank_board(wired_api, board, budget=5, as_of=FIXED_T, is_board_snapshot=True)
-    assert out["pages"] == 3
-    assert out["board_size"] == len(board)
-    assert out["board_context_source"] == DERIVED_ACROSS_PAGES
-    assert all(p["board_context_supplied"] for p in out["postings"])
-
-
-def test_a_one_page_snapshot_scores_as_the_service_would_derive_it(wired_api):
-    board = _board(8)
-    via_client = rank_board(wired_api, board, budget=2, as_of=FIXED_T, is_board_snapshot=True)
-    via_service = wired_api.rank(board, as_of=FIXED_T, is_board_snapshot=True)
-    assert [p["probability"] for p in via_client["postings"]] == pytest.approx(
-        [p["probability"] for p in via_service["postings"]]
-    )
-
-
-def test_a_snapshot_refuses_mixed_boards_and_hand_supplied_context():
-    with pytest.raises(ValueError, match="one board"):
-        board_context_for([{"title": "a", "source": "x"}, {"title": "b", "source": "y"}])
-    with pytest.raises(ValueError, match="send one or the other"):
-        board_context_for([{"title": "a", "board_size_at_t": 9}])

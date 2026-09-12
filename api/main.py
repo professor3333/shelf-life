@@ -46,6 +46,12 @@ from fastapi.responses import JSONResponse
 
 from api.runtime import process_age_seconds, rss_mb
 from api.schemas import (
+    BoardCreated,
+    BoardCreateRequest,
+    BoardPage,
+    BoardProgress,
+    BoardRankRequest,
+    BoardRankResponse,
     HealthResponse,
     PostingRequest,
     PredictionResponse,
@@ -54,8 +60,9 @@ from api.schemas import (
     RankResponse,
 )
 from src.inference.artifact import DEFAULT_ARTIFACT, ArtifactError
+from src.inference.boards import BoardExpired, BoardStore
 from src.inference.contract import InvalidPayload, describe
-from src.inference.predict import Predictor
+from src.inference.predict import MAX_BATCH, Predictor
 
 #: Where the artifact lives, overridable so a container can mount one elsewhere
 #: and a test can point at one it built itself.
@@ -140,6 +147,9 @@ def create_app(artifact: Path | str | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.artifact_path = path
+    # The live boards. In memory, on this instance, with a TTL — the honest
+    # shape on a free tier that sleeps, and said so in every response.
+    app.state.boards = BoardStore()
 
     @app.exception_handler(InvalidPayload)
     async def _invalid_payload(request: Request, error: InvalidPayload) -> JSONResponse:
@@ -154,6 +164,11 @@ def create_app(artifact: Path | str | None = None) -> FastAPI:
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={"detail": str(error)},
         )
+
+    @app.exception_handler(BoardExpired)
+    async def _board_expired(request: Request, error: BoardExpired) -> JSONResponse:
+        """A board that is gone is a 404 that says to start over, not a 500."""
+        return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content={"detail": str(error)})
 
     def _predictor(app: FastAPI) -> Predictor:
         predictor = getattr(app.state, "predictor", None)
@@ -254,6 +269,78 @@ def create_app(artifact: Path | str | None = None) -> FastAPI:
             board_context_source=batch.board_context_source,
             board_size=batch.board_size,
         )
+
+    # --- a board as one logical collection ------------------------------------
+
+    @app.post("/boards", response_model=BoardCreated, status_code=status.HTTP_201_CREATED)
+    def create_board(request: BoardCreateRequest) -> BoardCreated:
+        """Open a board to upload in pages, score in pages, and rank once.
+
+        The whole-board ranking cannot be one request here — 1,150 postings on
+        a tenth of a CPU is about 106 s against a 90 s rule — so it is several,
+        and this is the collection they share. The prediction instant and the
+        snapshot declaration are fixed now; `/boards/{id}/postings` appends up
+        to `page_size` at a time; `/boards/{id}/score` scores the next page,
+        deriving board context over the whole board first when it is a
+        snapshot; `/boards/{id}/rank` orders the whole board by the same rule
+        `/rank` applies to a batch. The client pages and loops; it never
+        rebuilds the ranking, and never sees a probability until the ranking.
+
+        Boards live in memory on one instance for `ttl_seconds`, and are gone
+        when the service sleeps or redeploys — a 404 that says to start over.
+        """
+        _predictor(app)
+        board = app.state.boards.create(
+            Predictor.moment(request.as_of),
+            is_snapshot=request.is_board_snapshot,
+            previous_board_size=request.previous_board_size,
+        )
+        return BoardCreated(
+            board_id=board.board_id, ttl_seconds=app.state.boards._ttl, page_size=MAX_BATCH
+        )
+
+    @app.post("/boards/{board_id}/postings", response_model=BoardProgress)
+    def add_postings(board_id: str, page: BoardPage) -> BoardProgress:
+        """Append a page of postings. Refused once scoring has begun."""
+        board = app.state.boards.get(board_id)
+        board.add([posting.payload() for posting in page.postings])
+        return BoardProgress(
+            board_id=board_id, total=board.total, scored=board.scored, done=board.done
+        )
+
+    @app.post("/boards/{board_id}/score", response_model=BoardProgress)
+    def score_board(board_id: str) -> BoardProgress:
+        """Score the next unscored page; call until `done`."""
+        board = app.state.boards.get(board_id)
+        board.score_next(_predictor(app))
+        return BoardProgress(
+            board_id=board_id, total=board.total, scored=board.scored, done=board.done
+        )
+
+    @app.post("/boards/{board_id}/rank", response_model=BoardRankResponse)
+    def rank_board(board_id: str, request: BoardRankRequest) -> BoardRankResponse:
+        """The ranking over the whole board. Refused until every page is scored."""
+        board = app.state.boards.get(board_id)
+        batch = board.rank(_predictor(app), request.budget)
+        return BoardRankResponse(
+            postings=[RankedPosting(**item.as_dict()) for item in batch.postings],
+            threshold_applied=batch.threshold_applied,
+            threshold_source=batch.threshold_source,
+            budget=batch.budget,
+            horizon_days=batch.horizon_days,
+            model=batch.model,
+            dataset=batch.dataset,
+            t=batch.t,
+            board_context_source=batch.board_context_source,
+            board_size=batch.board_size,
+            board_id=board_id,
+            pages_scored=-(-board.total // MAX_BATCH),
+        )
+
+    @app.delete("/boards/{board_id}", status_code=status.HTTP_204_NO_CONTENT)
+    def delete_board(board_id: str) -> None:
+        """Forget a board early. Idempotent."""
+        app.state.boards.delete(board_id)
 
     @app.get("/contract")
     def contract() -> list[dict]:
