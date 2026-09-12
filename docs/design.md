@@ -405,6 +405,17 @@ in hours. A false "stays open" costs a job never applied to, which is
 unrecoverable. The second is worse, so the operating point leans to recall and
 the threshold is chosen against a fixed alert budget rather than at 0.5.
 
+**The product's number is the headline — added 2026-09-12.** §15 made the
+product a ranked shortlist under a daily budget, and a report whose first
+table is PR-AUC lets a reader see a classifier where there is a decision
+system. So `metrics.at_budget` names the shortlist's own numbers —
+precision@20/day, recall@20/day, lift over the base rate, removals caught and
+false alarms per day, NDCG@20 as a secondary — and they lead: the first table
+of `test_results.md` with their intervals, three columns of the comparison
+table, two columns of the depth ledger. PR-AUC stays the selection metric and
+the threshold-free companion; the two answer different questions, and the
+product's is asked first.
+
 **Every headline number carries an interval — added 2026-09-07.** The test block
 will hold on the order of twenty positives, and a bare PR-AUC at that count is a
 number whose second decimal is decoration. PR-AUC, precision, recall, Brier and

@@ -376,6 +376,9 @@ def compare_models(
                 "model": name,
                 **summarise_folds(fold_scores),
                 "val_pr_auc": summary["pr_auc"],
+                "val_precision_at_budget": summary["precision_at_budget"],
+                "val_recall_at_budget": summary["recall_at_budget"],
+                "val_lift_at_budget": summary["lift_at_budget"],
                 "val_brier": summary["brier"],
                 "val_ece": expected_calibration_error(target, scores),
                 "val_roc_auc": summary["roc_auc"],
@@ -970,6 +973,7 @@ def write_report(
     recalibration: dict | None = None,
     validation_intervals: dict | None = None,
     board_context_decision: dict | None = None,
+    budget_per_day: int = DEFAULT_ALERT_BUDGET,
 ) -> None:
     reference = analytic_reference(frame)
     lines = [
@@ -1054,7 +1058,11 @@ def write_report(
             "",
             "`cv_pr_auc_mean ± sd` across rolling-origin folds inside the training window;",
             "`val_pr_auc` is the single draw at the real cut. Select on the first, and read",
-            "a disagreement between them as a warning rather than an average.",
+            "a disagreement between them as a warning rather than an average. The three",
+            f"`_at_budget` columns are the product's own numbers at {budget_per_day} a day —",
+            "precision and recall of the shortlist, and its lift over reading the board",
+            "unaided — which is what a person gets; PR-AUC is whether the ranking is good",
+            "everywhere and not only at the cut.",
             "",
             _table(
                 summary,
@@ -1064,6 +1072,9 @@ def write_report(
                     "cv_pr_auc_mean",
                     "cv_pr_auc_sd",
                     "val_pr_auc",
+                    "val_precision_at_budget",
+                    "val_recall_at_budget",
+                    "val_lift_at_budget",
                     "val_brier",
                     "val_ece",
                     "val_roc_auc",
@@ -1377,6 +1388,8 @@ def main() -> None:
                         folds=len(per_fold[chosen]),
                         chosen=chosen,
                         pr_auc=row["val_pr_auc"],
+                        precision_at_budget=row["val_precision_at_budget"],
+                        lift_at_budget=row["val_lift_at_budget"],
                         cv_pr_auc_mean=row["cv_pr_auc_mean"],
                         cv_pr_auc_sd=row["cv_pr_auc_sd"],
                         block_positives=int(target.sum()),
@@ -1411,6 +1424,7 @@ def main() -> None:
         recalibration=recalibration,
         validation_intervals=validation_intervals,
         board_context_decision=board_context_decision,
+        budget_per_day=args.budget,
     )
     print(f"wrote -> {args.out}")
 

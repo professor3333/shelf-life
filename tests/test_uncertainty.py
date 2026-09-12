@@ -173,12 +173,27 @@ def test_the_table_renders_an_absent_interval_as_a_dash_not_nan():
 
 
 def test_every_headline_metric_gets_an_interval():
-    """The five the design document names, so a metric cannot be added to the
-    report without someone deciding whether it needs one."""
+    """The five the design document names plus the three product metrics
+    (added 2026-09-12: precision@budget, recall@budget, lift), so a metric
+    cannot be added to the report without someone deciding whether it needs
+    one. The product ones come first: they are the headline."""
     block = _block([1] * 10 + [0] * 40)
     scores = np.linspace(0.9, 0.1, 50)
     result = bootstrap_block(block, scores, threshold=0.5, resamples=100)
-    assert set(result) == {"pr_auc", "brier", "ece", "precision", "recall"}
+    assert list(result)[:3] == ["precision_at_budget", "recall_at_budget", "lift_at_budget"]
+    assert set(result) == {
+        "precision_at_budget",
+        "recall_at_budget",
+        "lift_at_budget",
+        "pr_auc",
+        "brier",
+        "ece",
+        "precision",
+        "recall",
+    }
+    assert result["lift_at_budget"].point == pytest.approx(
+        result["precision_at_budget"].point / 0.2
+    )
 
 
 def test_the_bootstrap_is_deterministic_for_a_given_seed():

@@ -143,12 +143,22 @@ def _statistics(threshold: float) -> dict[str, Callable[[np.ndarray, np.ndarray]
     recomputing one per resample — see the module docstring.
     """
     return {
+        "precision_at_budget": lambda t, s: confusion_at(t, s, threshold)["precision"],
+        "recall_at_budget": lambda t, s: confusion_at(t, s, threshold)["recall"],
+        "lift_at_budget": lambda t, s: _lift(t, s, threshold),
         "pr_auc": average_precision,
         "brier": brier_score,
         "ece": lambda t, s: expected_calibration_error(t, s),
         "precision": lambda t, s: confusion_at(t, s, threshold)["precision"],
         "recall": lambda t, s: confusion_at(t, s, threshold)["recall"],
     }
+
+
+def _lift(truth: np.ndarray, score: np.ndarray, threshold: float) -> float:
+    """Precision at the frozen threshold over the resample's own base rate."""
+    base_rate = float(np.mean(truth)) if truth.size else float("nan")
+    precision = confusion_at(truth, score, threshold)["precision"]
+    return precision / base_rate if base_rate and not np.isnan(precision) else float("nan")
 
 
 def bootstrap_block(
