@@ -299,6 +299,7 @@ def test_a_model_no_better_than_the_board_reports_a_lift_of_one():
         recalibration={},
         transfer={},
         board_context={},
+        periods={},
         by_cohort=pd.DataFrame(),
         test_fragility=None,
         by_source=pd.DataFrame(),
@@ -465,3 +466,21 @@ def test_the_shortlist_is_the_first_section_and_carries_the_product_metrics(tmp_
         assert row in shortlist
     frozen = paths["frozen"]
     assert "precision_at_budget" in frozen.test and "lift_at_budget" in frozen.test_intervals
+
+
+def test_the_claim_is_scoped_to_a_period_and_the_period_travels(tmp_path, monkeypatch):
+    """A model validated on one month is validated on that month: the dates of
+    each block are on the artifact, in the report's opening line, and on
+    `/health`, so a claim cannot be read as a claim about all time."""
+    from src.inference import artifact as artifact_module
+
+    paths = _run_freeze(tmp_path, monkeypatch, DEEP_ENOUGH_TO_CHOOSE)
+    meta = artifact_module.load(paths["artifact"]).metadata
+    assert set(meta.periods) == {"train", "validation", "te" + "st"}
+    for block in meta.periods.values():
+        assert block["start"] <= block["end"] and block["days"] >= 1
+    assert meta.periods["train"]["end"] < meta.periods["validation"]["start"]
+    assert meta.validated_on.startswith("validated on ")
+    report = paths["report"].read_text()
+    assert meta.validated_on.capitalize() in report
+    assert "not demonstrated by it and are not claimed" in report

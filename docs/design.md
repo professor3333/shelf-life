@@ -2026,3 +2026,42 @@ boards; applicable, if the gate says so, to boards of their kind.
 learning project with a defined end. About v2: a second family whose base
 rate and template were close enough to Greenhouse's that adding it changed
 no number, which would say the family boundary was drawn in the wrong place.
+
+---
+
+## 18. Temporal claims — **DECIDED 2026-09-12: every number is about a period, and says which**
+
+When the fold gate clears, the held-out block will cover a few weeks of one
+autumn. That validates a few weeks of one autumn. Weekday and month effects
+over a longer span, hiring seasons, holidays, macro hiring changes,
+board-policy and recruiter-behaviour changes, source schema changes — none of
+those is demonstrated by a block that short, and a report that stated a
+PR-AUC without a date range would be read as a claim about all of them.
+
+**So the period travels with the number.** `freeze` records the dates each
+block covers on the artifact (`Metadata.periods`); the held-out report opens
+with *validated on <first validation date> – <last held-out date>* and says in
+the next sentence what that does not demonstrate; `/health` carries the same
+sentence, so a caller of the public URL finds out which weeks the number is
+about before reading it; the depth ledger gains a `period` column, so its
+rows over successive snapshots read as the time series they are.
+
+**The first honest model is frozen when the protocol allows it — not after
+six months.** Postponing the freeze to widen the period would trade a narrow,
+true claim for a wider, later one, and the learning project has an end. The
+claim is made narrow instead: *validated on the collected August–October
+2026 period* (or whatever the dates turn out to be), and nothing wider.
+
+**What stands in for long-range robustness, until there is a long range.**
+The crawler keeps running and the ledger keeps every run. As the panel
+deepens, each re-run adds a row with a later period and a narrower interval;
+whether `precision_at_budget` and `pr_auc` hold steady across those rows, or
+drift, is the finding — and the only honest one available. A first-freeze
+number that later rows cannot reproduce is a finding about the period, not a
+failure of the discipline that reported it.
+
+**Would change my mind:** nothing about scoping claims to their period. About
+the freeze timing: a known structural break inside the first block — a board
+changing its housekeeping, a schema change at the scraper — would be a reason
+to wait for a block on the far side of it, and the label audit is where such a
+break would show.

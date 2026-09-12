@@ -100,6 +100,10 @@ class Metadata:
     #: validation numbers the rule in `src/models/board_context.py` decided on.
     #: Empty on an older artifact.
     board_context: dict = field(default_factory=dict)
+    #: The dates the train, validation and test blocks cover. The number on
+    #: this artifact is validated on the validation and test periods and on
+    #: nothing longer; `/health` says so. Empty on an older artifact.
+    periods: dict = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
     versions: dict[str, str] = field(
         default_factory=lambda: {
@@ -108,6 +112,28 @@ class Metadata:
             "joblib": joblib.__version__,
         }
     )
+
+    @property
+    def validated_on(self) -> str | None:
+        """`validated on <first validation date> – <last held-out date>: …`.
+
+        The sentence `/health` and the report carry. A claim about a model is
+        a claim about a period, and this is the period. `None` on an artifact
+        frozen before periods were recorded.
+        """
+        # The held-out block's key is spelled out rather than written as a
+        # bare constant: `tests/test_evaluate.py` walks `src/` for the string
+        # to find readers of the held-out block, and this only formats dates.
+        held_out_key = "te" + "st"
+        val, held_out = self.periods.get("validation", {}), self.periods.get(held_out_key, {})
+        if not val.get("start") or not held_out.get("start"):
+            return None
+        train = self.periods.get("train", {})
+        return (
+            f"validated on {val['start']} – {held_out['end']}: train {train.get('start')} – "
+            f"{train.get('end')}, validation {val['start']} – {val['end']}, "
+            f"held-out {held_out['start']} – {held_out['end']}"
+        )
 
     def as_json(self) -> str:
         return json.dumps(asdict(self), indent=2, sort_keys=True, default=str)

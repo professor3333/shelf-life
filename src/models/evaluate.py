@@ -1390,6 +1390,10 @@ def main() -> None:
                         pr_auc=row["val_pr_auc"],
                         precision_at_budget=row["val_precision_at_budget"],
                         lift_at_budget=row["val_lift_at_budget"],
+                        period=(
+                            f"{provenance.period(split.val)['start']} – "
+                            f"{provenance.period(split.val)['end']}"
+                        ),
                         cv_pr_auc_mean=row["cv_pr_auc_mean"],
                         cv_pr_auc_sd=row["cv_pr_auc_sd"],
                         block_positives=int(target.sum()),

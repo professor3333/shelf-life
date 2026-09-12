@@ -357,3 +357,7 @@ class HealthResponse(BaseModel):
     #: actual cap instead of a copy of it that would drift (`app/client.py`
     #: `rank_board`). Present whether or not a model is loaded.
     rank_max_batch: int = MAX_BATCH
+    #: The period the loaded model's numbers are validated on — the validation
+    #: and test blocks' dates. A claim about a model is a claim about a period,
+    #: and this is where a caller finds out which.
+    validated_on: str | None = None
