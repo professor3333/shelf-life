@@ -79,6 +79,9 @@ HORIZON=1 ./scripts/rehearse.sh || true
 echo "== the ledger"
 "${PYTHON}" -m src.models.ledger
 
+echo "== the README's generated block"
+"${PYTHON}" -m src.data.readme_summary
+
 echo
 echo "regenerated. Review, then commit reports/ as one change:"
 git status --short -- reports
