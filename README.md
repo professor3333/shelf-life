@@ -69,7 +69,7 @@ it describes — and this README links to them rather than restating them:
 | The base rate, the label's stability, relisting, removals against lifespan | [`label_validity.md`](reports/label_validity.md) |
 | Are removals real removals (checked against the boards) | [`label_check.md`](reports/label_check.md) |
 | Does the label treat the initial stock and new arrivals alike | [`cohort_audit.md`](reports/cohort_audit.md) |
-| Can the features name the board without `source` | [`board_fingerprint.md`](reports/board_fingerprint.md) |
+| Can the features name the board without `source` | [`board_fingerprint.md`](reports/board_fingerprint.md) at H=7 (declines until a legal cut exists); the finding so far is the H=1 run, [`board_fingerprint_h1_calendar.md`](reports/board_fingerprint_h1_calendar.md) |
 | The ladder, folds, threshold, calibration, per-board and transfer | [`model_comparison.md`](reports/model_comparison.md) |
 | The held-out result, or the refusal to produce one | [`test_results.md`](reports/test_results.md) |
 | Selected validation results and completed held-out runs | [`depth_ledger.md`](reports/depth_ledger.md) |
@@ -960,6 +960,14 @@ The blank lines are the point. Data, then modelling — which touches
 cold-start gate. `freeze` sits by itself because it is the only line in the
 project that reads the test block, and it happens after the threshold is chosen
 and before anything is published.
+
+**Every report is regenerated from a clean tree, together.** `./scripts/regenerate_reports.sh`
+refuses if anything outside `reports/` is uncommitted, then runs every
+generator in the pipeline's order — pin and build, the H=7 audits, the H=7
+gate, the H=1 rehearsal, the ledger — so each report's `Code` row names a
+commit that reproduces it. The day the gate clears: merge → clean `main` → CI
+green → this script → commit the reports → `freeze`, in that order, so the
+evidence is in history before the result that is read against it.
 
 **`cold_start.sh` runs last, and it is a gate rather than a report.** It has to
 come after the deploy, because it measures a real instance waking from idle with

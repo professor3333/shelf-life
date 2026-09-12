@@ -1975,6 +1975,26 @@ prediction.
 then the lock would be exported to a pinned `requirements` file for it, still
 generated from `uv.lock`, never written by hand.
 
+### The supporting evidence gets the same standard — **ADDED 2026-09-12**
+
+The refusal above protects the artifact. It did not protect the reports the
+artifact is read against, and on 2026-09-12 every one of them said `dirty
+tree`: regenerated mid-edit, or after another report in the same batch, so
+none could be reproduced from the commit it named. Two changes:
+
+- **A report's dirtiness excludes `reports/`.** What the `Code` row claims
+  is that the source at that SHA, on that snapshot, produced the file; the
+  other reports regenerated beside it are outputs of the same run, not inputs
+  to it. `provenance.source_is_dirty` says so. The freeze's `worktree_is_clean`
+  stays strict, because there the reports must be committed too.
+- **`scripts/regenerate_reports.sh`** regenerates all of them from a clean
+  source tree in the pipeline's order and refuses otherwise. The day-of
+  sequence is therefore: merge → clean `main` → CI green → regenerate →
+  commit the reports → `freeze`. The reports are committed at the SHA the
+  artifact will name.
+
+Regenerated on 2026-09-12 from `530be544d`, clean, on the 2026-09-12 snapshot.
+
 ### What the artifact is traceable to
 
 Everything below travels on the artifact's metadata and its JSON sidecar, and

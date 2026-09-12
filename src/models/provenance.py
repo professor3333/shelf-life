@@ -128,6 +128,29 @@ def sha256_of(path: Path, chunk_size: int = 1 << 20) -> str:
     return digest.hexdigest()
 
 
+def _snapshot_date_for(panel_path: Path, raw_root: Path = Path("data/raw")) -> str | None:
+    """The snapshot a report is about.
+
+    A report that reads a specific pinned snapshot — the dated data profiles
+    do, by manifest path — is about *that* snapshot, not the newest one on
+    disk: until 2026-09-12 the profile of 2026-09-04, regenerated later, said
+    it described the 2026-09-12 snapshot. So a path under `data/raw/<date>/`
+    names its own snapshot, and everything else (a derived panel) is about
+    the newest, which is the one it was built from.
+    """
+    try:
+        parts = Path(panel_path).resolve().relative_to(raw_root.resolve()).parts
+    except ValueError:
+        return _snapshot_date(raw_root)
+    if parts:
+        manifest = raw_root / parts[0] / "manifest.json"
+        try:
+            return str(json.loads(manifest.read_text())["snapshot_date"])
+        except (OSError, ValueError, KeyError):
+            return parts[0]
+    return _snapshot_date(raw_root)
+
+
 def _snapshot_date(raw_root: Path = Path("data/raw")) -> str | None:
     """The date of the most recent pinned snapshot, if one exists.
 
@@ -228,5 +251,5 @@ def collect(panel_path: Path, n_rows: int, dataset: str = REAL) -> Provenance:
         panel_path=str(panel_path),
         panel_sha256=sha256_of(panel_path) if panel_path.exists() else None,
         panel_rows=int(n_rows),
-        snapshot_date=_snapshot_date(),
+        snapshot_date=_snapshot_date_for(panel_path),
     )
