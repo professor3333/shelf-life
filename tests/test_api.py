@@ -207,14 +207,15 @@ def test_the_two_request_shapes_partition_the_contract():
     send; a field in a shape and not the contract reaches nothing. The
     individual-posting shape takes everything a person can know; the board
     shape adds the four board fields (and `requisition_id`, an identifier for
-    the snapshot count, never a feature). `as_of` is the documented exception:
-    the prediction instant, an axis, never an input."""
+    the snapshot count, never a feature). `as_of` and `client_id` are the
+    documented exceptions: the prediction instant and the caller's handle —
+    an axis and a join key, never inputs."""
     from api.schemas import BoardPosting
     from src.inference.contract import BOARD_CONTEXT
 
     contract = {field.name for field in FIELDS}
-    single = set(PostingRequest.model_fields) - {"as_of"}
-    board = set(BoardPosting.model_fields) - {"as_of", "requisition_id"}
+    single = set(PostingRequest.model_fields) - {"as_of", "client_id"}
+    board = set(BoardPosting.model_fields) - {"as_of", "requisition_id", "client_id"}
     assert single == contract - set(BOARD_CONTEXT)
     assert board == contract
 
@@ -532,3 +533,36 @@ def test_a_forgotten_board_is_a_404_that_says_to_start_over(client):
 
 def test_boards_need_a_model(modelless_client):
     assert modelless_client.post("/boards", json={}).status_code == 503
+
+
+# --- the caller's handle -------------------------------------------------------------
+
+
+def test_client_id_round_trips_and_never_reaches_the_model(client):
+    """Two postings identical but for `client_id` must score identically —
+    the handle is not a feature — and each result carries its own handle."""
+    a = {**FIXED_POSTING, "as_of": FIXED_T, "client_id": "row-7"}
+    b = {**FIXED_POSTING, "as_of": FIXED_T, "client_id": "something-else"}
+    one, two = (client.post("/predict", json=p).json() for p in (a, b))
+    assert one["client_id"] == "row-7" and two["client_id"] == "something-else"
+    assert one["probability"] == two["probability"]
+    assert client.post("/predict", json={"title": "x"}).json()["client_id"] is None
+
+
+def test_client_ids_come_back_on_the_matching_ranked_posting(client):
+    from src.inference.predict import MAX_BATCH
+
+    postings = _postings(MAX_BATCH + 5)
+    for i, p in enumerate(postings):
+        p["client_id"] = f"csv-row-{i}"
+    postings[3]["client_id"] = "dup"  # a duplicate handle is the caller's business
+    postings[4]["client_id"] = "dup"
+
+    board_id, _, ranked = _drive_board(client, postings, budget=3, is_board_snapshot=True)
+    echoed = [item["client_id"] for item in ranked.json()["postings"]]
+    assert echoed == [p["client_id"] for p in postings], "in input order, handle by handle"
+
+    one_shot = client.post(
+        "/rank", json={"postings": postings[:5], "as_of": FIXED_T, "budget": 2}
+    ).json()
+    assert [i["client_id"] for i in one_shot["postings"]] == [p["client_id"] for p in postings[:5]]

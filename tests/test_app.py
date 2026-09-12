@@ -284,9 +284,11 @@ def test_a_board_is_read_from_json_or_csv_and_unknown_columns_are_dropped():
     assert from_csv[0]["content_chars"] == 1400
 
     as_list = parse_board('[{"title": "A", "url": "https://x", "location": "B"}]', allowed)
-    assert as_list == [{"title": "A", "location": "B"}], "url is not a field the API takes"
-    wrapped = parse_board('{"postings": [{"title": "A"}]}', allowed)
-    assert wrapped == [{"title": "A"}]
+    assert as_list == [{"title": "A", "location": "B", "client_id": "row-1"}], (
+        "url is not a field the API takes; the row number becomes the handle"
+    )
+    wrapped = parse_board('{"postings": [{"title": "A", "client_id": "mine"}]}', allowed)
+    assert wrapped == [{"title": "A", "client_id": "mine"}], "a supplied handle is kept"
     assert parse_board("   ", allowed) == []
     with pytest.raises(ValueError, match="title"):
         parse_board("location\nBerlin\n", allowed)

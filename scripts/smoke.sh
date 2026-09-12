@@ -146,7 +146,7 @@ rank_body() {
   "budget": 2,
   "as_of": "2026-09-14T03:45:00Z",
   "postings": [
-    {"title": "Senior Data Engineer", "location": "Berlin",
+    {"client_id": "a1", "title": "Senior Data Engineer", "location": "Berlin",
      "salary_raw": "120000 - 160000 USD", "departments": "Eng", "offices": "HQ",
      "n_offices": 1, "n_metadata": 3, "content_chars": 1400,
      "first_published": "2026-08-20T00:00:00Z", "updated_at": "2026-09-01T00:00:00Z"},
@@ -201,6 +201,9 @@ if abs(first["threshold_applied"] - scores[1]) > 1e-9:
 
 if second.get("postings") != postings:
     sys.exit("the same batch ranked differently on a second call — the ranking is not deterministic")
+
+if postings[0].get("client_id") != "a1" or any(p.get("client_id") for p in postings[1:]):
+    sys.exit(f"client_id did not round-trip: {[p.get('client_id') for p in postings]}")
 
 alone = single.get("probability")
 through_rank = postings[0]["probability"]

@@ -39,6 +39,22 @@ from src.inference.artifact import DEFAULT_ARTIFACT, Artifact, load
 from src.inference.board_snapshot import DERIVED, SUPPLIED_OR_IMPUTED, derive_board_context
 from src.inference.contract import board_context_supplied, build_row
 
+#: An opaque caller-supplied handle that rides along and comes back on the
+#: matching result. Never a feature: it is stripped before a row is built,
+#: and the contract's `assert_known_columns` would refuse it if it were not.
+#: It exists because "results come back in input order" is a contract that
+#: survives a single synchronous call and little else — a CSV row, a retry,
+#: a deduplication, a page of a board all want a handle, not a position.
+CLIENT_ID = "client_id"
+
+
+def _split_client_id(payload: dict) -> tuple[dict, str | None]:
+    """The payload without its handle, and the handle."""
+    handle = payload.get(CLIENT_ID)
+    return {k: v for k, v in payload.items() if k != CLIENT_ID}, (
+        None if handle is None else str(handle)
+    )
+
 
 def predicts(horizon_days: int) -> str:
     """The sentence every prediction carries about what it predicts."""
@@ -63,6 +79,8 @@ class Prediction:
     model: str
     dataset: str
     t: str
+    #: The caller's handle, echoed. `None` when none was sent.
+    client_id: str | None = None
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -81,6 +99,9 @@ class Ranked:
     probability: float
     watch: bool
     board_context_supplied: bool
+    #: The caller's handle, echoed on the matching result — the join key a
+    #: client should use instead of array position.
+    client_id: str | None = None
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -177,6 +198,7 @@ class Predictor:
         if moment.tzinfo is None:
             moment = moment.tz_localize("UTC")
 
+        payload, client_id = _split_client_id(payload)
         row = build_row(payload, moment)
         probability = float(self.artifact.pipeline.predict_proba(row)[0, 1])
         applied = self.metadata.threshold if threshold is None else float(threshold)
@@ -191,6 +213,7 @@ class Predictor:
             model=self.metadata.run_name,
             dataset=self.metadata.dataset,
             t=moment.isoformat(),
+            client_id=client_id,
         )
 
     def rank(
@@ -268,7 +291,8 @@ class Predictor:
         """
         if len(payloads) > MAX_BATCH:
             raise ValueError(f"{len(payloads)} postings exceeds the {MAX_BATCH}-posting page")
-        frame = pd.concat([build_row(payload, moment) for payload in payloads], ignore_index=True)
+        rows = [build_row(_split_client_id(payload)[0], moment) for payload in payloads]
+        frame = pd.concat(rows, ignore_index=True)
         return self.artifact.pipeline.predict_proba(frame)[:, 1]
 
     def order(
@@ -308,6 +332,7 @@ class Predictor:
                 probability=float(probabilities[index]),
                 watch=position <= effective,
                 board_context_supplied=board_context_supplied(payloads[index]),
+                client_id=_split_client_id(payloads[index])[1],
             )
 
         return RankedBatch(
