@@ -808,8 +808,8 @@ here; their reports and experiment tracking retain those results. An empty
 real-data ledger does not mean no real-data metrics exist.
 
 It exists because of a fact this project cannot argue its way out of. The panel
-accrues about **19 removals a day** against 100 today, so the first honest result
-will carry an interval wide enough to swallow most differences between models.
+accrues removals at a rate of tens a day, so the first honest result will carry
+an interval wide enough to swallow most differences between models.
 That is the finding, not an excuse — and the only way to show it as one is to
 keep the earlier runs and let a reader watch the interval narrow against a
 sample size printed beside it. A metric at one depth is a claim; the same metric
