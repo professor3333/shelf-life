@@ -126,16 +126,24 @@ def concurrent_rank(post: Post, batch: int, concurrency: int = 4, requests: int 
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
         results = list(pool.map(lambda _: post("/rank", body), range(requests)))
     codes = [r[0] for r in results]
-    numbers = _percentiles([r[1] for r in results])
+    served = [r for r in results if r[0] == 200]
+    numbers = _percentiles([r[1] for r in served])
     numbers["batch"] = float(batch)
     numbers["concurrency"] = float(concurrency)
-    ok = all(c == 200 for c in codes) and all(
-        r[2] is not None and sum(p["watch"] for p in r[2]["postings"]) == 20 for r in results
+    numbers["refused_429"] = float(codes.count(429))
+    # The per-address budget on expensive routes (api/protection.py) may
+    # refuse some of a burst with 429 — that is the behaviour, not a failure.
+    # What must hold: nothing 5xx, and every ranking that was served is right.
+    ok = (
+        all(c in (200, 429) for c in codes)
+        and bool(served)
+        and all(sum(p["watch"] for p in r[2]["postings"]) == 20 for r in served if r[2])
     )
     return Section(
         f"concurrent /rank ×{concurrency}, {batch} postings each",
         ok,
-        f"{requests} requests, {codes.count(200)} × 200; every ranking flagged exactly 20"
+        f"{requests} requests: {codes.count(200)} × 200, {codes.count(429)} × 429 (the "
+        "per-address budget); every served ranking flagged exactly 20"
         if ok
         else f"codes {codes}",
         numbers,
@@ -145,11 +153,20 @@ def concurrent_rank(post: Post, batch: int, concurrency: int = 4, requests: int 
 def memory_while_ranking(
     get_health: Callable[[], dict], post: Post, batch: int, rounds: int = 5
 ) -> Section:
-    """Peak RSS before and after repeated maximum-size rankings. Pass: flat."""
+    """Peak RSS before and after repeated maximum-size rankings. Pass: flat.
+
+    Waits out a 429 from the per-address budget rather than counting a
+    refused request as a ranking.
+    """
     before = float(get_health().get("rss_mb") or float("nan"))
     body = {"postings": _board(batch), "budget": 20, "as_of": AS_OF}
-    for _ in range(rounds):
-        post("/rank", body)
+    done = 0
+    while done < rounds:
+        code, _, _ = post("/rank", body)
+        if code == 429:
+            time.sleep(5)
+            continue
+        done += 1
     after = float(get_health().get("rss_mb") or float("nan"))
     growth = after - before
     return Section(
@@ -181,8 +198,10 @@ def malformed_and_oversized(post: Post, batch: int) -> Section:
     return Section("malformed and oversized requests", ok, detail, {})
 
 
-def burst_without_a_rate_limit(post: Post, burst: int = 32) -> Section:
-    """What no rate limit means: a burst queues at the worker and is answered."""
+def burst_on_a_cheap_route(post: Post, burst: int = 32) -> Section:
+    """What the absence of a limit on `/predict` means: a burst queues at the
+    worker and every request is answered, slowly. Expensive routes have a
+    per-address budget instead (`api/protection.py`)."""
     body = {**POSTING, "as_of": AS_OF}
     started = time.perf_counter()
     with ThreadPoolExecutor(max_workers=burst) as pool:
@@ -193,11 +212,30 @@ def burst_without_a_rate_limit(post: Post, burst: int = 32) -> Section:
     numbers["burst"] = float(burst)
     numbers["wall_s"] = wall
     return Section(
-        f"a burst of {burst} with no rate limit",
+        f"a burst of {burst} on /predict, which has no budget",
         all(c == 200 for c in codes),
-        f"all {burst} answered in {wall:.2f} s wall; none refused, none 5xx — there is no "
-        "limit to hit, so a burst costs everyone latency rather than anyone an error",
+        f"all {burst} answered in {wall:.2f} s wall; none refused, none 5xx — a single "
+        "posting is cheap enough that a burst costs latency rather than an error",
         numbers,
+    )
+
+
+def budget_on_an_expensive_route(post: Post, batch: int) -> Section:
+    """More expensive requests at once than the budget allows: 429 with
+    Retry-After, and never a 5xx. Pass: at least one refusal, no error."""
+    from api.protection import BURST  # the number, not the middleware
+
+    body = {"postings": _board(min(batch, 20)), "budget": 5, "as_of": AS_OF}
+    with ThreadPoolExecutor(max_workers=BURST + 4) as pool:
+        results = list(pool.map(lambda _: post("/rank", body), range(BURST + 4)))
+    codes = [r[0] for r in results]
+    refused = codes.count(429)
+    ok = all(c in (200, 429) for c in codes) and refused >= 1
+    return Section(
+        f"{BURST + 4} expensive requests at once against a budget of {BURST}",
+        ok,
+        f"{codes.count(200)} × 200, {refused} × 429; no 5xx" if ok else f"codes {codes}",
+        {"refused_429": float(refused)},
     )
 
 
@@ -211,7 +249,10 @@ def run(
         concurrent_rank(post, batch, concurrency=min(concurrency, 4), requests=4 if light else 8),
         memory_while_ranking(get_health, post, batch, rounds=2 if light else 5),
         malformed_and_oversized(post, batch),
-        burst_without_a_rate_limit(post, burst=8 if light else 32),
+        burst_on_a_cheap_route(post, burst=8 if light else 32),
+        # The budget section needs the real bucket; the light in-process run
+        # uses one that never refuses, and tests the section on its own.
+        *([] if light else [budget_on_an_expensive_route(post, batch)]),
     ]
 
 
@@ -256,11 +297,13 @@ def render(sections: list[Section], target: str, label: str, health: dict) -> st
         "",
         "## What is deliberately not here",
         "",
-        "A rate limit. The service has none (`docs/design.md` §7b; the non-goals), so the",
-        "last section measures what that costs — a burst queues at the single worker and",
-        "every request is answered, slowly — rather than testing a limit that does not",
-        "exist. A public free instance with no limit can be made slow by one caller; it",
-        "cannot be made to answer wrongly, which is what the sections above check.",
+        "Authentication, and a limit on the cheap routes. `/predict` and `/health` have",
+        "no budget, so a burst there queues at the single worker and every request is",
+        "answered, slowly. The expensive routes carry a per-address budget",
+        "(`api/protection.py`): a courtesy limit on one free instance, not a security",
+        "boundary — the last section shows it refusing with 429 rather than slowing",
+        "everyone. A public free instance can still be made slow by one caller on the",
+        "cheap routes; it cannot be made to answer wrongly, which is what is checked.",
         "",
     ]
     return "\n".join(lines)
