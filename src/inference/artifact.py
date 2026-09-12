@@ -90,6 +90,11 @@ class Metadata:
     #: isotonic map was wrapped around the estimator, by which rule, on which
     #: validation numbers. Empty on an artifact frozen before the rule existed.
     recalibration: dict = field(default_factory=dict)
+    #: The leave-one-board-out assessment at the freeze (`generalisation.assess`):
+    #: verdict, per-board lifts over the base rate, and whether a collapse was
+    #: overridden. A model whose verdict is not `intact` is not described as
+    #: applicable to boards it has not seen. Empty on an older artifact.
+    transfer: dict = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
     versions: dict[str, str] = field(
         default_factory=lambda: {

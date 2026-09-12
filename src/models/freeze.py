@@ -78,6 +78,7 @@ from src.models.experiments import (
     default_cuts,
     spec_by_name,
 )
+from src.models.generalisation import assess, leave_one_board_out, report_tables
 from src.models.metrics import (
     DEFAULT_ALERT_BUDGET,
     alert_budget,
@@ -123,6 +124,10 @@ class FrozenModel:
     validation_intervals: dict[str, object]
     #: What `src/models/calibration.py` decided, and the numbers it decided on.
     recalibration: dict
+    #: The leave-one-board-out assessment of this candidate (`generalisation.assess`),
+    #: computed before the test block was opened: verdict, per-board lifts, and
+    #: whether a collapse was overridden in writing.
+    transfer: dict
     #: The model's performance on the incumbent stock against the incident
     #: flow, on the test block. The cohort audit asks whether the *label* is
     #: indifferent to cohort; this asks whether the *model* is.
@@ -170,8 +175,13 @@ def freeze(
     budget_per_day: int = DEFAULT_ALERT_BUDGET,
     fitted_on: str = "train",
     params: dict | None = None,
+    transfer: dict | None = None,
 ) -> FrozenModel:
     """Fit, fix the threshold on validation, then read test exactly once.
+
+    `transfer` is the leave-one-board-out assessment `main` computed before
+    deciding to call this at all; when a caller has not, it is computed here,
+    before the test block is opened, so every frozen model carries one.
 
     The order of the statements below is the whole discipline, so it is worth
     reading as an order rather than as a list: fit, score validation, choose the
@@ -186,6 +196,11 @@ def freeze(
         )
 
     resolved = spec.resolve(split) if params is None else dict(params)
+    if transfer is None:
+        folds, skipped = leave_one_board_out(
+            split, lambda: spec.build(split, resolved), budget_per_day, serve_time=True
+        )
+        transfer = {**assess(folds, skipped).as_dict(), "accepted_collapse": False}
     model = spec.build(split, resolved)
     fit_on_frame(model, _fit_block(split, fitted_on))
 
@@ -229,6 +244,7 @@ def freeze(
         test_intervals=bootstrap_block(test_block, test_scores, float(threshold)),
         validation_intervals=bootstrap_block(split.val, validation_scores, float(threshold)),
         recalibration=decision.as_dict(),
+        transfer=transfer,
         by_cohort=evaluate_by(
             cohort_audit.attach_cohort(test_block, split.frame),
             test_scores,
@@ -258,6 +274,61 @@ def freeze(
         features=tuple(spec_features(spec, split)),
         fitted_on=fitted_on,
     )
+
+
+def _transfer_section(transfer: dict) -> list[str]:
+    """What the model does on a board it has not seen — the release gate's reading."""
+    verdict = transfer["verdict"]
+    lifts = transfer.get("lifts", {})
+    lines = [
+        "## Would it work on a board it has never seen?",
+        "",
+        "The fingerprint diagnostic (`reports/board_fingerprint.md`) recovers the board",
+        "from the production features at 100%, so excluding `source` proves nothing;",
+        "only holding a board out of the fit does. Each board below was removed from",
+        "training and scored cold, with board context withheld the way a posting from",
+        "an unknown board arrives. Computed on train and validation before the test",
+        "block was opened. Rule (`docs/design.md` §4a, fixed 2026-09-12):",
+        f"`{transfer['rule']}`.",
+        "",
+    ]
+    if lifts:
+        lines += ["| board | transfer PR-AUC minus base rate |", "|---|---|"]
+        lines += [f"| {board} | {lift:+.4f} |" for board, lift in lifts.items()]
+        lines.append("")
+    for board, reason in transfer.get("skipped", {}).items():
+        lines.append(f"- `{board}` not held out: {reason}")
+    if transfer.get("skipped"):
+        lines.append("")
+    reading = {
+        "intact": "**Transfer intact.** Seeing a board at fit time was worth "
+        f"{transfer['mean_gap']:+.4f} PR-AUC against a spread of {transfer['spread']:.4f} — "
+        "inside one standard deviation. This model may be described as applicable to a "
+        "board of the kind these are; never to arbitrary boards.",
+        "board_specific": "**Board-specific learning is doing work.** Seeing a board at fit "
+        f"time was worth {transfer['mean_gap']:+.4f} PR-AUC against a spread of "
+        f"{transfer['spread']:.4f}. This model is fitted to these boards and is **not** "
+        "described as applicable to boards it has not seen.",
+        "reversed": "**Better on boards it did not see** — worth understanding before it is "
+        "reported; usually the held-out fits differ from the full fit in some other way.",
+        "unmeasured": "**Unmeasured.** Fewer than two boards could be held out, so the "
+        "question is unanswered, not answered; no claim about unseen boards is made.",
+    }[verdict]
+    lines.append(reading)
+    if transfer.get("collapsed"):
+        lines.append("")
+        lines.append(
+            "**Collapsed:** on the held-out boards the mean lift over the base rate is "
+            f"{transfer['mean_lift']:+.4f}. "
+            + (
+                "The freeze was allowed to proceed by `--accept-transfer-collapse`, and this "
+                "model is described as fitted to these boards and nothing wider."
+                if transfer.get("accepted_collapse")
+                else "The freeze should have refused; this line should not be readable."
+            )
+        )
+    lines.append("")
+    return lines
 
 
 def _recalibration_lines(decision: dict) -> list[str]:
@@ -323,6 +394,7 @@ def build_metadata(
         lock_sha256=provenance.lock_sha256(),
         seed=RANDOM_STATE,
         recalibration=frozen.recalibration,
+        transfer=frozen.transfer,
     )
 
 
@@ -418,6 +490,44 @@ class DirtyWorktree(RuntimeError):
     artifact from one is not provisional — it ships — and a SHA that does not
     reproduce it is a SHA that names nothing. Real panels only: a synthetic
     freeze is a rehearsal and says `dataset=synthetic` on every response.
+    """
+
+
+TRANSFER_COLLAPSED = """## Nothing below has run
+
+The split is legal and evaluable, and freeze refuses on what the candidate does
+on boards it has not seen.
+
+```
+{refusal}
+```
+
+**Why this is a gate and not a footnote.** `reports/board_fingerprint.md`: the
+production features identify the board at 100% — `board_size_at_t` alone does
+it. Excluding the `source` column therefore does not make a model
+board-independent, and a model can learn *this looks like anthropic* as a proxy
+for hazard and have nothing to say about a board it has never seen. The
+leave-one-board-out table measures exactly that, on the candidate being frozen,
+with board context withheld the way a posting from an unknown board arrives.
+When the model collapses to each held-out board's base rate, freezing it would
+ship a board lookup wearing a model's name (`docs/design.md` §4a, rule fixed
+2026-09-12).
+
+{table}
+
+Pass `--accept-transfer-collapse` to freeze anyway; the report and the artifact
+both record that it was used, and the model is then described as fitted to
+these boards and nothing wider.
+"""
+
+
+class TransferCollapse(RuntimeError):
+    """On boards it has not seen, the candidate is no better than the prior.
+
+    The third evidence refusal, after depth: the fingerprint diagnostic showed
+    the board is recoverable from the production features at 100%, so
+    excluding `source` proves nothing, and only holding a board out of the fit
+    does. Overridable in writing, like `NoFoldEvidence`, and recorded.
     """
 
 
@@ -613,6 +723,7 @@ def write_report(
                 ["cohort", "n", "positives", "base_rate", "pr_auc", "precision", "recall"],
             ),
             "",
+            *_transfer_section(frozen.transfer),
             "## Calibration on test",
             "",
             "Brier and ECE say how far the probabilities sit from the truth. They do",
@@ -660,6 +771,13 @@ def main() -> None:
         "model on. Spends the held-out block, once, on a pick nothing selected",
     )
     parser.add_argument(
+        "--accept-transfer-collapse",
+        action="store_true",
+        help="freeze even though the candidate collapses to the base rate on boards "
+        "held out of the fit. Recorded on the artifact; the model is then described "
+        "as fitted to these boards and nothing wider",
+    )
+    parser.add_argument(
         "--synthetic",
         action="store_true",
         help="freeze against tests/panels.py instead of the real panel, for when "
@@ -699,6 +817,25 @@ def main() -> None:
                 "selected a model to test."
             )
 
+        # Transfer, on the candidate being frozen, with board context withheld
+        # as at serve time. A modelling activity on train and validation only —
+        # nothing here touches the test block — and the third evidence refusal:
+        # a model that cannot score a board it has not seen has learned the
+        # boards, not the postings (`design.md` §4a, rule fixed 2026-09-12).
+        spec = spec_by_name(args.run)
+        folds, skipped = leave_one_board_out(
+            split, lambda: spec.build(split, spec.resolve(split)), args.budget, serve_time=True
+        )
+        transfer = assess(folds, skipped).as_dict()
+        transfer["accepted_collapse"] = bool(args.accept_transfer_collapse)
+        if transfer["collapsed"] and not args.accept_transfer_collapse:
+            raise TransferCollapse(
+                f"on {len(folds)} board(s) held out of the fit — "
+                f"{', '.join(transfer['boards'])} — the candidate's PR-AUC sits at or "
+                f"below each board's base rate (mean lift {transfer['mean_lift']:+.4f}). "
+                "It has learned which board a posting is from, not how long postings last."
+            )
+
         # The last check before the irreversible step, and the one that is
         # about the code rather than the data (`design.md` §16).
         if dataset == provenance.REAL and not provenance.worktree_is_clean():
@@ -707,7 +844,7 @@ def main() -> None:
                 "the artifact would not reproduce it. Commit (or stash) everything — "
                 "the regenerated reports included — and run freeze again."
             )
-        frozen = freeze(split, args.run, args.budget, args.fit)
+        frozen = freeze(split, args.run, args.budget, args.fit, transfer=transfer)
         metadata = build_metadata(
             frozen, args.run, panel, panel_path, dataset, args.budget, n_folds
         )
@@ -743,6 +880,20 @@ def main() -> None:
         blocker = NO_FOLDS.format(refusal=str(error), depth=depth_report(panel))
         print(f"not run: {error}")
         print("`--accept-no-folds` overrides this and spends the held-out block.")
+    except TransferCollapse as error:
+        scored, refused = report_tables(folds, skipped)
+        blocker = TRANSFER_COLLAPSED.format(
+            refusal=str(error),
+            table="\n".join(
+                [
+                    _table(scored, list(scored.columns)) if not scored.empty else "",
+                    "",
+                    _table(refused, ["board", "reason"]) if not refused.empty else "",
+                ]
+            ),
+        )
+        print(f"not run: {error}")
+        print("`--accept-transfer-collapse` overrides this; the artifact records it.")
     except DirtyWorktree as error:
         # No report: writing one would dirty the tree further, and this is not
         # a finding about the data. Its own exit code, so a caller can tell

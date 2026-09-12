@@ -191,3 +191,91 @@ def test_the_minimum_is_thin_enough_to_be_stated_honestly():
     """Ten is already too few for a tight interval; the constant exists to
     exclude numbers that are not about the model at all."""
     assert MIN_HELD_OUT_POSITIVES == 10
+
+
+# --- the release gate's reading ------------------------------------------------------
+
+
+def _folds_with_lifts(lifts: list[float], gap: float = 0.0) -> list[BoardFold]:
+    return [
+        BoardFold(
+            board=f"b{i}",
+            eval_rows=200,
+            eval_positives=20,
+            train_positives=80,
+            train_share=0.8,
+            base_rate=0.1,
+            transfer_pr_auc=0.1 + lift,
+            ceiling_pr_auc=0.1 + lift + gap,
+        )
+        for i, lift in enumerate(lifts)
+    ]
+
+
+def test_collapse_is_no_lift_over_the_base_rate_on_two_or_more_boards():
+    from src.models.generalisation import assess
+
+    collapsed = assess(_folds_with_lifts([0.0, -0.02, 0.01]), [])
+    assert collapsed.collapsed and collapsed.mean_lift <= 0
+    lifted = assess(_folds_with_lifts([0.05, 0.08, 0.03]), [])
+    assert not lifted.collapsed and lifted.mean_lift > 0
+
+
+def test_one_board_cannot_collapse_or_pass_the_gate():
+    from src.models.generalisation import UNMEASURED, Skipped, assess
+
+    one = assess(_folds_with_lifts([-0.05]), [Skipped("x", "3 positive(s)")])
+    assert one.verdict == UNMEASURED and not one.collapsed
+    assert one.skipped == {"x": "3 positive(s)"}
+
+
+def test_the_verdict_names_match_the_prose_verdict():
+    """`assess` and `verdict` read the same folds the same way."""
+    from src.models.generalisation import BOARD_SPECIFIC, INTACT, REVERSED, assess
+
+    assert assess(_folds([0.01, -0.01, 0.02]), []).verdict == INTACT
+    assert "intact" in verdict(_folds([0.01, -0.01, 0.02]))
+    assert assess(_folds([0.10, 0.11, 0.09]), []).verdict == BOARD_SPECIFIC
+    assert "Board-specific" in verdict(_folds([0.10, 0.11, 0.09]))
+    assert assess(_folds([-0.10, -0.11, -0.09]), []).verdict == REVERSED
+
+
+def test_the_assessment_states_its_rule_and_travels_as_a_dict():
+    from src.models.generalisation import assess
+
+    out = assess(_folds_with_lifts([0.05, 0.02]), []).as_dict()
+    assert out["rule"].startswith("collapsed iff mean(transfer_pr_auc - base_rate) <= 0")
+    assert set(out) >= {
+        "verdict",
+        "collapsed",
+        "boards",
+        "mean_gap",
+        "spread",
+        "mean_lift",
+        "lifts",
+    }
+    assert out["lifts"] == {"b0": pytest.approx(0.05), "b1": pytest.approx(0.02)}
+
+
+def test_serve_time_scoring_withholds_board_context_from_the_held_out_rows(multi_split):
+    """Both arms see the held-out board the way the service would: no board
+    context, imputed to the training fold's constants."""
+    from src.inference.contract import BOARD_CONTEXT
+    from src.models.generalisation import without_board_context
+
+    withheld = without_board_context(multi_split.val)
+    assert all(withheld[column].isna().all() for column in BOARD_CONTEXT)
+    assert len(withheld) == len(multi_split.val)
+    seen = []
+
+    def build():
+        from sklearn.linear_model import LogisticRegression
+
+        from src.features.preprocessing import build_pipeline
+
+        model = build_pipeline(LogisticRegression(max_iter=200))
+        seen.append(model)
+        return model
+
+    folds, _ = leave_one_board_out(multi_split, build, serve_time=True)
+    assert folds, "the fixture must yield at least one fold for this to test anything"

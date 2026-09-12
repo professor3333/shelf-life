@@ -130,6 +130,16 @@ echo "== the ladder, on validation only"
 "${PYTHON}" -m src.models.train --panel "${PANEL}"
 "${PYTHON}" -m src.models.experiments --panel "${PANEL}"
 "${PYTHON}" -m src.models.evaluate --panel "${PANEL}"
+# The fingerprint at this horizon, beside the H=1 one the report was first
+# written on: the release gate in `freeze` reads transfer on the candidate, and
+# this is the record of what there was to transfer past. Its own file at any
+# horizon but 7, the way the label audit above is kept apart.
+if [ "${HORIZON}" = "7" ]; then
+  "${PYTHON}" -m src.models.board_fingerprint --panel "${PANEL}"
+else
+  "${PYTHON}" -m src.models.board_fingerprint --panel "${PANEL}" \
+    --out "reports/board_fingerprint_h${HORIZON}_${BASIS}.md"
+fi
 
 echo
 echo "ran on validation only. The test block is untouched: freeze is a separate,"
