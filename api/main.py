@@ -45,6 +45,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
+from api import protection
 from api.runtime import process_age_seconds, rss_mb
 from api.schemas import (
     BoardCreated,
@@ -115,7 +116,9 @@ def artifact_tag() -> str | None:
         return None
 
 
-def create_app(artifact: Path | str | None = None) -> FastAPI:
+def create_app(
+    artifact: Path | str | None = None, buckets: protection.TokenBuckets | None = None
+) -> FastAPI:
     """Build the app.
 
     A factory rather than a module-level singleton so that a test can serve an
@@ -148,6 +151,10 @@ def create_app(artifact: Path | str | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.artifact_path = path
+    # A body limit before parsing and a per-address budget on the expensive
+    # routes — a courtesy limit for one free instance, not a security
+    # boundary (`api/protection.py` says exactly what it is and is not).
+    protection.install(app, buckets)
     # The live boards. In memory, on this instance, with a TTL — the honest
     # shape on a free tier that sleeps, and said so in every response.
     app.state.boards = BoardStore()

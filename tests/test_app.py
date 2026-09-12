@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient
 from test_inference import EXPECTED_PROBABILITY, FIXED_POSTING, FIXED_T
 
 from api.main import create_app
+from api.protection import TokenBuckets
 from app.client import (
     Api,
     ApiError,
@@ -33,6 +34,12 @@ from app.client import (
     verdict,
     warnings_for,
 )
+
+
+def generous() -> TokenBuckets:
+    """A bucket that never refuses: these tests are about the routes, not the
+    limiter, which has its own tests in `test_protection.py`."""
+    return TokenBuckets(burst=1_000_000, per_minute=6e7)
 
 
 class _FakeResponse:
@@ -137,7 +144,7 @@ def test_an_unreachable_api_is_an_ApiError_not_a_traceback(monkeypatch):
 def wired_api(monkeypatch, synthetic_artifact):
     """The real client against the real app, with `requests` routed to the ASGI
     test transport. Everything but the socket is exercised."""
-    client = TestClient(create_app(synthetic_artifact))
+    client = TestClient(create_app(synthetic_artifact, buckets=generous()))
     client.__enter__()
 
     def get(url, **kwargs):
@@ -403,7 +410,7 @@ def rendered_without_a_model(monkeypatch):
     pytest.importorskip("streamlit", reason="the UI extra is not installed")
     from streamlit.testing.v1 import AppTest
 
-    client = TestClient(create_app("/nonexistent/shelf_life.joblib"))
+    client = TestClient(create_app("/nonexistent/shelf_life.joblib", buckets=generous()))
     client.__enter__()
     monkeypatch.setattr(requests, "get", lambda url, **k: client.get(url.replace("http://api", "")))
     monkeypatch.setattr(

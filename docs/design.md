@@ -709,8 +709,29 @@ run in-process in the suite on every push, so the behaviours — no 5xx, flat
 memory, 4xx on abuse — are held, and only the absolute numbers are this
 machine's.
 
-**Would change my mind:** a second operator, at which point either a limit or
-a second instance is the fix, and "no rate limit" stops being a non-goal.
+**Two courtesy limits — ADDED 2026-09-12, later the same day.** Not a
+security boundary, and the non-goal stands in that sense: no key, no
+account, no per-user quota. What `api/protection.py` adds is the minimum that
+keeps one careless or hostile caller from making the free instance useless
+for everyone else. A **body cap of 4 MB checked against `Content-Length`
+before the body is read** — twice the largest legitimate request, a full page
+with every text field at its cap — so an oversized request costs a header,
+not a parse (the benchmark's 5 MB title went from a 71 ms parse-then-422 to
+a 34 ms 413). And a **per-address token bucket on the expensive routes** —
+`/rank`, `/boards/*/score`, `/boards/*/rank` — of six at once, refilling at
+twelve a minute; over it is a 429 with `Retry-After`, never a queue that
+slows every other caller. `/predict` and `/health` are unlimited: a single
+posting is cheap, and limiting `/health` would break the UI's wake-up and
+the deploy verification. In memory, per process, keyed by the first
+`X-Forwarded-For` hop, forgotten on restart — a determined caller can vary
+the address, and the document says so. Measured against a container: eight
+concurrent full rankings now serve seven and refuse one; ten at once against
+the budget refuse with 429 and nothing 5xx.
+
+**Would change my mind:** a second operator, at which point a key — the
+production step this deliberately is not — replaces the courtesy limit with a
+real one, or a second instance replaces the in-memory bucket with a shared
+one.
 
 ### 7c. The UI — Streamlit Community Cloud
 

@@ -1636,6 +1636,18 @@ last check is why the placeholder currently in `models/` cannot reach a public
 URL by accident. Setup, release ritual, rollback and teardown:
 [`docs/deploy.md`](docs/deploy.md).
 
+**Two courtesy limits, and what they are not.** Authentication is a non-goal
+and stays one: no key, no account. What the public endpoint does carry is a
+4 MB body cap checked before parsing (twice the largest legitimate request)
+and, on the expensive routes only — `/rank`, the board flow's `score` and
+`rank` — a per-address budget of six at once refilling at twelve a minute,
+answered with 429 and `Retry-After` rather than a queue that slows everyone.
+`/predict` and `/health` are unlimited. It is in memory on one instance and
+keyed by the forwarded address, so it protects the operator's own ranking from
+an accidental loop or a curious script, not from anyone determined; a key is
+the production step deliberately not taken ([`docs/design.md`](docs/design.md)
+§7b-ii).
+
 **Behaviour under load is measured, not assumed.** `python -m benchmarks.service <url>`
 runs six sections against a running service — warm sequential `/predict`
 (p50/p95), concurrent `/predict`, concurrent maximum-size `/rank`, peak RSS
@@ -1644,10 +1656,10 @@ burst with no rate limit — each a behaviour with a pass condition, and writes
 `reports/benchmark_<label>.md`. Against a container capped at one core and the
 instance's 512 MB
 ([`reports/benchmark_local_container.md`](reports/benchmark_local_container.md)):
-no 5xx anywhere, memory flat at 256 MB across five full rankings, every abuse
-case a 422 — including a 5 MB title, which the first run found the service
+no 5xx anywhere, memory flat across five full rankings, every abuse case a
+4xx — including a 5 MB title, which the first run found the service
 *accepting and scoring*; text fields are now capped at ten times the longest
-real value. The finding to carry to the free instance: four concurrent
+real value and the body at 4 MB before parsing. The finding to carry to the free instance: four concurrent
 250-posting rankings took 8.4 s each on one core, so on a tenth of a CPU two
 callers ranking full batches at once would push each other past the 90 s rule.
 The cap is calibrated for one caller at a time, and there is no rate limit by

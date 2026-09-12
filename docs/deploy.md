@@ -312,6 +312,8 @@ comes back within the criterion.** Until then it is provisional.
 | `await_release.sh` times out | the build failed, so the old revision is still serving | read Render's build log |
 | Build fails in `src.inference.fetch` | the published bytes do not match the published checksums | re-cut the release; do not force it |
 | Build fails in `assert_is_full_pipeline` | the artifact is not a fitted pipeline in the serving environment — usually a booster written by a different XGBoost than the image installs | re-freeze in an environment matching the image |
+| A caller gets 429 with `Retry-After` on `/rank` or the board flow | the per-address budget on expensive routes: six at once, twelve a minute (`api/protection.py`) | wait it out; a client ranking one board never hits it |
+| A caller gets 413 | the body was over 4 MB before parsing | fewer postings per request; a page is 250 |
 | Smoke: "model_loaded: false" | `MODEL_TAG` was empty when the image was built | check the build log's `artifact tag:` line |
 | Smoke: "fitted on the SYNTHETIC panel" | working as designed | freeze against the real panel first |
 | Smoke: malformed payload returned 500 | a validation gap; bad input must be a 4xx | fix `api/schemas.py`, add the case to `tests/test_api.py` |

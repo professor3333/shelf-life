@@ -26,14 +26,21 @@ from fastapi.testclient import TestClient
 from test_inference import EXPECTED_PROBABILITY, FIXED_POSTING, FIXED_T
 
 from api.main import create_app
+from api.protection import TokenBuckets
 from api.schemas import PostingRequest
 from src.inference.contract import FIELDS
 from tests.conftest import FROZEN_RUN
 
 
+def generous() -> TokenBuckets:
+    """A bucket that never refuses: these tests are about the routes, not the
+    limiter, which has its own tests in `test_protection.py`."""
+    return TokenBuckets(burst=1_000_000, per_minute=6e7)
+
+
 @pytest.fixture(scope="module")
 def client(synthetic_artifact):
-    with TestClient(create_app(synthetic_artifact)) as test_client:
+    with TestClient(create_app(synthetic_artifact, buckets=generous())) as test_client:
         yield test_client
 
 
@@ -41,7 +48,7 @@ def client(synthetic_artifact):
 def modelless_client(tmp_path_factory):
     """An app whose artifact does not exist. The state a fresh deploy is in."""
     missing = tmp_path_factory.mktemp("empty") / "absent.joblib"
-    with TestClient(create_app(missing)) as test_client:
+    with TestClient(create_app(missing, buckets=generous())) as test_client:
         yield test_client
 
 
