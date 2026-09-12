@@ -44,7 +44,9 @@ import time
 CAPTION = "Will this job posting come off the board soon?"
 
 #: The page opens on the board-ranking mode — the product (`design.md` §15).
-#: Its absence would mean the deployed UI is the single-posting demo again.
+#: Its absence, when a model is serving, would mean the deployed UI is the
+#: single-posting demo again. With no model the page stops at the warning
+#: before either mode, deliberately, so the mode is only required then.
 RANK_MODE = "Rank a board"
 
 #: What the app says when the API is unreachable (`app/client.py`).
@@ -111,9 +113,6 @@ def main(argv: list[str]) -> int:
     if CAPTION not in text:
         print("UI SMOKE FAIL: the app did not render its caption in time", file=sys.stderr)
         return 1
-    if RANK_MODE not in text:
-        print("UI SMOKE FAIL: the page has no 'Rank a board' mode", file=sys.stderr)
-        return 1
     if UNREACHABLE in text:
         print(
             "UI SMOKE FAIL: the UI cannot reach the API. Check the SHELF_LIFE_API secret on "
@@ -124,7 +123,13 @@ def main(argv: list[str]) -> int:
     if MODEL_LESS in text:
         print("ok  reached the API — it is up with no model loaded (the deliberate state)")
     elif MODEL_SERVING in text:
-        print("ok  reached the API — a model is serving")
+        if RANK_MODE not in text:
+            print(
+                "UI SMOKE FAIL: a model is serving but the page has no 'Rank a board' mode",
+                file=sys.stderr,
+            )
+            return 1
+        print("ok  reached the API — a model is serving; the page opens on 'Rank a board'")
     else:
         print(
             "UI SMOKE FAIL: rendered, but said nothing recognisable about the API", file=sys.stderr
