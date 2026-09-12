@@ -1980,3 +1980,49 @@ the test `test_the_artifact_names_everything_it_is_traceable_to` pins the list:
 everything" stops being one person's habit and a captured diff might be the
 cheaper enforcement. Or a run so long that committing between the comparison
 and the freeze is a real cost — it is seconds here.
+
+---
+
+## 17. External validity — **DECIDED 2026-09-12: out of scope for this build, and said so**
+
+The labelled panel is seven boards: six employers on Greenhouse and
+python_org. Everything this build can say about *a board it has never seen*
+is said about a board of that kind — §4a's transfer gate is scoped to it in
+so many words — and nothing here can say anything about a board of a
+different kind, because there is none in the data.
+
+There could have been. arbeitnow is 78% of the collected postings and is
+excluded entirely, not because its postings are unlabelable in principle but
+because the crawls that collected them were truncated at a page cap, so a
+posting's absence meant *fell past page 8*, not *removed*
+(`docs/problem_definition.md` §4). That is an upstream collection defect. It
+is left unfixed **on purpose**: this build's assignment is the mess it was
+handed, and repairing the scraper to make the data better would delete the
+lesson (`README`: the non-goals). The cost of that choice is exactly the
+narrow source family above, and it is a cost, not a footnote.
+
+**What this build claims, and does not.** Transfer, if the gate passes, is
+transfer *within* a source family. "Unseen-board performance" on a board
+whose template, cadence and audience resemble none of the seven is not
+measured and is not claimed — the README's failure mode #2 and the model
+card's limitations say so, and the words *arbitrary boards* appear in this
+repository only to be refused.
+
+**What v2 would need, in order.** Not more models.
+
+1. Fix the collector's completeness: crawl a board to its end, or record
+   that it did not, per run — so absence can mean removal on every source.
+2. Bring in genuinely different families: at least one aggregator with a
+   complete crawl (arbeitnow itself, once its crawls are whole), one ATS
+   that is not Greenhouse, one non-English board. Different templates,
+   different housekeeping habits, different base rates.
+3. Only then re-run §4a's leave-one-*family*-out, which is the measurement
+   the present leave-one-board-out is a stand-in for.
+
+Until then the honest sentence is the one on the model card: fitted to these
+boards; applicable, if the gate says so, to boards of their kind.
+
+**Would change my mind:** nothing about the scope of this build — it is a
+learning project with a defined end. About v2: a second family whose base
+rate and template were close enough to Greenhouse's that adding it changed
+no number, which would say the family boundary was drawn in the wrong place.

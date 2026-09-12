@@ -148,7 +148,12 @@ Wilson interval is not a bootstrap interval for predictive performance.
 Limitations include daily interval censoring and horizon-boundary ambiguity,
 missed observations, reappearance/relisting, short panel depth, few independent
 removal events, a small incident cohort, unequal board coverage and structural
-missingness. Excluding explicit identity does not remove source confounding:
+missingness. **The source family is narrow by construction**: six Greenhouse
+boards and python_org, because the collector's page cap made the largest
+source (arbeitnow, 78% of postings) unlabelable; nothing here measures or
+claims performance on a board of a different kind. Fixing the collector and
+adding genuinely different families is a v2 concern, recorded in design §17,
+not a gate on this build. Excluding explicit identity does not remove source confounding:
 the H=1 [fingerprint diagnostic](reports/board_fingerprint.md) recovered board
 identity with 100% accuracy from production features. That diagnostic is not a
 disappearance score or evidence of transfer. Imputed board context and repeated
