@@ -1642,6 +1642,20 @@ H=1 validation block. On the label of 2026-09-09 to 2026-09-11 it was not —
 every incident row was positive and no incumbent row was — and that is the
 signature the audit's first verdict now names in one sentence.
 
+**Implemented in the UI, 2026-09-12.** The Streamlit page opens on *Rank a
+board* and keeps the single-posting form as the second mode, because a UI
+that demonstrated `/predict` alone demonstrated the narrower promise this
+section retired. The one design question it raised was the batch cap:
+`/rank` accepts 250 postings (`MAX_BATCH`, a measurement) and a day's board
+is ~1,150, so the board is paged — and under a budget, paging is only honest
+if the pages are merged by the service's own rule and the budget applied once
+to the union, which `app/client.py` `rank_board` does and a test holds equal
+to the unpaged ranking. The cap itself was *not* raised: the 2026-09-12
+baseline puts the worst-case cold start at 52 s, so 250 postings plus a wake
+is ~75 s against the 90 s rule, and 500 would be over it. The cap is tighter
+than the day it was set, not looser, and raising it stays a measurement
+against the deployed instance with a real artifact.
+
 **Would change my mind:** an incident cohort large enough to evaluate on its
 own *and* a persistent gap between its rate and the stock's after the label is
 known to be sound. That would mean arrival itself carries hazard, and the

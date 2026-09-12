@@ -92,11 +92,105 @@ class Api:
         return self._get("/contract")  # type: ignore[return-value]
 
     def predict(self, payload: dict) -> dict:
+        return self._post("/predict", payload)
+
+    def rank(
+        self, postings: list[dict], budget: int | None = None, as_of: str | None = None
+    ) -> dict:
+        """One `/rank` call: at most the service's page of postings."""
+        body: dict = {"postings": postings}
+        if budget is not None:
+            body["budget"] = budget
+        if as_of is not None:
+            body["as_of"] = as_of
+        return self._post("/rank", body)
+
+    def _post(self, path: str, body: dict) -> dict:
         try:
-            response = requests.post(f"{self.base_url}/predict", json=payload, timeout=TIMEOUT)
+            response = requests.post(f"{self.base_url}{path}", json=body, timeout=TIMEOUT)
         except requests.RequestException as error:
             raise ApiError(f"cannot reach the API at {self.base_url}: {error}") from error
         return _unwrap(response)  # type: ignore[return-value]
+
+
+#: What `/rank` calls the operating point when a batch's own budget set it. The
+#: merged, whole-board ranking below reports its own name for the same idea, so
+#: a reader can tell "the service ranked this batch" from "the client merged
+#: several batches" — they agree by construction, but they are not the same call.
+BOARD_BUDGET = "board_budget"
+
+
+def rank_board(
+    api: Api,
+    postings: list[dict],
+    budget: int,
+    as_of: str | None = None,
+    page_size: int | None = None,
+) -> dict:
+    """Rank a whole board under one budget, in pages the service will accept.
+
+    `/rank` caps a request at `rank_max_batch` postings (250 on the free
+    instance — `src.inference.predict.MAX_BATCH`, a measurement, not a round
+    number), and a day's board is about 1,150. So the board is sent in pages.
+    Paging is only honest if the merged answer is the answer one big call would
+    have given, and with a budget it is not automatically so: the budget-th
+    score of each *page* is not the board's budget-th score. What makes the
+    merge exact is that `/rank` returns every posting's probability, so the
+    pages can be ranked here by the same rule the service uses on a batch —
+    descending probability, ties by input order — and the budget applied once,
+    to the union. `tests/test_app.py` holds this equal to the service's own
+    unpaged ranking on a board larger than a page.
+
+    Each page is sent *without* a budget, so the service applies its frozen
+    threshold to it; that threshold is returned as `frozen_threshold` beside
+    the board's budget-th score, which is `threshold_applied` here, because the
+    two are different operating points and a caller should see both.
+    """
+    if budget < 1:
+        raise ValueError("budget must be at least 1")
+    if not postings:
+        raise ValueError("no postings to rank")
+    size = page_size or int(api.health().get("rank_max_batch") or 1)
+    if size < 1:
+        raise ValueError("page size must be at least 1")
+
+    scored: list[tuple[int, float, dict]] = []
+    frozen_threshold: float | None = None
+    meta: dict = {}
+    pages = 0
+    for start in range(0, len(postings), size):
+        page = postings[start : start + size]
+        response = api.rank(page, as_of=as_of)
+        pages += 1
+        if frozen_threshold is None:
+            frozen_threshold = float(response["threshold_applied"])
+            meta = {key: response[key] for key in ("horizon_days", "model", "dataset", "t")}
+        for offset, item in enumerate(response["postings"]):
+            scored.append((start + offset, float(item["probability"]), item))
+
+    # The service's rule, applied once to the whole board: descending
+    # probability, ties broken by the order the postings were sent in.
+    order = sorted(scored, key=lambda row: (-row[1], row[0]))
+    effective = min(budget, len(order))
+    threshold_applied = order[effective - 1][1]
+    ranked: list[dict | None] = [None] * len(postings)
+    for position, (index, probability, item) in enumerate(order, start=1):
+        ranked[index] = {
+            "rank": position,
+            "probability": probability,
+            "watch": position <= effective,
+            "board_context_supplied": bool(item["board_context_supplied"]),
+        }
+    return {
+        "postings": ranked,
+        "threshold_applied": threshold_applied,
+        "threshold_source": BOARD_BUDGET,
+        "frozen_threshold": frozen_threshold,
+        "budget": effective,
+        "pages": pages,
+        "page_size": size,
+        **meta,
+    }
 
 
 def _unwrap(response: requests.Response) -> object:
@@ -175,6 +269,56 @@ def verdict(prediction: dict) -> tuple[str, str]:
             f"{prediction['threshold']:.3f}, so this posting is not on the alert list."
         )
     return headline, explanation
+
+
+def parse_board(text: str, allowed: set[str]) -> list[dict]:
+    """A pasted or uploaded board -> the list `/rank` takes.
+
+    Two shapes, because the two people who would use this hold the board in
+    different forms: JSON (a list of postings, or `{"postings": [...]}`) from
+    anything that already speaks the API, and CSV with one column per field
+    for everything else. Columns the contract does not list are dropped rather
+    than sent — the API refuses unknown fields on purpose, and a board export
+    always carries columns that are nobody's business at prediction time.
+    Blank cells are omitted the way blank form fields are (`build_payload`).
+    """
+    import io
+    import json
+
+    stripped = text.strip()
+    if not stripped:
+        return []
+    rows: list[dict]
+    if stripped[0] in "[{":
+        loaded = json.loads(stripped)
+        rows = loaded["postings"] if isinstance(loaded, dict) else loaded
+        if not isinstance(rows, list):
+            raise ValueError('JSON must be a list of postings or {"postings": [...]}')
+    else:
+        import pandas as pd
+
+        frame = pd.read_csv(io.StringIO(stripped))
+        rows = frame.astype(object).where(frame.notna(), None).to_dict("records")
+    postings = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("every posting must be an object")
+        kept = build_payload({k: v for k, v in row.items() if k in allowed})
+        if "title" not in kept:
+            raise ValueError("every posting needs a title")
+        postings.append(kept)
+    return postings
+
+
+#: Five postings a stranger can rank without a board of their own: the same
+#: batch the deployed smoke test sends, so what the UI shows is what CI checked.
+EXAMPLE_BOARD_CSV = """title,location,salary_raw,content_chars,first_published
+Senior Data Engineer,Berlin,120000 - 160000 USD,1400,2026-08-20
+Werkstudent Marketing (m/w/d),München,,600,2026-09-01
+"Staff Software Engineer, Infrastructure",Remote,200000 - 260000 USD,2800,2026-08-10
+Customer Support Specialist,Dublin,,900,2026-09-05
+Head of Product,London,,2100,2026-07-28
+"""
 
 
 #: Shown under every result. Wording taken from the problem definition rather

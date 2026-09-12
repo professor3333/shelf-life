@@ -1,6 +1,15 @@
-"""The form somebody who does not read JSON can use.
+"""The page somebody who does not read JSON can use: a board, ranked; or one posting.
 
     Streamlit  ──HTTP──>  FastAPI  ──>  the frozen pipeline
+
+**Ranking a board comes first**, because that is what the model is for
+(`docs/design.md` §15): give it today's board and a budget — how many postings
+a person can actually read — and get back the ones most likely to be gone
+within the horizon. The single-posting form is the second mode, kept because it
+is the form of the question a person holding one job ad asks. The board is
+sent to `/rank` in pages the service will accept and merged here by the
+service's own rule (`app/client.py` `rank_board`), so a board larger than one
+request is still ranked once, under one budget.
 
 Three rules this file keeps, and each one is a line it would be easy to cross:
 
@@ -41,10 +50,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.client import (  # noqa: E402
     API_URL_ENV,
     CAVEAT,
+    EXAMPLE_BOARD_CSV,
     Api,
     ApiError,
     api_url_from,
     build_payload,
+    parse_board,
+    rank_board,
     verdict,
     warnings_for,
 )
@@ -132,6 +144,117 @@ with st.sidebar:
         "budget — the number of postings a person can actually read in a day — "
         "not left at 0.5."
     )
+
+# --- which question ----------------------------------------------------------
+
+RANK, ONE = "Rank a board", "One posting"
+mode = st.radio("What do you have?", (RANK, ONE), horizontal=True)
+
+# --- a board, ranked under a budget -------------------------------------------
+
+if mode == RANK:
+    st.subheader("Today's board")
+    st.caption(
+        'Paste or upload the postings — JSON (a list, or `{"postings": [...]}`) or CSV '
+        "with one column per field. Fields the API does not accept are dropped; "
+        "`/contract` lists the ones it does. The service ranks at most "
+        f"{health.get('rank_max_batch', '?')} postings per request, so a larger board is "
+        "sent in pages and merged here by the same rule, under one budget."
+    )
+    uploaded = st.file_uploader("Upload a board", type=("csv", "json"))
+    pasted = st.text_area(
+        "…or paste it",
+        height=160,
+        placeholder=EXAMPLE_BOARD_CSV,
+        help="The placeholder is a real five-posting board; the download below has it.",
+    )
+    st.download_button(
+        "Download the example board (CSV)",
+        EXAMPLE_BOARD_CSV,
+        file_name="example_board.csv",
+        mime="text/csv",
+    )
+    left, right = st.columns(2)
+    with left:
+        budget = st.number_input(
+            "Budget — postings you will read today",
+            min_value=1,
+            value=20,
+            step=1,
+            help="The operating point is the budget-th score on this board: exactly this "
+            "many postings are flagged, and the threshold that implies is shown.",
+        )
+    with right:
+        as_of_date = st.date_input("As of", value=None, format="YYYY-MM-DD")
+    rank_it = st.button("Rank", type="primary")
+
+    if rank_it:
+        text = uploaded.getvalue().decode("utf-8") if uploaded is not None else pasted
+        try:
+            allowed = {row["field"] for row in api.contract()}
+            board = parse_board(text, allowed)
+        except (ApiError, ValueError) as error:
+            st.error(f"could not read the board: {error}")
+            st.stop()
+        if not board:
+            st.error("No postings. Paste a board, upload one, or use the example.")
+            st.stop()
+
+        try:
+            with st.spinner(f"Ranking {len(board)} postings…"):
+                ranking = rank_board(api, board, budget=int(budget), as_of=_iso(as_of_date))
+        except ApiError as error:
+            st.error(str(error))
+            st.stop()
+
+        table = pd.DataFrame(
+            {
+                "rank": [row["rank"] for row in ranking["postings"]],
+                "flagged": [row["watch"] for row in ranking["postings"]],
+                "probability": [row["probability"] for row in ranking["postings"]],
+                "title": [posting.get("title") for posting in board],
+                "location": [posting.get("location") for posting in board],
+            }
+        ).sort_values("rank")
+        flagged = table[table["flagged"]]
+
+        horizon = ranking["horizon_days"]
+        st.subheader(
+            f"{len(flagged)} of {len(board)} flagged as likely to be removed "
+            f"within {horizon} day{'s' if horizon != 1 else ''}"
+        )
+        columns = st.columns(3)
+        columns[0].metric("Budget", ranking["budget"])
+        columns[1].metric("Threshold on this board", f"{ranking['threshold_applied']:.3f}")
+        columns[2].metric("Frozen threshold", f"{ranking['frozen_threshold']:.3f}")
+        st.caption(
+            "The board threshold is the budget-th score of what you sent — a property of "
+            "this board. The frozen threshold is the model's own operating point, chosen "
+            "on validation at the stated budget. They are different decisions, and "
+            f"this ranking used the first (source: `{ranking['threshold_source']}`, "
+            f"{ranking['pages']} request{'s' if ranking['pages'] != 1 else ''})."
+        )
+        st.dataframe(
+            flagged.drop(columns="flagged").style.format({"probability": "{:.1%}"}),
+            hide_index=True,
+            use_container_width=True,
+        )
+        with st.expander("The whole board, ranked"):
+            st.dataframe(
+                table.style.format({"probability": "{:.1%}"}),
+                hide_index=True,
+                use_container_width=True,
+            )
+        for note in warnings_for(health):
+            st.warning(note)
+        if not all(row["board_context_supplied"] for row in ranking["postings"]):
+            st.warning(
+                "Board context was not supplied for every posting, so the board-level "
+                "features were imputed to constants there. A submitted batch is not the "
+                "board: the service does not count it as one."
+            )
+        st.info(CAVEAT)
+    st.stop()
 
 # --- the form ---------------------------------------------------------------
 

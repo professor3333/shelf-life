@@ -842,6 +842,7 @@ def test_the_ui_check_reads_the_sentences_the_app_actually_writes() -> None:
     assert module.UNREACHABLE in client, "the sentence the client writes when the API is down"
     assert module.MODEL_LESS in app, "the warning for the deliberate model-less deployment"
     assert module.MODEL_SERVING in app, "the sidebar heading shown when a model is serving"
+    assert f'"{module.RANK_MODE}"' in app, "the board-ranking mode's label"
 
 
 def test_the_deployed_ui_is_verified_after_app_changes(workflow_text: str) -> None:

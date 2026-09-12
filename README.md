@@ -736,9 +736,18 @@ Three properties worth stating, because each is a decision:
   wrong.
 
 The batch cap is **250 postings**, from measurement rather than taste: 1.42 s on
-a full core, ~23 s at the free instance's 0.1 vCPU, ~55 s worst case if the
-request also wakes a sleeping container, against the 90 s stop rule. A day's
-board is ~1,150 postings, so a full day is deliberately several pages.
+a full core, ~23 s at the free instance's 0.1 vCPU, and with the measured
+52 s worst-case cold start ([`reports/cold_start_baseline.md`](reports/cold_start_baseline.md))
+~75 s worst case if the request also wakes a sleeping container, against the
+90 s stop rule. A day's board is ~1,150 postings, so a full day is deliberately
+several pages — and paging is only honest if the merged answer equals the one
+big call's, which under a budget it is not automatically: the budget-th score
+of a page is not the board's. `/health` reports the cap as `rank_max_batch`,
+and `app/client.py`'s `rank_board` is the reference paging client: it sends
+pages, ranks the union by the service's own rule (descending probability, ties
+by input order), applies the budget once, and reports both the board's
+threshold and the frozen one. A test holds it equal to the service's unpaged
+ranking on a 600-posting board.
 
 **When the headline number arrives it will carry an interval.** PR-AUC,
 precision, recall, Brier and ECE each get a 95% interval from resampling
@@ -1197,8 +1206,16 @@ caller may send, and whether somebody holding one posting could know it.
 SHELF_LIFE_API=http://localhost:8000 streamlit run app/streamlit_app.py
 ```
 
-A form, a probability, the threshold it was compared against, and the caveat on
-screen rather than in a footnote.
+Two modes, and the board comes first. **Rank a board**: paste or upload
+today's postings (JSON or CSV, one column per `/contract` field; unknown
+columns are dropped), set the budget — how many you will actually read — and
+get back exactly that many, ranked, with the board's threshold and the frozen
+one shown side by side because they are different decisions. Boards larger
+than the service's cap are paged and merged by the service's own rule; a
+600-posting board is three requests and one ranking. **One posting**: the form,
+a probability, the threshold it was compared against. The caveat is on screen
+in both, not in a footnote. An example five-posting board is downloadable from
+the page.
 
 ### Docker
 

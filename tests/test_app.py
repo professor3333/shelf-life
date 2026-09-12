@@ -24,11 +24,13 @@ from test_inference import EXPECTED_PROBABILITY, FIXED_POSTING, FIXED_T
 
 from api.main import create_app
 from app.client import (
+    BOARD_BUDGET,
     Api,
     ApiError,
     _detail,
     api_url_from,
     build_payload,
+    rank_board,
     verdict,
     warnings_for,
 )
@@ -166,6 +168,116 @@ def test_health_and_contract_come_back_through_the_client(wired_api):
     assert any(row["field"] == "title" for row in wired_api.contract())
 
 
+# --- a whole board, in pages, ranked once --------------------------------------
+
+
+def _board(n: int) -> list[dict]:
+    """`n` distinct postings, varied enough that scores are not all equal."""
+    titles = ("Senior Data Engineer", "Werkstudent Marketing", "Staff Engineer", "Head of Product")
+    return [
+        {
+            **FIXED_POSTING,
+            "title": f"{titles[i % len(titles)]} {i}",
+            "content_chars": 400 + (i * 37) % 2600,
+            "first_published": f"2026-0{7 + i % 2}-{1 + i % 27:02d}T00:00:00Z",
+        }
+        for i in range(n)
+    ]
+
+
+def test_ranking_a_board_in_pages_equals_ranking_it_at_once(
+    wired_api, synthetic_artifact, monkeypatch
+):
+    """The property that makes paging honest.
+
+    The service caps a batch at `MAX_BATCH`, a day's board is larger, and the
+    budget-th score of a page is not the board's budget-th score. `rank_board`
+    merges the pages by the service's own rule and applies the budget once;
+    this holds the result equal to `Predictor.rank` on the whole board — the
+    unpaged answer the service would give if it accepted the batch.
+    """
+    from src.inference import predict as predict_module
+    from src.inference.predict import MAX_BATCH, Predictor
+
+    board = _board(2 * MAX_BATCH + 100)
+    budget = 20
+    paged = rank_board(wired_api, board, budget=budget, as_of=FIXED_T)
+    # The oracle is the service's own rule with the cap lifted — what one big
+    # call would answer if the instance could afford it.
+    monkeypatch.setattr(predict_module, "MAX_BATCH", len(board))
+    whole = Predictor.load(synthetic_artifact).rank(board, t=FIXED_T, budget=budget)
+
+    assert paged["pages"] == 3 and paged["page_size"] == MAX_BATCH
+    assert paged["budget"] == whole.budget == budget
+    assert paged["threshold_applied"] == pytest.approx(whole.threshold_applied)
+    assert [p["rank"] for p in paged["postings"]] == [p.rank for p in whole.postings]
+    assert [p["watch"] for p in paged["postings"]] == [p.watch for p in whole.postings]
+    assert [p["probability"] for p in paged["postings"]] == pytest.approx(
+        [p.probability for p in whole.postings]
+    )
+    assert sum(p["watch"] for p in paged["postings"]) == budget
+    assert paged["threshold_source"] == BOARD_BUDGET
+    assert paged["frozen_threshold"] == pytest.approx(wired_api.health()["threshold"])
+
+
+def test_the_page_size_comes_from_the_service_not_a_copy(wired_api):
+    from src.inference.predict import MAX_BATCH
+
+    assert wired_api.health()["rank_max_batch"] == MAX_BATCH
+
+
+def test_ties_are_broken_by_input_order_across_pages(monkeypatch):
+    """Two identical postings on different pages: the earlier one ranks first,
+    exactly as the service would rank them in one batch."""
+
+    class Stub:
+        def health(self):
+            return {"rank_max_batch": 2}
+
+        def rank(self, postings, budget=None, as_of=None):
+            return {
+                "postings": [
+                    {"probability": 0.5, "board_context_supplied": False} for _ in postings
+                ],
+                "threshold_applied": 0.3,
+                "horizon_days": 7,
+                "model": "m",
+                "dataset": "synthetic",
+                "t": "t",
+            }
+
+    out = rank_board(Stub(), [{"title": str(i)} for i in range(5)], budget=2)  # type: ignore[arg-type]
+    assert [p["rank"] for p in out["postings"]] == [1, 2, 3, 4, 5]
+    assert [p["watch"] for p in out["postings"]] == [True, True, False, False, False]
+    assert out["pages"] == 3 and out["threshold_applied"] == 0.5
+
+
+def test_a_board_is_read_from_json_or_csv_and_unknown_columns_are_dropped():
+    from app.client import EXAMPLE_BOARD_CSV, parse_board
+
+    allowed = {"title", "location", "salary_raw", "content_chars", "first_published"}
+    from_csv = parse_board(EXAMPLE_BOARD_CSV, allowed)
+    assert len(from_csv) == 5
+    assert from_csv[0]["title"] == "Senior Data Engineer"
+    assert "salary_raw" not in from_csv[1], "a blank cell is omitted, not sent as NaN"
+    assert from_csv[0]["content_chars"] == 1400
+
+    as_list = parse_board('[{"title": "A", "url": "https://x", "location": "B"}]', allowed)
+    assert as_list == [{"title": "A", "location": "B"}], "url is not a field the API takes"
+    wrapped = parse_board('{"postings": [{"title": "A"}]}', allowed)
+    assert wrapped == [{"title": "A"}]
+    assert parse_board("   ", allowed) == []
+    with pytest.raises(ValueError, match="title"):
+        parse_board("location\nBerlin\n", allowed)
+
+
+def test_rank_board_refuses_nothing_and_a_zero_budget():
+    with pytest.raises(ValueError):
+        rank_board(Api("http://api"), [], budget=1)
+    with pytest.raises(ValueError):
+        rank_board(Api("http://api"), [{"title": "x"}], budget=0)
+
+
 # --- the separation ---------------------------------------------------------
 
 
@@ -204,9 +316,44 @@ def rendered(monkeypatch, wired_api):
     return test.run()
 
 
-def test_the_form_renders_without_error(rendered):
+def _one_posting_mode(rendered):
+    """Switch the page to the single-posting form. The board comes first."""
+    rendered.radio[0].set_value("One posting")
+    return rendered.run()
+
+
+def test_the_board_comes_first(rendered):
+    """The page opens on the product's question — a board, ranked under a
+    budget — and the single-posting form is the second mode."""
     assert not rendered.exception
     assert rendered.title[0].value == "shelf-life"
+    assert rendered.radio[0].value == "Rank a board"
+    assert any(widget.label.startswith("Budget") for widget in rendered.number_input)
+    assert not any(widget.label == "Title" for widget in rendered.text_input)
+
+
+def test_ranking_the_example_board_flags_the_budget_and_shows_both_thresholds(rendered):
+    """Paste the example board, ask for two, get exactly two flagged — through
+    the real client, the real API and the pipeline, with no socket."""
+    from app.client import EXAMPLE_BOARD_CSV
+
+    rendered.text_area[0].set_value(EXAMPLE_BOARD_CSV)
+    for widget in rendered.number_input:
+        if widget.label.startswith("Budget"):
+            widget.set_value(2)
+    rank = next(button for button in rendered.button if button.label == "Rank")
+    result = rank.click().run()
+
+    assert not result.exception
+    assert any(sub.value.startswith("2 of 5 flagged") for sub in result.subheader)
+    labels = {metric.label for metric in result.metric}
+    assert {"Budget", "Threshold on this board", "Frozen threshold"} <= labels
+    assert any("not the same as filled" in info.value for info in result.info)
+
+
+def test_the_form_renders_without_error(rendered):
+    rendered = _one_posting_mode(rendered)
+    assert not rendered.exception
     labels = {widget.label for widget in rendered.text_input}
     assert {"Title", "Location"} <= labels
 
@@ -218,6 +365,7 @@ def test_a_synthetic_model_is_announced_on_screen(rendered):
 
 
 def test_submitting_the_form_shows_a_probability_and_the_caveat(rendered):
+    rendered = _one_posting_mode(rendered)
     for widget in rendered.text_input:
         if widget.label == "Title":
             widget.set_value("Senior Data Engineer")

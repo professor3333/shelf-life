@@ -227,3 +227,9 @@ class HealthResponse(BaseModel):
     load_seconds: float | None = None
     ready_after_seconds: float | None = None
     rss_mb: float | None = None
+    #: The largest batch `/rank` accepts — `src.inference.predict.MAX_BATCH`,
+    #: which is a measurement against the instance rather than a round number.
+    #: Reported so a caller ranking a whole board can page by the service's
+    #: actual cap instead of a copy of it that would drift (`app/client.py`
+    #: `rank_board`). Present whether or not a model is loaded.
+    rank_max_batch: int = MAX_BATCH
