@@ -71,7 +71,6 @@ from src.models.metrics import (
     alert_budget,
     confusion_at,
     evaluate,
-    evaluate_by,
     expected_calibration_error,
     reliability_curve,
     threshold_for_budget,
@@ -85,7 +84,12 @@ from src.models.train_baseline import (
     analytic_reference,
     prediction_days,
 )
-from src.models.uncertainty import bootstrap_block, format_table
+from src.models.uncertainty import (
+    bootstrap_block,
+    evaluate_by_with_evidence,
+    evidence_columns,
+    format_table,
+)
 
 DEFAULT_REPORT = Path("reports/model_comparison.md")
 
@@ -1156,7 +1160,12 @@ def write_report(
             "arbeitnow is excluded from labelled rows, but the remaining boards still",
             "differ. A model that works on one board is a per-board model.",
             "",
-            _table(by_source, ["source", "n", "positives", "base_rate", "pr_auc", "brier"]),
+            "Every row carries its evidence: rows, independent postings, positives, a",
+            "posting-clustered 95% interval on `pr_auc` and `precision_at_budget`, and a",
+            "`fragile` flag under thirty positives — a number on five events is a number",
+            "set by which five.",
+            "",
+            _table(by_source, evidence_columns("source")),
             "",
             "**That table scores each board with a model fitted on it**, which answers",
             "*does it work here* rather than *would it work somewhere new*. The section",
@@ -1165,9 +1174,7 @@ def write_report(
             *_generalisation_section(generalisation),
             "## Carried-over postings against unseen ones",
             "",
-            _table(
-                by_carryover, ["seen_in_train", "n", "positives", "base_rate", "pr_auc", "brier"]
-            ),
+            _table(by_carryover, evidence_columns("seen_in_train")),
             "",
             *_first_observation_section(by_first_observation),
             *_cohort_section(by_cohort),
@@ -1225,7 +1232,7 @@ def _cohort_section(table: pd.DataFrame | None) -> list[str]:
         "whether the *model* does. The incident cohort is small at every depth this panel",
         "has reached; read `n` and `positives` before the metric.",
         "",
-        _table(table, ["cohort", "n", "positives", "base_rate", "pr_auc", "brier"]),
+        _table(table, evidence_columns("cohort")),
         "",
     ]
 
@@ -1257,7 +1264,7 @@ def _first_observation_section(table: pd.DataFrame | None) -> list[str]:
         ]
     return [
         *lines,
-        _table(table, ["first_observation", "n", "positives", "base_rate", "pr_auc", "brier"]),
+        _table(table, evidence_columns("first_observation")),
         "",
     ]
 
@@ -1325,21 +1332,23 @@ def main() -> None:
             target = split.val["y"].astype(int)
             thresholds = threshold_sweep(target, scores, prediction_days(split.val))
             calibration = reliability_curve(target, scores)
-            by_source = evaluate_by(split.val, scores, "source", n_days=prediction_days(split.val))
-            by_carryover = evaluate_by(
+            by_source = evaluate_by_with_evidence(
+                split.val, scores, "source", n_days=prediction_days(split.val)
+            )
+            by_carryover = evaluate_by_with_evidence(
                 split.val, scores, "seen_in_train", n_days=prediction_days(split.val)
             )
             # The cohort columns are as-of-`t` and derived from the whole panel,
             # so the block is annotated from the frame rather than from itself —
             # and joined on keys, not index: `temporal_split` renumbers its
             # blocks, and `.loc` on the frame's index would pick other rows.
-            by_first_observation = evaluate_by(
+            by_first_observation = evaluate_by_with_evidence(
                 cohort_audit.attach_first_observation(split.val, frame),
                 scores,
                 "first_observation",
                 n_days=prediction_days(split.val),
             )
-            by_cohort = evaluate_by(
+            by_cohort = evaluate_by_with_evidence(
                 cohort_audit.attach_cohort(split.val, frame),
                 scores,
                 "cohort",

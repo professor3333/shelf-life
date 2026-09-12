@@ -481,6 +481,21 @@ incident flow is reported beside the first-observation and seen/unseen slices �
 the cohort audit says whether the *label* is indifferent to cohort, this says
 whether the model is.
 
+**Every breakdown row carries its evidence — added 2026-09-12.** Per-board
+positive rates on this panel run from 0% to 13.5%, and several boards and
+the incident cohort hold a handful of events; a PR-AUC on five positives is a
+number set by which five, and printed beside a real one it invites a
+comparison that cannot be made. So every row of every breakdown table —
+per board, by cohort, first-observation, seen/unseen — carries `n` rows,
+`postings` (the independent units), `positives`, a posting-clustered 95%
+interval on `pr_auc` and on `precision_at_budget`, and `fragile` under thirty
+positives (`uncertainty.evaluate_by_with_evidence`). The interval is the
+release evidence; the point estimate on a fragile row is an order of
+magnitude. Fixing this surfaced a latent bug in the headline path: one
+resample on which a statistic is undefined (nothing above the threshold)
+turned the whole percentile interval to `nan`; such resamples are now
+dropped like resamples with no positives.
+
 **The interval and the fold spread answer different questions**, and both are
 reported. The interval asks how much this block's number would move on a
 different sample of postings; the fold spread in `reports/model_comparison.md`
