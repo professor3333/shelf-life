@@ -88,9 +88,7 @@ def read(reports: Path = REPORTS) -> dict:
     ladder = _table(comparison, "model")
     horizon = _kv(comparison, "Horizon") or ""
     verdict = re.search(r"\*\*Chosen: ([^*]+)\*\* — ([^\n]+)", comparison)
-    fitted = [
-        row for row in ladder if row.get("val_pr_auc", "—") not in ("—", "") and row["model"]
-    ]
+    fitted = [row for row in ladder if row.get("val_pr_auc", "—") not in ("—", "") and row["model"]]
     best = max(fitted, key=lambda r: float(r["val_pr_auc"]), default=None)
     prior = next((r for r in ladder if r["model"] == "prior"), None)
     scored = [int(r["folds_scored"]) for r in ladder if r.get("folds_scored", "").isdigit()]
@@ -130,8 +128,11 @@ def render(state: dict) -> str:
         f"{folds.get('short by', '?')}, projected {folds.get('projected', '?')}). Legal cuts "
         f"today: {state['legal_cuts']}.",
         "- **H=7 held-out block** ([`test_results.md`](reports/test_results.md)): "
-        + ("**opened** — the result is in the report." if state["held_out_opened"]
-           else "**not opened**; the report records the refusal."),
+        + (
+            "**opened** — the result is in the report."
+            if state["held_out_opened"]
+            else "**not opened**; the report records the refusal."
+        ),
     ]
     if state["verdict"]:
         chosen, reason = state["verdict"]
