@@ -43,6 +43,11 @@ def _why(name: str) -> str:
     return FIELDS_BY_NAME[name].availability
 
 
+#: The longest text a posting field accepts: ten times the longest real value
+#: on the panel (a 147-character location). See the field comments below.
+TEXT_MAX = 1500
+
+
 class PostingRequest(BaseModel):
     """One job posting, as somebody looking at it could describe it.
 
@@ -77,18 +82,29 @@ class PostingRequest(BaseModel):
         },
     )
 
-    title: str = Field(min_length=1, description=_why("title"))
-    location: str | None = Field(default=None, description=_why("location"))
-    salary_raw: str | None = Field(default=None, description=_why("salary_raw"))
-    departments: str | None = Field(default=None, description=_why("departments"))
-    offices: str | None = Field(default=None, description=_why("offices"))
+    # Text fields are capped. The longest real values on the panel are a
+    # 89-character title, a 147-character location and a 112-character
+    # offices string; `TEXT_MAX` is ten times the longest of those. Without a
+    # cap a 5 MB title was accepted and scored (the service benchmark found
+    # it on 2026-09-12) — not a crash, but a request that costs the free
+    # instance a second of CPU for a caller who typed nothing a posting could
+    # contain. Over the cap is a 422 before any feature is derived.
+    title: str = Field(min_length=1, max_length=TEXT_MAX, description=_why("title"))
+    location: str | None = Field(default=None, max_length=TEXT_MAX, description=_why("location"))
+    salary_raw: str | None = Field(
+        default=None, max_length=TEXT_MAX, description=_why("salary_raw")
+    )
+    departments: str | None = Field(
+        default=None, max_length=TEXT_MAX, description=_why("departments")
+    )
+    offices: str | None = Field(default=None, max_length=TEXT_MAX, description=_why("offices"))
     n_offices: float | None = Field(default=None, ge=0, description=_why("n_offices"))
     n_metadata: float | None = Field(default=None, ge=0, description=_why("n_metadata"))
     content_chars: float | None = Field(default=None, ge=0, description=_why("content_chars"))
     first_published: datetime | None = Field(default=None, description=_why("first_published"))
     updated_at: datetime | None = Field(default=None, description=_why("updated_at"))
-    source: str | None = Field(default=None, description=_why("source"))
-    company: str | None = Field(default=None, description=_why("company"))
+    source: str | None = Field(default=None, max_length=TEXT_MAX, description=_why("source"))
+    company: str | None = Field(default=None, max_length=TEXT_MAX, description=_why("company"))
 
     as_of: datetime | None = Field(
         default=None,

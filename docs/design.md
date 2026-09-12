@@ -678,6 +678,40 @@ required, and a trial credit is not a free tier, respectively.
 Vercel and Netlify cap a Python bundle far below what scikit-learn and XGBoost
 weigh, before the fitted pipeline is even considered.
 
+### 7b-ii. Behaviour under load — **MEASURED 2026-09-12**
+
+`MAX_BATCH` came from one measurement — one request, one core. `benchmarks/
+service.py` asks what that measurement did not: several callers at once, the
+latency distribution once warm, memory across maximum-size rankings, and
+abuse. Against a container capped at one core and 512 MB, with the rehearsal
+artifact (`reports/benchmark_local_container.md`):
+
+| section | result |
+|---|---|
+| warm `/predict`, sequential ×50 | p50 29 ms, p95 103 ms, all 200 |
+| concurrent `/predict` ×8, 100 requests | p50 270 ms, p95 354 ms, no 5xx |
+| concurrent `/rank` ×4, 250 postings each | p50 **8.4 s**, all 200, every ranking flagged exactly 20 |
+| peak RSS across 5 rankings of 250 | 256 MB → 256 MB, flat |
+| malformed and oversized | every case a 422 — after a fix |
+| a burst of 32, no rate limit | all answered in 1.1 s wall, none refused |
+
+Two things it found. **A 5 MB title was accepted and scored** — not a crash,
+but a request that would cost the free instance a second of CPU for a caller
+who typed nothing a posting could contain; text fields are now capped at
+`TEXT_MAX = 1500`, ten times the longest real value on the panel. And **the
+cap is calibrated for one caller at a time**: four concurrent full batches
+took 8.4 s each on one core, which on a tenth of a CPU is ~85 s — two callers
+ranking full batches at once would push each other past the 90 s rule. There
+is no rate limit, by design (the non-goals), so the honest statement is that
+the free instance serves one operator ranking one board; a second concurrent
+operator costs both of them latency, never correctness. The same functions
+run in-process in the suite on every push, so the behaviours — no 5xx, flat
+memory, 4xx on abuse — are held, and only the absolute numbers are this
+machine's.
+
+**Would change my mind:** a second operator, at which point either a limit or
+a second instance is the fix, and "no rate limit" stops being a non-goal.
+
 ### 7c. The UI — Streamlit Community Cloud
 
 Free, no card, roughly 1 GB of memory, deployed straight from this GitHub
