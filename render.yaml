@@ -11,7 +11,7 @@
 # this came out of.
 
 services:
-  - name: shelf-life
+  - name: shelf-life-rehearsal
     type: web
     runtime: docker
     plan: free
