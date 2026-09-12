@@ -43,6 +43,10 @@ import time
 #: how "the app rendered" is decided — the host's own pages never contain it.
 CAPTION = "Will this job posting come off the board soon?"
 
+#: The page opens on the board-ranking mode — the product (`design.md` §15).
+#: Its absence would mean the deployed UI is the single-posting demo again.
+RANK_MODE = "Rank a board"
+
 #: What the app says when the API is unreachable (`app/client.py`).
 UNREACHABLE = "cannot reach the API"
 
@@ -106,6 +110,9 @@ def main(argv: list[str]) -> int:
         return 1
     if CAPTION not in text:
         print("UI SMOKE FAIL: the app did not render its caption in time", file=sys.stderr)
+        return 1
+    if RANK_MODE not in text:
+        print("UI SMOKE FAIL: the page has no 'Rank a board' mode", file=sys.stderr)
         return 1
     if UNREACHABLE in text:
         print(

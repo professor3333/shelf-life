@@ -92,16 +92,22 @@ class Ranked:
 #: Measured on the XGBoost artifact at this size: **1.42 s** on a full core,
 #: peak RSS 211 MB with no growth across the batch. The free instance has
 #: 0.1 vCPU, and the cold-start work in `docs/design.md` §7d ran **16x** slower
-#: there than locally (2.06 s against 32.65 s). Applying that factor puts 250 at
-#: roughly 23 s, and a request may already have spent 32.65 s waking the
-#: instance: **55 s worst case against the 90 s stop rule** §7e sets, with 211 MB
-#: against 512 MB.
+#: there than locally. Applying that factor puts 250 at roughly 23 s, and a
+#: request may already have spent the cold start waking the instance — which
+#: the three-cycle baseline of 2026-09-12 puts at **52 s worst case**, not the
+#: 32.65 s single sample this arithmetic was first done with
+#: (`reports/cold_start_baseline.md`). So: **~75 s worst case against the 90 s
+#: stop rule** §7e sets, with 211 MB against 512 MB. Doubling the cap would put
+#: that at ~98 s, over the rule. The cap is tighter than it was, not looser.
 #:
-#: Doubling it would put the worst case at 78 s, inside the rule but with no
-#: room for the rule to be wrong. A full day's board is about 1,150 postings, so
-#: this deliberately does not rank a whole day in one request — the caller
-#: pages. Raising it is a measurement against the deployed instance, not an edit
-#: to this line.
+#: A full day's board is about 1,150 postings, so this deliberately does not
+#: rank a whole day in one request — the caller pages, and `/health` reports
+#: this number as `rank_max_batch` so a caller pages by the service's cap and
+#: not a copy. `app/client.py` `rank_board` is the reference paging client: it
+#: merges the pages by the rule `rank` applies to a batch and applies the
+#: budget once, and a test holds its result equal to this method's on a board
+#: larger than a page. Raising the cap is a measurement against the deployed
+#: instance, not an edit to this line.
 MAX_BATCH = 250
 
 
