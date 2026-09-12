@@ -60,6 +60,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.data import cohort_audit
 from src.data.split import (
     SplitResult,
     SplitTooShallow,
@@ -70,7 +71,7 @@ from src.data.split import (
 from src.features.assemble import horizon_banner
 from src.features.preprocessing import features_and_target, fit_on_frame
 from src.inference import artifact as artifact_module
-from src.models import ledger, provenance
+from src.models import calibration, ledger, provenance
 from src.models.evaluate import calibration_summary, wave_forward_folds
 from src.models.experiments import (
     SYNTHETIC_PANEL_SOURCE,
@@ -115,6 +116,17 @@ class FrozenModel:
     #: not a result on its own — `src/models/uncertainty.py` says why the
     #: resampling unit is the posting rather than the row.
     test_intervals: dict[str, object]
+    #: The same intervals on the validation block, at the same frozen threshold,
+    #: so validation and test can be read against each other with a spread on
+    #: both sides rather than one — added 2026-09-12; until then only the test
+    #: block carried them.
+    validation_intervals: dict[str, object]
+    #: What `src/models/calibration.py` decided, and the numbers it decided on.
+    recalibration: dict
+    #: The model's performance on the incumbent stock against the incident
+    #: flow, on the test block. The cohort audit asks whether the *label* is
+    #: indifferent to cohort; this asks whether the *model* is.
+    by_cohort: pd.DataFrame
     #: The fragility note, or None when the block is big enough not to need one.
     test_fragility: str | None
     by_source: pd.DataFrame
@@ -178,6 +190,16 @@ def freeze(
     fit_on_frame(model, _fit_block(split, fitted_on))
 
     validation_scores = _score(model, split.val)
+
+    # Recalibration, by the rule fixed in `src/models/calibration.py` before
+    # any real validation ECE existed. Monotone, so the ranking and the alert
+    # list survive it (ties at the boundary aside); what changes is what the
+    # percentage shown to a person means. Fitted on validation only, and the
+    # decision travels on the artifact either way.
+    decision = calibration.decide(split.val["y"], validation_scores)
+    if decision.recalibrate:
+        model = calibration.recalibrate(model, split.val, split.val["y"])
+        validation_scores = _score(model, split.val)
     validation = evaluate(
         split.val["y"], validation_scores, prediction_days(split.val), budget_per_day
     )
@@ -205,6 +227,15 @@ def freeze(
         test=test,
         test_at_frozen_threshold=confusion_at(test_block["y"], test_scores, threshold),
         test_intervals=bootstrap_block(test_block, test_scores, float(threshold)),
+        validation_intervals=bootstrap_block(split.val, validation_scores, float(threshold)),
+        recalibration=decision.as_dict(),
+        by_cohort=evaluate_by(
+            cohort_audit.attach_cohort(test_block, split.frame),
+            test_scores,
+            "cohort",
+            n_days=prediction_days(test_block),
+            budget_per_day=budget_per_day,
+        ),
         test_fragility=fragility_note(test_block),
         by_source=evaluate_by(
             test_block,
@@ -227,6 +258,25 @@ def freeze(
         features=tuple(spec_features(spec, split)),
         fitted_on=fitted_on,
     )
+
+
+def _recalibration_lines(decision: dict) -> list[str]:
+    """What the pre-registered rule decided, stated before the test curve."""
+    head = (
+        "**Recalibrated** on validation (isotonic, wrapped around the estimator; the"
+        " artifact carries it)."
+        if decision["recalibrate"]
+        else "**Not recalibrated.**"
+    )
+    return [
+        f"{head} Rule, fixed 2026-09-12 in `src/models/calibration.py` before any real",
+        f"validation ECE existed: `{decision['rule']}`. On this validation block: ECE",
+        f"{decision['validation_ece']:.4f}, base rate {decision['validation_base_rate']:.4f},",
+        f"bound {decision['bound']:.4f}, {decision['validation_positives']} positives —",
+        f"{decision['reason']}. Recalibration is monotone, so it changes what the",
+        "percentage means and not who is flagged (ties at the boundary aside); the ECE",
+        "below is the test block's verdict on whether the curve transferred.",
+    ]
 
 
 def spec_features(spec, split: SplitResult) -> tuple[str, ...]:
@@ -272,6 +322,7 @@ def build_metadata(
         rules_version=int(panel["rules_version"].iloc[0]) if "rules_version" in panel else -1,
         lock_sha256=provenance.lock_sha256(),
         seed=RANDOM_STATE,
+        recalibration=frozen.recalibration,
     )
 
 
@@ -493,9 +544,16 @@ def write_report(
             "how well the model separates with where the operating point happened to land,",
             "and the artifact ships one threshold rather than a distribution of them.",
             "",
+            "**Test block:**",
+            "",
             *format_table(frozen.test_intervals),
             "",
             *([frozen.test_fragility, ""] if frozen.test_fragility else []),
+            "**Validation block, same threshold, same resampler** — so the side-by-side",
+            "table above can be read with a spread on both sides:",
+            "",
+            *format_table(frozen.validation_intervals),
+            "",
             "**Read the width, not the centre.** If an interval spans the baseline, the",
             "honest report is that this test set could not tell the model from the",
             "baseline — which is a result about the sample size and not a failure of the",
@@ -541,12 +599,28 @@ def write_report(
                 ["seen_in_train", "n", "positives", "base_rate", "pr_auc", "precision", "recall"],
             ),
             "",
+            "## Incumbent stock against incident flow",
+            "",
+            "`reports/cohort_audit.md` asks whether the *label* treats the postings that",
+            "were on the board when collection began (incumbent) like the ones that",
+            "arrived after (incident). This asks whether the *model* does: a score that",
+            "holds on one and collapses on the other has learned which population a row",
+            "came from, not how long postings last. The incident cohort is small at",
+            "every depth this panel has reached; read `n` and `positives` first.",
+            "",
+            _table(
+                frozen.by_cohort,
+                ["cohort", "n", "positives", "base_rate", "pr_auc", "precision", "recall"],
+            ),
+            "",
             "## Calibration on test",
             "",
             "Brier and ECE say how far the probabilities sit from the truth. They do",
             "not say which way, and a model that is uniformly overconfident scores the",
             "same as one that is confident in the wrong direction — so the curve is",
             "here too, and it is the one to read.",
+            "",
+            *_recalibration_lines(frozen.recalibration),
             "",
             _table(pd.DataFrame([frozen.calibration]), list(frozen.calibration)),
             "",

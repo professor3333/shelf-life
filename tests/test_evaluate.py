@@ -783,3 +783,40 @@ def test_the_first_observation_slice_is_reported_or_its_absence_is_said():
     text = "\n".join(_first_observation_section(present))
     assert "holds no first observations" not in text
     assert "| True |" in text and "| False |" in text
+
+
+def test_the_comparison_says_what_the_freeze_will_do_about_calibration():
+    """The rule's verdict is stated in the comparison report, before the freeze
+    applies it — so the decision is on record ahead of the test block, and a
+    reader of the validation curve sees what will be done about it."""
+    from src.models.evaluate import _cohort_section, _recalibration_verdict
+
+    will = "\n".join(
+        _recalibration_verdict(
+            {
+                "recalibrate": True,
+                "rule": "ece > 0.25 * base_rate and positives >= 30",
+                "reason": "validation ECE 0.0400 exceeds 0.25 × base rate 0.0800 = 0.0200",
+            }
+        )
+    )
+    assert "**will recalibrate**" in will and "ece > 0.25 * base_rate" in will
+    wont = "\n".join(
+        _recalibration_verdict({"recalibrate": False, "rule": "r", "reason": "within"})
+    )
+    assert "**will not recalibrate**" in wont
+    assert _recalibration_verdict(None) == []
+
+    table = pd.DataFrame(
+        {
+            "cohort": ["incident", "incumbent"],
+            "n": [20, 200],
+            "positives": [2, 20],
+            "base_rate": [0.1, 0.1],
+            "pr_auc": [0.2, 0.2],
+            "brier": [0.1, 0.1],
+        }
+    )
+    section = "\n".join(_cohort_section(table))
+    assert "## Incumbent stock against incident flow" in section and "incident" in section
+    assert _cohort_section(None) == []

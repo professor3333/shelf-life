@@ -51,6 +51,7 @@ from src.data.split import (
 )
 from src.features.assemble import horizon_banner
 from src.features.preprocessing import features_and_target, fit_on_frame
+from src.models import calibration as calibration_rule
 from src.models import ledger, provenance
 
 # `verdict` is aliased: `write_report` already has a `verdict` parameter holding
@@ -82,6 +83,7 @@ from src.models.train_baseline import (
     analytic_reference,
     prediction_days,
 )
+from src.models.uncertainty import bootstrap_block, format_table
 
 DEFAULT_REPORT = Path("reports/model_comparison.md")
 
@@ -947,6 +949,9 @@ def write_report(
     figures: list[Path] | None = None,
     prov: provenance.Provenance | None = None,
     by_first_observation: pd.DataFrame | None = None,
+    by_cohort: pd.DataFrame | None = None,
+    recalibration: dict | None = None,
+    validation_intervals: dict | None = None,
 ) -> None:
     reference = analytic_reference(frame)
     lines = [
@@ -1107,6 +1112,15 @@ def write_report(
             "",
             _table(calibration, ["bin_low", "bin_high", "n", "mean_predicted", "observed_rate"]),
             "",
+            *_recalibration_verdict(recalibration),
+            "## The chosen model's validation numbers, with intervals",
+            "",
+            "The same posting-clustered resampler the test block gets, at the threshold",
+            "the budget implies on this block — so the numbers above carry a spread",
+            "before the test block is opened, not only after.",
+            "",
+            *(format_table(validation_intervals) if validation_intervals else ["—"]),
+            "",
             "## Per source",
             "",
             "arbeitnow is excluded from labelled rows, but the remaining boards still",
@@ -1126,10 +1140,43 @@ def write_report(
             ),
             "",
             *_first_observation_section(by_first_observation),
+            *_cohort_section(by_cohort),
         ]
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n")
+
+
+def _recalibration_verdict(decision: dict | None) -> list[str]:
+    """What `freeze` will do about the curve above, said before it does it."""
+    if decision is None:
+        return []
+    verb = "**will recalibrate**" if decision["recalibrate"] else "**will not recalibrate**"
+    return [
+        f"By the rule fixed in `src/models/calibration.py` (`{decision['rule']}`), the",
+        f"freeze {verb} this model: {decision['reason']}. The rule was written before",
+        "any real validation ECE existed, so that the decision is made by the rule and",
+        "not by the number. Recalibration is monotone and changes what the percentage",
+        "means, not who is flagged.",
+        "",
+    ]
+
+
+def _cohort_section(table: pd.DataFrame | None) -> list[str]:
+    """The model on the incumbent stock against the incident flow."""
+    if table is None:
+        return []
+    return [
+        "## Incumbent stock against incident flow",
+        "",
+        "`reports/cohort_audit.md` asks whether the *label* treats the postings that were",
+        "on the board when collection began like the ones that arrived after. This asks",
+        "whether the *model* does. The incident cohort is small at every depth this panel",
+        "has reached; read `n` and `positives` before the metric.",
+        "",
+        _table(table, ["cohort", "n", "positives", "base_rate", "pr_auc", "brier"]),
+        "",
+    ]
 
 
 def _first_observation_section(table: pd.DataFrame | None) -> list[str]:
@@ -1203,7 +1250,8 @@ def main() -> None:
     figures: list[Path] = []
     summary = per_fold = verdict = thresholds = calibration = None
     generalisation = None
-    by_source = by_carryover = by_first_observation = blocker = None
+    by_source = by_carryover = by_first_observation = by_cohort = blocker = None
+    recalibration = validation_intervals = None
     try:
         split = temporal_split(frame, best_cuts(frame))
         summary, per_fold, val_scores = compare_models(split, args.budget)
@@ -1239,6 +1287,26 @@ def main() -> None:
                 scores,
                 "first_observation",
                 n_days=prediction_days(split.val),
+            )
+            by_cohort = evaluate_by(
+                cohort_audit.attach_cohort(split.val, frame),
+                scores,
+                "cohort",
+                n_days=prediction_days(split.val),
+            )
+            # What the freeze will do about calibration, decided by the rule and
+            # said here first; and the validation numbers with the spread the
+            # test block will get, at the threshold this block's budget implies.
+            recalibration = calibration_rule.decide(target, scores).as_dict()
+            validation_intervals = bootstrap_block(
+                split.val,
+                scores,
+                float(
+                    threshold_for_budget(
+                        scores,
+                        alert_budget(len(split.val), prediction_days(split.val), args.budget),
+                    )
+                ),
             )
             # Refits per board, so it is a modelling activity and stays on the
             # validation block.
@@ -1288,6 +1356,9 @@ def main() -> None:
         figures=figures,
         prov=provenance.collect(args.panel, len(frame), provenance.REAL),
         by_first_observation=by_first_observation,
+        by_cohort=by_cohort,
+        recalibration=recalibration,
+        validation_intervals=validation_intervals,
     )
     print(f"wrote -> {args.out}")
 

@@ -389,6 +389,50 @@ across resamples. Recomputing the budget threshold inside each resample would
 mix how well the model separates with where the operating point happened to
 land, and the artifact ships one threshold rather than a distribution.
 
+**Recalibration — DECIDED 2026-09-12: by a rule, fixed before the number.**
+§5 made calibration co-primary and said nothing about what to do when the
+validation curve comes back bent — a decision that would then have been made
+on the afternoon the numbers appeared, by the numbers. The rule is in
+`src/models/calibration.py`, written while every validation ECE in the
+repository is H=1 or synthetic:
+
+> Recalibrate iff validation ECE > **0.25 × the validation base rate** and the
+> block holds at least **30 positives**. Method: isotonic regression, fitted
+> on the validation block only, wrapped around the pipeline's final estimator
+> so the artifact stays one `Pipeline`.
+
+Relative to the base rate rather than absolute, because at a 7.7% positive
+rate an ECE of 0.02 is a quarter of everything there is to predict and at 50%
+it would be noise; the positives floor is the bootstrap's own fragility line —
+a monotone curve fitted to fewer events is fitted to those events. `evaluate`
+states the verdict for the chosen model in the comparison report; `freeze`
+applies it and records the decision on the artifact either way.
+
+Why this is safe to pre-register: the operating point is a rank statistic (the
+budget-th validation score) and isotonic regression is monotone, so
+recalibration cannot reorder postings or drop one from the alert list. Its
+one effect on *who* is flagged is at ties — isotonic pools neighbouring
+scores into steps, and `probability >= threshold` includes ties — so it can
+add a posting at the boundary, never remove one. What it changes is what the
+percentage shown to a person means, which is the point. The test block's ECE,
+opened after as before, is the honest measure of whether the curve
+transferred. Tests hold the monotonicity, the alert-list property, and that
+the artifact still serves.
+
+**Would change my mind:** a validation block with enough positives that
+Platt scaling's two parameters would generalise better than isotonic's
+steps — at hundreds of events isotonic wins; at thirty it is a coin flip and
+the floor is what keeps it honest.
+
+**Intervals on validation too — added 2026-09-12.** The same posting-clustered
+resampler, at the frozen threshold, on the validation block, so the
+side-by-side table in `test_results.md` carries a spread on both sides; and the
+comparison report carries it for the chosen model before the test block is
+opened. And the **model's** performance on the incumbent stock against the
+incident flow is reported beside the first-observation and seen/unseen slices —
+the cohort audit says whether the *label* is indifferent to cohort, this says
+whether the model is.
+
 **The interval and the fold spread answer different questions**, and both are
 reported. The interval asks how much this block's number would move on a
 different sample of postings; the fold spread in `reports/model_comparison.md`

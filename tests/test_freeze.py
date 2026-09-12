@@ -219,7 +219,10 @@ REQUIRED_SECTIONS = (
     "## The operating point, applied as frozen",  # precision/recall at the shipped threshold
     "## Per source",  # is it one board's model
     "## Carried over from training, or not",  # memorisation check
+    "## Incumbent stock against incident flow",  # the model by cohort, not only the label
     "## Calibration on test",  # brier, ece, and the binned curve
+    "**Validation block, same threshold, same resampler**",  # intervals on both sides
+    "Rule, fixed 2026-09-12 in `src/models/calibration.py`",  # the decision, stated first
     "## What this means for the person using it",  # the decision the numbers inform
 )
 
@@ -289,6 +292,9 @@ def test_a_model_no_better_than_the_board_reports_a_lift_of_one():
             "recall": 0.20,
         },
         test_intervals={},
+        validation_intervals={},
+        recalibration={},
+        by_cohort=pd.DataFrame(),
         test_fragility=None,
         by_source=pd.DataFrame(),
         by_seen_in_train=pd.DataFrame(),
