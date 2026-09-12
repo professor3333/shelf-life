@@ -220,6 +220,7 @@ REQUIRED_SECTIONS = (
     "## Per source",  # is it one board's model
     "## Carried over from training, or not",  # memorisation check
     "## Incumbent stock against incident flow",  # the model by cohort, not only the label
+    "## Board context: what the default public model carries",  # the §12 rule, applied
     "## Would it work on a board it has never seen?",  # the release gate's reading
     "## Calibration on test",  # brier, ece, and the binned curve
     "**Validation block, same threshold, same resampler**",  # intervals on both sides
@@ -296,6 +297,7 @@ def test_a_model_no_better_than_the_board_reports_a_lift_of_one():
         validation_intervals={},
         recalibration={},
         transfer={},
+        board_context={},
         by_cohort=pd.DataFrame(),
         test_fragility=None,
         by_source=pd.DataFrame(),

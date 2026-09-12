@@ -556,6 +556,15 @@ probability that is not calibrated is a score wearing a percent sign — and
 because a constant predictor is perfectly calibrated and completely useless,
 calibration is never reported on its own.
 
+**Board context has a rule too.** Most callers hold one advert and cannot
+know the four board-level features, so they are imputed. At the freeze the
+chosen candidate is scored on validation three ways — board context supplied,
+the same model with it imputed, and a refit without the columns — and the
+refit ships as the default public model iff the imputed score falls below the
+refit's by more than the candidate's fold spread (`src/models/board_context.py`,
+[`docs/design.md`](docs/design.md) §12). The transfer gate then runs on
+whichever pipeline ships; the decision and its numbers are on the artifact.
+
 **Calibration has a rule, not a mood.** Whether the frozen model is recalibrated
 is decided by `src/models/calibration.py`, written before any real validation
 curve existed: isotonic on validation iff validation ECE exceeds a quarter of

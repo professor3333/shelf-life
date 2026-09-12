@@ -51,8 +51,8 @@ from src.data.split import (
 )
 from src.features.assemble import horizon_banner
 from src.features.preprocessing import features_and_target, fit_on_frame
+from src.models import board_context, ledger, provenance
 from src.models import calibration as calibration_rule
-from src.models import ledger, provenance
 
 # `verdict` is aliased: `write_report` already has a `verdict` parameter holding
 # the model-selection verdict, and two different verdicts under one name in one
@@ -969,6 +969,7 @@ def write_report(
     by_cohort: pd.DataFrame | None = None,
     recalibration: dict | None = None,
     validation_intervals: dict | None = None,
+    board_context_decision: dict | None = None,
 ) -> None:
     reference = analytic_reference(frame)
     lines = [
@@ -1130,6 +1131,7 @@ def write_report(
             _table(calibration, ["bin_low", "bin_high", "n", "mean_predicted", "observed_rate"]),
             "",
             *_recalibration_verdict(recalibration),
+            *_board_context_verdict(board_context_decision),
             "## The chosen model's validation numbers, with intervals",
             "",
             "The same posting-clustered resampler the test block gets, at the threshold",
@@ -1175,6 +1177,27 @@ def _recalibration_verdict(decision: dict | None) -> list[str]:
         "any real validation ECE existed, so that the decision is made by the rule and",
         "not by the number. Recalibration is monotone and changes what the percentage",
         "means, not who is flagged.",
+        "",
+    ]
+
+
+def _board_context_verdict(decision: dict | None) -> list[str]:
+    """Which pipeline the freeze will ship as the default, said before it does."""
+    if decision is None:
+        return []
+    ship = (
+        "**will ship the refit without the four board-context columns**"
+        if decision["ship"] == "without_board_context"
+        else "**will ship the candidate as specified, with board context imputed when absent**"
+    )
+    return [
+        "## Board context: what the freeze will ship as the default",
+        "",
+        f"By the rule in `src/models/board_context.py` (`{decision['rule']}`), the freeze",
+        f"{ship}. Validation PR-AUC — supplied {decision['val_pr_auc_supplied']:.4f}, imputed",
+        f"{decision['val_pr_auc_imputed']:.4f}, refit without",
+        f"{decision['val_pr_auc_without']:.4f}, fold spread {decision['fold_sd']:.4f}:",
+        f"{decision['reason']}.",
         "",
     ]
 
@@ -1268,7 +1291,7 @@ def main() -> None:
     summary = per_fold = verdict = thresholds = calibration = None
     generalisation = None
     by_source = by_carryover = by_first_observation = by_cohort = blocker = None
-    recalibration = validation_intervals = None
+    recalibration = validation_intervals = board_context_decision = None
     try:
         split = temporal_split(frame, best_cuts(frame))
         summary, per_fold, val_scores = compare_models(split, args.budget)
@@ -1315,6 +1338,11 @@ def main() -> None:
             # said here first; and the validation numbers with the spread the
             # test block will get, at the threshold this block's budget implies.
             recalibration = calibration_rule.decide(target, scores).as_dict()
+            board_context_decision = board_context.decide(
+                split,
+                candidate_models(split)[chosen],
+                float(summary.loc[summary["model"] == chosen, "cv_pr_auc_sd"].iloc[0]),
+            ).as_dict()
             validation_intervals = bootstrap_block(
                 split.val,
                 scores,
@@ -1382,6 +1410,7 @@ def main() -> None:
         by_cohort=by_cohort,
         recalibration=recalibration,
         validation_intervals=validation_intervals,
+        board_context_decision=board_context_decision,
     )
     print(f"wrote -> {args.out}")
 
