@@ -1613,7 +1613,9 @@ measurement by asking `/health`, and only the last can print `ACCEPTED`.
 ## Model card
 
 The short, structured version of everything above, in the form that survives
-being pasted into someone else's document.
+being pasted into someone else's document. The full card — every pending field
+named, the identifiers that pin the reviewed evidence, and what to copy from
+the frozen artifact on the day — is [`MODEL_CARD.md`](MODEL_CARD.md).
 
 **Model.** Discrete-time hazard classifier over job-day rows: a scikit-learn
 `Pipeline` carrying derivation, column selection, imputation, encoding and a
