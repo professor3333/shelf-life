@@ -19,9 +19,10 @@ the UI, and in every API response, which carries a `predicts` field that says
 **One word for the label: removal.** This document, the model card, the API
 and the UI say *removed*, *removal*, *disappearance*; never *filled*, *hired*
 or *closed* as the name of the event. Where a code identifier or a generated
-table still says `closure` — `closure_rate`, a `closures` column — it means
-removal and nothing more; those names predate the rule and are being retired
-as the files they live in are touched.
+table still says `closure` — `closure_dispersion`, a `closures` column, the
+`closures_caught_per_day` family in the budget tables — it means removal and
+nothing more; those names predate the rule and are being retired as the files
+they live in are touched.
 
 **That the label measures removal has been checked against the boards, not just
 argued.** A sample of postings the panel calls removed was verified against each
@@ -1100,7 +1101,16 @@ output — regenerate rather than edit; each file names the command that writes 
 - Docker, to build the image
 - **For the data pipeline only:** the scraper's SQLite database. Without it, the
   ingestion commands have nothing to read; everything else — tests, API, UI —
-  runs without it.
+  runs without it. The scraper is a separate, currently private repository, so
+  a stranger cannot rebuild the panel from scratch; what they *can* do is run
+  the modelling path on the synthetic fixture — `python -m src.models.freeze
+  --run <spec> --synthetic` and the test suite both do — which exercises every
+  stage from split to artifact against a panel with the same schema and none
+  of the real rows. To point the pipeline at a database of your own:
+  `python -m src.data.snapshot --source-db <path>`. It requires four tables —
+  `runs`, `jobs`, `job_observations`, `job_changes` (`REQUIRED_TABLES` in
+  `src/data/snapshot.py`) — and `src/data/load.py` is the schema contract the
+  first three are validated against.
 
 ---
 
