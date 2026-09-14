@@ -238,6 +238,11 @@ EXCLUDED: dict[str, str] = {
     "horizon_days": "axis — label-construction metadata",
     "horizon_basis": "axis — label-construction metadata",
     "rules_version": "axis — the scraper's parsing epoch; constant within a panel",
+    "page": "axis — the listing page the crawl found the row on (upstream, 2026-09-13); "
+    "a property of the crawl, constant 1 on every labelled board, and on a page-capped "
+    "board it is the label's own mechanism",
+    "response_sha256": "axis — the raw response's hash (upstream, 2026-09-13); one value per "
+    "(board, run), so it names both",
     "y": "the target",
     "label_observable": "the censoring flag",
     "split": "assigned by src/data/split.py; describes the experiment",
