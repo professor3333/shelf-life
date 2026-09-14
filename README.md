@@ -83,13 +83,13 @@ those reports and held equal to them by a test — the one place in this file
 where a moving number lives.
 
 <!-- generated: begin — python -m src.data.readme_summary; do not edit by hand -->
-**Current state, read from the generated reports** — snapshot `2026-09-12`, regenerated at `f8e3c4dd7`:
+**Current state, read from the generated reports** — snapshot `2026-09-14`, regenerated at `592fb1ea7`:
 
-- **H=7 readiness** ([`readiness.md`](reports/readiness.md)): 6 labelled waves. A legal split needs 22 (short by 16, projected 2026-09-21); three rolling-origin folds need 34 (short by 28, projected 2026-10-03). Legal cuts today: 0.
+- **H=7 readiness** ([`readiness.md`](reports/readiness.md)): 8 labelled waves. A legal split needs 22 (short by 14, projected 2026-09-28); three rolling-origin folds need 34 (short by 26, projected 2026-10-10). Legal cuts today: 0.
 - **H=7 held-out block** ([`test_results.md`](reports/test_results.md)): **not opened**; the report records the refusal.
-- **H=1 rehearsal** ([`model_comparison.md`](reports/model_comparison.md); H=1 (calendar basis) — a pipeline smoke test, not the build's horizon): 10 candidates, 0 rolling-origin folds scored. Verdict: **None** — no model was scored on any fold. Best single validation draw: `random_forest` at PR-AUC 0.1804 against a prior of 0.0052 — one draw with no error bar, which is why it selected nothing.
+- **H=1 rehearsal** ([`model_comparison.md`](reports/model_comparison.md); H=1 (calendar basis) — a pipeline smoke test, not the build's horizon): 10 candidates, 1 rolling-origin folds scored. Verdict: **None** — no model reached 3 scored folds — the deepest managed 1, which is a number without a spread to read it against. Best single validation draw: `random_forest` at PR-AUC 1 against a prior of 0.0009 — one draw with no error bar, which is why it selected nothing.
 - **Depth ledger** ([`depth_ledger.md`](reports/depth_ledger.md)): 0 real run(s) kept, 1 synthetic.
-- **Latest data profile**: [`data_profile_2026-09-12.md`](reports/data_profile_2026-09-12.md).
+- **Latest data profile**: [`data_profile_2026-09-14.md`](reports/data_profile_2026-09-14.md).
 <!-- generated: end -->
 
 ---
