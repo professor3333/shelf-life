@@ -150,6 +150,11 @@ class FrozenModel:
     #: flow, on the test block. The cohort audit asks whether the *label* is
     #: indifferent to cohort; this asks whether the *model* is.
     by_cohort: pd.DataFrame
+    #: The model on the rows that are a posting's first sighting, against the
+    #: rest of the test block. `design.md` §15 makes this the slice the board
+    #: ranking must not fail on; `evaluate` reports it on validation, and the
+    #: test block is opened once, so it is recorded here or never.
+    by_first_observation: pd.DataFrame
     #: The fragility note, or None when the block is big enough not to need one.
     test_fragility: str | None
     by_source: pd.DataFrame
@@ -286,6 +291,13 @@ def freeze(
             n_days=prediction_days(test_block),
             budget_per_day=budget_per_day,
         ),
+        by_first_observation=evaluate_by_with_evidence(
+            cohort_audit.attach_first_observation(test_block, split.frame),
+            test_scores,
+            "first_observation",
+            n_days=prediction_days(test_block),
+            budget_per_day=budget_per_day,
+        ),
         test_fragility=fragility_note(test_block),
         by_source=evaluate_by_with_evidence(
             test_block,
@@ -308,6 +320,36 @@ def freeze(
         features=tuple(model.named_steps["select"].kw_args["columns"]),
         fitted_on=fitted_on,
     )
+
+
+def _first_observation_section(table: pd.DataFrame) -> list[str]:
+    """The day a posting first appears, scored on the test block.
+
+    The incident cohort above is every posting that arrived after collection
+    began, on every day of its life. This is narrower: only the row on which
+    each of them was first seen — the case `/predict` serves when a caller
+    holds a posting on its first day. A model that ranks incidents well on
+    their third day and not their first would hide inside the cohort table.
+    Absent when the block holds no such rows, which the section says rather
+    than leaving a gap — the block opens once, and a gap cannot be filled later.
+    """
+    lines = [
+        "## The day a posting first appears",
+        "",
+        "Rows that are an incident posting's first sighting, against the rest of the",
+        "test block. `design.md` §15 makes the board ranking the product and this the",
+        "slice it must not fail on; the same slice on validation is in",
+        "`reports/model_comparison.md`.",
+        "",
+    ]
+    if table.empty or not bool(table["first_observation"].any()):
+        return [
+            *lines,
+            "_The test block holds no first observations — no posting first appeared",
+            "inside it after the embargo. The slice is unmeasured on test, not passed._",
+            "",
+        ]
+    return [*lines, _table(table, evidence_columns("first_observation")), ""]
 
 
 def _board_context_section(decision: dict) -> list[str]:
@@ -869,6 +911,7 @@ def write_report(
             "",
             _table(frozen.by_cohort, evidence_columns("cohort")),
             "",
+            *_first_observation_section(frozen.by_first_observation),
             *_board_context_section(frozen.board_context),
             *_transfer_section(frozen.transfer),
             "## Calibration on test",
