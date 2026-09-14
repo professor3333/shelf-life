@@ -612,6 +612,16 @@ def projected_clear(
     around: the answer to "is it ready?" stays `minimum_waves` on the day, and
     this only says when to next ask.
 
+    **Anchored on the newest crawl, not the newest labelled wave.** A wave is
+    labelled only once its horizon has elapsed, so the labelled frontier trails
+    the crawl frontier by the horizon — seven days at H=7 — and waves become
+    labelled at the crawl cadence behind it. The shortfall therefore closes
+    `shortfall × spacing` after *today's* newest crawl. Until 2026-09-14 this
+    counted from the newest labelled wave, which dated each gate to the day its
+    closing wave would be *crawled*, a horizon early — while the docstring above
+    promised it could never be early. Every projected date in the reports and
+    the depth-watch log before that day is a week short at H=7.
+
     `None` means the gate is already open.
     """
     depth = minimum_waves(frame, target_folds=target_folds)
@@ -625,7 +635,7 @@ def projected_clear(
         # answer would be the most confident-looking line in the report.
         if shortfall == 0 or accrual["stalled"]:
             return None
-        return newest + shortfall * spacing
+        return accrual["newest_wave"] + shortfall * spacing
 
     return {
         "newest_labelled_wave": newest,

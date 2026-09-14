@@ -495,6 +495,28 @@ def test_projected_clear_never_dates_a_gate_earlier_than_the_shortfall_allows():
             assert gap >= depth["folds_shortfall"] * ahead["spacing"]
 
 
+def test_projected_clear_counts_from_the_newest_crawl_not_the_newest_labelled_wave():
+    """A wave is labelled only once its horizon has elapsed, so the labelled
+    frontier trails the crawl frontier by the horizon. Counting the shortfall
+    from the newest *labelled* wave dated each gate to the day its closing wave
+    would be crawled — a horizon early, on a panel where every real H=7 report
+    had promised the projection could never be early (2026-09-14)."""
+    panel = _structural(8)
+    waves = crawl_waves(panel)
+    # Blind the newest three waves, the way a horizon does to the real panel.
+    tail = panel["t"].isin(waves.sort_values().iloc[-3:])
+    panel = panel.assign(label_observable=panel["label_observable"] & ~tail)
+    labelled = crawl_waves(panel[panel["label_observable"]])
+    assert labelled.max() < waves.max(), "the labelled frontier must trail the crawl"
+
+    ahead = projected_clear(panel, now=waves.max() + pd.Timedelta(hours=1))
+    shortfall = minimum_waves(panel)["folds_shortfall"]
+    assert shortfall > 0
+    assert ahead["folds_clear"] == waves.max() + shortfall * ahead["spacing"]
+    # Strictly later than the old anchor would have said — by the blinded tail.
+    assert ahead["folds_clear"] - ahead["newest_labelled_wave"] > shortfall * ahead["spacing"]
+
+
 def test_depth_report_states_both_waits():
     text = depth_report(_structural(8))
     assert "cannot carry a positive" in text

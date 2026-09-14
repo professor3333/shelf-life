@@ -4,6 +4,30 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-14 — every projected gate date was a horizon early
+
+- **Problem:** `readiness.md`, `test_results.md`, the README block and the
+  depth-watch log all projected the first legal H=7 cut for 2026-09-21 and
+  three folds for 2026-10-03. Plain arithmetic on the same page — 8 labelled
+  waves, 14 short, one wave a day — gives 2026-09-28. No exception; a wrong
+  date printed with confidence, daily, since the projection was added.
+- **Root cause:** `projected_clear` computed `newest_labelled_wave + shortfall
+  × spacing`. A wave is labelled only once its horizon has elapsed, so the
+  labelled frontier trails the crawl frontier by the horizon — measured: 7 days
+  0h exactly, every wave from 2026-09-08 on holding 0 labelled rows. The
+  formula dated each gate to the day its closing wave would be *crawled*, not
+  the day it could be *labelled*. The docstring promised "late but never early";
+  the test that enforced it used a fixture where every wave is labelled, so the
+  two anchors coincided and the lag was invisible.
+- **Solution:** anchor on the newest *crawled* wave (`accrual_status` already
+  returned it), `src/data/split.py:projected_clear`; a test with a blinded tail
+  (`tests/test_split.py`) that fails on the old anchor. Corrected dates:
+  legal cut 2026-09-28, three folds 2026-10-10.
+- **Lesson:** a property claimed in a docstring needs a test whose fixture can
+  violate it. "Never early" was tested on a panel with no lag, which is the one
+  panel on which the bug cannot show. When a quantity has a known systematic
+  offset (here, the horizon), the fixture must carry that offset.
+
 ## 2026-09-14 — two columns the scraper added upstream reached the panel with no verdict
 
 - **Problem:** the first report regeneration after 2026-09-13 crashed the H=1
