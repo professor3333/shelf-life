@@ -38,7 +38,7 @@ the model learned on it is untrained in the only regime that matters.
 `t` is the prediction point: the start instant of the complete run that observed
 the posting.
 
-### Identity and axis — 8 columns, all excluded
+### Identity and axis — 10 columns, all excluded
 
 | column | verdict | reason |
 |---|---|---|
@@ -49,6 +49,8 @@ the posting.
 | `url` | **axis** | unique per posting, and its domain names the board — it re-admits `source` through the back door |
 | `requisition_id` | **axis** as a field | 1,120 distinct values over 1,240 postings: identity, not a category. Only the windowed count derived from it (`n_same_req_on_board`) is a feature |
 | `horizon_days`, `horizon_basis` | **axis** | label-construction metadata, constant within a frame. They record how `y` was made |
+| `page` | **axis** | added upstream on 2026-09-13, when the scraper began tying every observation to the raw response it was parsed from. The listing page the crawl found the row on — a property of the crawl, not the posting. Constant `1` on every labelled board (python_org reaches `2`), so dead here; and on a page-capped board it would be the label's own mechanism, since "fell past the last page" is what absence means there. Caught by the verdict guard on 2026-09-14, the first panel built after the upstream change |
+| `response_sha256` | **axis** | same upstream change. The hash of the raw response the row was parsed from: one value per (board, run), so it names both the board and the crawl. Caught alongside `page` |
 
 ### The label — 2 columns
 

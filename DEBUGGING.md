@@ -4,6 +4,31 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-14 — two columns the scraper added upstream reached the panel with no verdict
+
+- **Problem:** the first report regeneration after 2026-09-13 crashed the H=1
+  rehearsal at the ladder: `ValueError: no leakage verdict for ['page',
+  'response_sha256']`. Every step before it — snapshot, panel, audits, the
+  H=7 refusal — had run clean.
+- **Root cause:** the scraper began tying each observation to the raw response
+  it was parsed from (a `pages` table, 2026-09-13), and `load.py` reads
+  observations with `SELECT *`, so the two new columns rode into the panel on
+  the next snapshot. Neither is a property of a posting: `page` is the listing
+  page the crawl found the row on, `response_sha256` names the (board, run)
+  pair. The guard in `preprocessing.py` refuses a frame carrying a column no
+  verdict has been written for, and did.
+- **Solution:** both added to `EXCLUDED` as axis columns
+  (`src/features/preprocessing.py`) and to the identity-and-axis table in
+  `docs/leakage_audit.md`, with the upstream date. No model saw either.
+- **Lesson:** the upstream schema is an input that changes without telling this
+  repository, and `SELECT *` means every addition arrives as a candidate
+  feature. The refusal is the right behaviour — a crash at the ladder is
+  cheaper than a column that silently fingerprints the board — so keep the
+  guard strict, and treat every scraper commit that touches its schema as a
+  verdict owed here before the next snapshot.
+
+---
+
 ## 2026-09-12 — a push that added names to a helper module broke the deployed UI
 
 - **Problem:** #85 added `rank_board`, `parse_board` and `EXAMPLE_BOARD_CSV`
