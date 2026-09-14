@@ -221,6 +221,7 @@ REQUIRED_SECTIONS = (
     "## Per source",  # is it one board's model
     "## Carried over from training, or not",  # memorisation check
     "## Incumbent stock against incident flow",  # the model by cohort, not only the label
+    "## The day a posting first appears",  # the §15 slice, on test — recorded once or never
     "## Board context: what the default public model carries",  # the §12 rule, applied
     "## Would it work on a board it has never seen?",  # the release gate's reading
     "## Calibration on test",  # brier, ece, and the binned curve
@@ -301,6 +302,7 @@ def test_a_model_no_better_than_the_board_reports_a_lift_of_one():
         board_context={},
         periods={},
         by_cohort=pd.DataFrame(),
+        by_first_observation=pd.DataFrame(),
         test_fragility=None,
         by_source=pd.DataFrame(),
         by_seen_in_train=pd.DataFrame(),
@@ -492,7 +494,12 @@ def test_every_breakdown_row_carries_its_evidence(tmp_path, monkeypatch):
     precision@budget, and a fragility flag — not a bare PR-AUC."""
     paths = _run_freeze(tmp_path, monkeypatch, DEEP_ENOUGH_TO_CHOOSE)
     frozen = paths["frozen"]
-    for table in (frozen.by_source, frozen.by_cohort, frozen.by_seen_in_train):
+    for table in (
+        frozen.by_source,
+        frozen.by_cohort,
+        frozen.by_first_observation,
+        frozen.by_seen_in_train,
+    ):
         for column in (
             "postings",
             "pr_auc_low",
@@ -508,3 +515,24 @@ def test_every_breakdown_row_carries_its_evidence(tmp_path, monkeypatch):
     per_source = report.split("## Per source")[1].split("## ")[0]
     assert "| postings |" in per_source or "postings" in per_source
     assert "pr_auc_low" in per_source and "fragile" in per_source
+
+
+def test_the_first_observation_slice_is_on_the_test_report_or_its_absence_is_said(
+    tmp_path, monkeypatch
+):
+    """The §15 slice is recorded on the test block, and the block opens once —
+    so the section is present whether or not the block holds a first sighting,
+    and says which."""
+    paths = _run_freeze(tmp_path, monkeypatch, DEEP_ENOUGH_TO_CHOOSE)
+    frozen = paths["frozen"]
+    report = paths["report"].read_text()
+    section = report.split("## The day a posting first appears")[1].split("\n## ")[0]
+    if bool(frozen.by_first_observation["first_observation"].any()):
+        assert "first_observation" in section and "pr_auc_low" in section
+    else:
+        assert "unmeasured on test, not passed" in section
+
+    from src.models.freeze import _first_observation_section
+
+    empty = "\n".join(_first_observation_section(pd.DataFrame()))
+    assert "unmeasured on test, not passed" in empty

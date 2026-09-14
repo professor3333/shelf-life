@@ -1909,6 +1909,16 @@ stock cannot hide inside the board-wide number. The README's opening no longer
 says "at the moment it first appears"; the API still accepts a posting on its
 first day, and that is the case this slice measures.
 
+**On the test block too — 2026-09-14.** `freeze` now slices the held-out block
+by `first_observation` beside `cohort`, `source` and `seen_in_train`, under
+"The day a posting first appears" in `reports/test_results.md`, and the section
+is required (`tests/test_freeze.py`, `REQUIRED_SECTIONS`). The incident cohort
+is every later-arriving posting on every day of its life; this is only the row
+on which each was first seen, which is the case `/predict` serves. The test
+block opens once, so a slice not recorded by that run is not recorded — and
+the section is written whether or not the block holds such rows, saying which.
+Added while no real H=7 number existed at any horizon.
+
 **The condition the decision rests on, and the check that enforces it.** Job-
 day scoring makes age a feature only if the label is indifferent to which
 population a row came from. On the corrected label it is: incident rows close
