@@ -993,3 +993,22 @@ def test_every_module_the_runbook_tells_you_to_run_exists() -> None:
         assert importlib.util.find_spec(module) is not None, (
             f"docs/deploy.md says to run `python -m {module}`, which does not exist"
         )
+
+
+def test_the_watch_rehearses_once_at_the_first_legal_cut_and_never_freezes():
+    """On the day the first legal cut appears the watch runs the rehearsal once,
+    for first contact with the real panel — and that is all it does: no gate
+    moves, no exit code changes, and `freeze` is never named as a command."""
+    script = Path("scripts/watch_depth.sh").read_text()
+    before_the_gate, _, after = script.partition("== the fold gate is OPEN")
+
+    first_cut = before_the_gate.partition("== the first legal cut")[2]
+    assert first_cut, "the first-cut rehearsal must run before the fold gate, not after"
+    assert "./scripts/rehearse.sh" in first_cut
+    assert 'PREVIOUS_CUTS:-0}" = "0"' in before_the_gate, "it must fire on the transition only"
+    # Both refusals still stand below it, unchanged.
+    assert 'if [ "${SHORTFALL}" -gt 0 ]; then' in first_cut
+    # `freeze` is named once, in the message that tells a person to run it.
+    commands, _, message = script.partition("cat <<'MESSAGE'")
+    assert "src.models.freeze" not in commands
+    assert "src.models.freeze --run" in message

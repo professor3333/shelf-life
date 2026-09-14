@@ -18,6 +18,15 @@
 # stops and says a human owes it a decision. The decision is which model, made on
 # the fold evidence that has just become available for the first time.
 #
+# **It also runs the rehearsal once, earlier, on the day the first legal cut
+# appears** (added 2026-09-14). That run selects nothing — a single validation
+# block has no spread — and the script says so. Its purpose is first contact:
+# every module below the gate had met only the synthetic panel until the H=1
+# smoke test, and the 2026-09-14 regeneration showed what first contact looks
+# like — two columns the scraper had added upstream crashed the ladder at the
+# verdict guard. Better to meet the H=7 panel's version of that a fortnight
+# before the fold gate than on the afternoon the test block is available.
+#
 # Exit codes: 0 the fold gate is open · 3 still accruing · 4 no legal split yet ·
 # 5 the panel has stopped accruing and the wait is not running down ·
 # anything else, a step failed.
@@ -173,6 +182,21 @@ fi
 if [ "${USABLE}" -eq 0 ]; then
   [ "${CHANGED}" -eq 1 ] && echo "  no legal three-way cut yet."
   exit 4
+fi
+
+# The first legal cut, once. Yesterday's line said `cuts=0` and today's does
+# not — that is the only day this fires, so a scheduled job and an impatient
+# person running it twice in the same hour see the rehearsal once. It is not
+# a gate: the exit code below is unchanged, and nothing here reads `FOLDS`.
+PREVIOUS_CUTS=$(tail -n 2 "${LOG}" | head -n 1 | awk -F'\t' '{for(i=1;i<=NF;i++) if($i ~ /^cuts=/) {sub(/^cuts=/,"",$i); print $i}}')
+if [ "${SHORTFALL}" -gt 0 ] && [ "${PREVIOUS_CUTS:-0}" = "0" ]; then
+  echo
+  echo "== the first legal cut: running the rehearsal once, for first contact"
+  echo "This selects nothing. A single validation block has no spread, and the"
+  echo "fold gate below is still ${SHORTFALL} wave(s) away. Read it for what broke,"
+  echo "not for which model led."
+  echo
+  ./scripts/rehearse.sh || echo "== the rehearsal failed — that is the finding. See above."
 fi
 
 # The gate is the *target* fold count, not the first fold. `SHORTFALL` counts
