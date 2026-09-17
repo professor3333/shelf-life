@@ -55,9 +55,9 @@ the posting left, the role did not. [`reports/label_check.md`](reports/label_che
 > [Why, and when it clears](#why-there-is-no-test-number-yet).
 >
 > The ladder *has* run end to end on the real panel at H = 1, the pipeline smoke
-> test, where nothing separates from the base rate
-> ([`reports/model_comparison.md`](reports/model_comparison.md)). Those numbers
-> describe the smoke test and are labelled as such wherever they appear.
+> test. Its current fold evidence and selection verdict are recorded in
+> [`reports/model_comparison.md`](reports/model_comparison.md). Those numbers
+> describe the one-day rehearsal; they do not establish seven-day performance.
 
 **Where the numbers live.** The scraper runs daily, so every count, rate and
 date in this project moves. The generated reports under `reports/` are the

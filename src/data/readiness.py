@@ -150,11 +150,12 @@ def render(panel: pd.DataFrame, prov, now: pd.Timestamp | None = None) -> str:
         "control drift of 3.3%. *Removed* is still not *filled* — 12% had their title",
         "relisted under a new id within days.",
         "",
-        "**Complexity has not yet earned its place.** On the H=1 rehearsal no fitted rung",
-        "clears a hand-written rule by more than fold variance would explain, and step 4 of",
-        "the selection rule returns a heuristic when that holds. Shipping a rule a person",
-        "could follow unaided is a legitimate outcome of this build, not a failure to",
-        "produce a model.",
+        "**The horizons answer different questions.** The H=1 rehearsal checks the pipeline",
+        "on real data; its current fold evidence and selection verdict are recorded in",
+        "[`model_comparison.md`](model_comparison.md). A selected H=1 candidate does not",
+        "establish seven-day performance. H=7 must clear its own depth and selection gates",
+        "before a release is considered. The selection rule can return a hand-written",
+        "heuristic when fitted models do not improve on it beyond fold variance.",
         "",
     ]
     return "\n".join(lines) + "\n"
