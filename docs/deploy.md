@@ -112,13 +112,13 @@ verified, not assumed:
 5. Run the two UI checks by hand once, before relying on the workflow:
 
    ```bash
-   ./scripts/smoke_ui.sh "$SHELF_LIFE_UI"                                   # exists, RUNNING, server answers
    uv run --no-project --with playwright playwright install chromium        # once
    uv run --no-project --with playwright python scripts/smoke_ui_browser.py "$SHELF_LIFE_UI"
+   ./scripts/smoke_ui.sh "$SHELF_LIFE_UI"                                   # exists, RUNNING, server answers
    ```
 
-   The second opens the page in a headless browser and reads what the app
-   wrote after calling the API. It is the only check that can see the
+   The browser check wakes a sleeping app through its normal button, then
+   reads what the app wrote after calling the API. It is the only check that can see the
    secret: Streamlit draws the page over a WebSocket, so nothing HTTP can.
 
 ---
@@ -213,16 +213,18 @@ The same workflow's `verify-ui` job runs when `app/`, `requirements.txt` or
 the UI scripts change, against `SHELF_LIFE_UI`:
 
 ```bash
-./scripts/smoke_ui.sh "$SHELF_LIFE_UI" 8                                       # HTTP
 uv run --no-project --with playwright python scripts/smoke_ui_browser.py "$SHELF_LIFE_UI"
+./scripts/smoke_ui.sh "$SHELF_LIFE_UI" 8                                       # HTTP
 ```
 
 The HTTP half proves the app exists on Community Cloud (a missing app is a
 404), that the host reports it `RUNNING` — `INSTALLER_ERROR` is a
 `requirements.txt` the host could not resolve, `USER_SCRIPT_ERROR` a script
-that crashed on boot, `IS_SHUTDOWN` the free tier's sleep, which the script
-wakes as a visitor's click would — and that the Streamlit server behind the
-host page answers. The browser half proves the page rendered and that what it
+that crashed on boot, `IS_SHUTDOWN` the free tier's sleep — and that the Streamlit server behind the
+host page answers. The browser runs first to wake a sleeping app through its
+normal button; an anonymous HTTP resume request can be rejected with 403.
+The HTTP check reports that rejection immediately instead of polling for a
+wake-up that never happened. The browser half proves the page rendered and that what it
 says about the API is one of the two honest states: a model is serving, or the
 API is up with no model. "cannot reach the API" fails it, and that is the
 sentence an unset secret produces.
