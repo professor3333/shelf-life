@@ -4,6 +4,25 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-17 — the status summary contradicted the first selected rehearsal model
+
+- **Problem:** The September 17 refresh selected `random_forest` across three
+  H=1 folds, but the generated README still said it selected nothing. The
+  readiness report and README status also claimed no fitted model separated
+  from the baseline.
+- **Root cause:** Report templates encoded the earlier shallow-panel outcome
+  as permanent prose. The summary appended its no-selection explanation even
+  when the comparison supplied a selected model; the existing test covered
+  only the no-selection state.
+- **Solution:** `src/data/readme_summary.py` now follows the selection verdict.
+  `src/data/readiness.py` and the README status refer to the current H=1 evidence
+  and keep it separate from H=7 readiness. A regression test covers selection
+  while the H=7 held-out block remains unopened.
+- **Lesson:** Test status reporting on both sides of a data gate. Derive a
+  changing conclusion from its recorded result instead of fixing it in prose.
+
+---
+
 ## 2026-09-14 — every projected gate date was a horizon early
 
 - **Problem:** `readiness.md`, `test_results.md`, the README block and the

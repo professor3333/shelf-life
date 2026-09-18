@@ -65,3 +65,29 @@ def test_a_large_single_draw_is_reported_as_a_draw_not_a_selection(tmp_path):
 def test_a_readme_without_markers_is_refused():
     with pytest.raises(ValueError, match="markers"):
         readme_summary.splice("no markers here", "block")
+
+
+def test_a_selected_rehearsal_model_is_not_described_as_no_selection():
+    state = {
+        "snapshot": "2026-09-17",
+        "sha": "abc1234",
+        "gates": {},
+        "legal_cuts": "0",
+        "held_out_opened": False,
+        "verdict": ("random_forest", "selected by the fold comparison"),
+        "best": {"model": "random_forest", "val_pr_auc": "0.0838"},
+        "prior": {"val_pr_auc": "0.0203"},
+        "h1_horizon": "H=1 (calendar basis)",
+        "candidates": 10,
+        "folds_scored": 3,
+        "ledger_real": 1,
+        "ledger_synthetic": 1,
+        "latest_profile": [],
+    }
+    block = readme_summary.render(state)
+
+    assert "Verdict: **random_forest**" in block
+    assert "3 rolling-origin folds scored" in block
+    assert "Best single validation draw: `random_forest` at PR-AUC 0.0838" in block
+    assert "selected nothing" not in block
+    assert "**not opened**" in block

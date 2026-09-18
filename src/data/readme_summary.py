@@ -140,7 +140,11 @@ def render(state: dict) -> str:
         best_text = (
             f" Best single validation draw: `{best['model']}` at PR-AUC {best['val_pr_auc']}"
             + (f" against a prior of {prior['val_pr_auc']}" if prior else "")
-            + " — one draw with no error bar, which is why it selected nothing."
+            + (
+                " — one draw with no error bar, which is why it selected nothing."
+                if chosen == "None"
+                else ". Selection is based on the fold comparison."
+            )
             if best
             else ""
         )

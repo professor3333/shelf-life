@@ -55,9 +55,9 @@ the posting left, the role did not. [`reports/label_check.md`](reports/label_che
 > [Why, and when it clears](#why-there-is-no-test-number-yet).
 >
 > The ladder *has* run end to end on the real panel at H = 1, the pipeline smoke
-> test, where nothing separates from the base rate
-> ([`reports/model_comparison.md`](reports/model_comparison.md)). Those numbers
-> describe the smoke test and are labelled as such wherever they appear.
+> test. Its current fold evidence and selection verdict are recorded in
+> [`reports/model_comparison.md`](reports/model_comparison.md). Those numbers
+> describe the one-day rehearsal; they do not establish seven-day performance.
 
 **Where the numbers live.** The scraper runs daily, so every count, rate and
 date in this project moves. The generated reports under `reports/` are the
@@ -83,13 +83,13 @@ those reports and held equal to them by a test — the one place in this file
 where a moving number lives.
 
 <!-- generated: begin — python -m src.data.readme_summary; do not edit by hand -->
-**Current state, read from the generated reports** — snapshot `2026-09-14`, regenerated at `592fb1ea7`:
+**Current state, read from the generated reports** — snapshot `2026-09-17`, regenerated at `28c7ef6bf`:
 
-- **H=7 readiness** ([`readiness.md`](reports/readiness.md)): 8 labelled waves. A legal split needs 22 (short by 14, projected 2026-09-28); three rolling-origin folds need 34 (short by 26, projected 2026-10-10). Legal cuts today: 0.
+- **H=7 readiness** ([`readiness.md`](reports/readiness.md)): 10 labelled waves. A legal split needs 22 (short by 12, projected 2026-09-29); three rolling-origin folds need 34 (short by 24, projected 2026-10-11). Legal cuts today: 0.
 - **H=7 held-out block** ([`test_results.md`](reports/test_results.md)): **not opened**; the report records the refusal.
-- **H=1 rehearsal** ([`model_comparison.md`](reports/model_comparison.md); H=1 (calendar basis) — a pipeline smoke test, not the build's horizon): 10 candidates, 1 rolling-origin folds scored. Verdict: **None** — no model reached 3 scored folds — the deepest managed 1, which is a number without a spread to read it against. Best single validation draw: `random_forest` at PR-AUC 1 against a prior of 0.0009 — one draw with no error bar, which is why it selected nothing.
-- **Depth ledger** ([`depth_ledger.md`](reports/depth_ledger.md)): 0 real run(s) kept, 1 synthetic.
-- **Latest data profile**: [`data_profile_2026-09-14.md`](reports/data_profile_2026-09-14.md).
+- **H=1 rehearsal** ([`model_comparison.md`](reports/model_comparison.md); H=1 (calendar basis) — a pipeline smoke test, not the build's horizon): 10 candidates, 3 rolling-origin folds scored. Verdict: **random_forest** — random_forest ties with xgboost inside fold variance and is already the simplest of them, so it stands. Best single validation draw: `random_forest` at PR-AUC 0.0838 against a prior of 0.0203. Selection is based on the fold comparison.
+- **Depth ledger** ([`depth_ledger.md`](reports/depth_ledger.md)): 1 real run(s) kept, 1 synthetic.
+- **Latest data profile**: [`data_profile_2026-09-17.md`](reports/data_profile_2026-09-17.md).
 <!-- generated: end -->
 
 ---
