@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Regenerate every generated report from a clean source tree, in order.
+# Regenerate diagnostic reports from a clean source tree, in order.
 #
-#     ./scripts/regenerate_reports.sh            # all of them, on the pinned snapshot
+#     ./scripts/regenerate_reports.sh            # diagnostics on the pinned snapshot
 #     ./scripts/regenerate_reports.sh --no-net   # skip the one that asks the boards
 #
 # Every report names the commit that produced it and whether the tree was
@@ -12,11 +12,11 @@
 # are the evidence the artifact is read against, so they get the same one.
 #
 # The order is the pipeline's: pin and build, then the audits that read the
-# panel, then the H=7 gate (which declines until the panel is deep enough and
-# writes the refusal), then the H=1 rehearsal — the ladder, the comparison,
+# panel, then the H=7 fingerprint, then the H=1 rehearsal — the ladder, the comparison,
 # the fingerprint — which is the machinery exercised on real data. Nothing
-# here opens the held-out block: `freeze` at H=7 refuses on depth, and at
-# H=1 the rehearsal stops short of it by design.
+# here invokes `freeze`, even after the depth gate opens. The held-out report
+# keeps its previous evidence and provenance until a deliberate freeze; at
+# H=1 the rehearsal stops short of the held-out block by design.
 #
 # Refuses if anything outside `reports/` is uncommitted: a report regenerated
 # from edited source names a commit that did not produce it. The reports
@@ -64,11 +64,9 @@ else
   echo "   (label_check skipped: --no-net; its report keeps its previous provenance)"
 fi
 
-echo "== the H=7 gate: the refusal, or the result"
-# `freeze` needs a run name even to refuse; the refusal is the report. The
-# fingerprint at H=7 declines the same way until there is a legal cut, and
-# its H=1 finding lives in board_fingerprint_h1_calendar.md meanwhile.
-"${PYTHON}" -m src.models.freeze --run 05-xgboost_engineered || true
+echo "== the H=7 fingerprint (held-out evidence is preserved)"
+# The fingerprint declines until there is a legal cut. Never call `freeze`
+# here: a temporary depth refusal is not a permanent test-set safeguard.
 "${PYTHON}" -m src.models.board_fingerprint --panel data/processed/features/job_days_h7_calendar.parquet || true
 
 echo "== the H=1 rehearsal: the machinery on real data"

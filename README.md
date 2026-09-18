@@ -961,11 +961,13 @@ cold-start gate. `freeze` sits by itself because it is the only line in the
 project that reads the test block, and it happens after the threshold is chosen
 and before anything is published.
 
-**Every report is regenerated from a clean tree, together.** `./scripts/regenerate_reports.sh`
-refuses if anything outside `reports/` is uncommitted, then runs every
-generator in the pipeline's order — pin and build, the H=7 audits, the H=7
-gate, the H=1 rehearsal, the ledger — so each report's `Code` row names a
-commit that reproduces it. The day the gate clears: merge → clean `main` → CI
+**Diagnostic reports are regenerated from a clean tree, together.** `./scripts/regenerate_reports.sh`
+refuses if anything outside `reports/` is uncommitted, then runs the diagnostic
+generators in the pipeline's order — pin and build, the H=7 audits and fingerprint,
+the H=1 rehearsal, the ledger — so each report's `Code` row names a
+commit that reproduces it. It never invokes `freeze`; `reports/test_results.md`
+keeps its previous evidence and provenance until the deliberate freeze.
+The day the gate clears: merge → clean `main` → CI
 green → this script → commit the reports → `freeze`, in that order, so the
 evidence is in history before the result that is read against it.
 
