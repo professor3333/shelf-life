@@ -442,7 +442,7 @@ _ABLATION_METRICS = (
 _REGIME_METRICS = ("n", "pr_auc", "brier", "precision", "recall", "delta_pr_auc")
 
 
-def _sweep_figures(sweep: pd.DataFrame, figures_dir: Path | None) -> list[Path]:
+def _sweep_figures(sweep: pd.DataFrame, figures_dir: Path | None, suffix: str = "") -> list[Path]:
     """The train-against-validation figure, or nothing if it cannot be drawn.
 
     `figures_dir` is a parameter rather than a module constant read at call time
@@ -454,7 +454,7 @@ def _sweep_figures(sweep: pd.DataFrame, figures_dir: Path | None) -> list[Path]:
 
     if figures_dir is None or not plots.available():
         return []
-    return [plots.complexity_gap(sweep, figures_dir / "complexity_gap.png")]
+    return [plots.complexity_gap(sweep, figures_dir / f"complexity_gap{suffix}.png")]
 
 
 def log_experiments(
@@ -469,6 +469,7 @@ def log_experiments(
     fold_evidence: tuple[pd.DataFrame, dict[str, float]] | None = None,
     serve_time: pd.DataFrame | None = None,
     figures_dir: Path | None = None,
+    figure_suffix: str = "",
 ) -> int:
     """Write every experiment this module runs to the tracking store.
 
@@ -556,7 +557,7 @@ def log_experiments(
     if sweep is not None and not sweep.empty:
         # The gap plot describes all six settings at once and belongs to none of
         # them, so it hangs on the family parent rather than on a child.
-        sweep_figures = _sweep_figures(sweep, figures_dir)
+        sweep_figures = _sweep_figures(sweep, figures_dir, figure_suffix)
         # Read from the sweep's own definition rather than from the result frame.
         # Settings override different knobs, so the frame carries a NaN wherever a
         # setting left one alone, and logging that NaN as a parameter would record
@@ -800,6 +801,9 @@ def write_report(
     tracking_note: str | None = None,
     prov: provenance.Provenance | None = None,
 ) -> None:
+    from src import plots
+
+    figure_suffix = plots.report_suffix(path, "model_results")
     reference = analytic_reference(frame)
     derived = ", ".join(f"`{name}`" for name in DERIVED_COLUMNS)
     lines = [
@@ -889,7 +893,7 @@ def write_report(
         tracking_note or "Tracking status not recorded.",
         "",
     ]
-    gap_figure = Path("reports/figures/complexity_gap.png")
+    gap_figure = Path(f"reports/figures/complexity_gap{figure_suffix}.png")
     if gap_figure.exists():
         lines[-1:-1] = [
             "",
@@ -944,6 +948,7 @@ def _track(args, frame, split, ladder, ablations, sweep, fold_evidence, serve_ti
         fold_evidence=fold_evidence,
         serve_time=serve_time,
         figures_dir=plots.FIGURES_DIR,
+        figure_suffix=plots.report_suffix(args.out, "model_results"),
     )
     print(f"logged {written} run(s) to experiment {args.experiment!r} at {args.tracking_uri}")
     return (

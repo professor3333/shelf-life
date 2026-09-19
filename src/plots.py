@@ -50,6 +50,17 @@ import pandas as pd
 #: build directory, because the reader of `reports/*.md` is the audience.
 FIGURES_DIR = Path("reports/figures")
 
+
+def report_suffix(report: Path, stem: str) -> str:
+    """What a report's name adds to its default stem — `""` for the build's
+    horizon, `"_h1_calendar"` for `model_comparison_h1_calendar.md` — carried
+    onto the figures that report embeds, so a rehearsal at another horizon
+    never paints over the build's pictures the way it once wrote over its
+    tables."""
+    name = report.stem
+    return name[len(stem) :] if name.startswith(stem) else ""
+
+
 #: One ink colour and one accent, both legible in grey-scale and distinguishable
 #: under the common colour-vision deficiencies. Two is enough: every figure here
 #: compares at most two series, and a palette wide enough to need a legend is a
