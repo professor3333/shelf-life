@@ -356,7 +356,7 @@ def test_a_gap_inside_one_standard_deviation_hands_the_pick_to_the_simpler_model
     `forest` has the higher mean and loses anyway, because the lead is smaller
     than its own fold-to-fold spread and `logistic` is earlier in the ladder.
     Complexity has to be *bought* with a lead that survives fold variance;
-    CLAUDE.md §4.4 is explicit that reaching the top rung is not the goal.
+    The build's rule is explicit that reaching the top rung is not the goal.
     """
     summary = pd.DataFrame({"model": ["forest", "logistic"], "cv_pr_auc_mean": [0.44, 0.43]})
     per_fold = {
@@ -372,7 +372,7 @@ def test_a_gap_inside_one_standard_deviation_hands_the_pick_to_the_simpler_model
 
 
 def test_a_fitted_model_that_cannot_separate_from_a_rule_loses_to_the_rule():
-    """CLAUDE.md §4.4 #12, enforced by the ladder's ordering rather than beside it.
+    """The baseline rule, enforced by the ladder's ordering rather than beside it.
 
     `age_ceiling` is a heuristic rung — the best any age-only rule could do — and
     it sits early in the ladder. An XGBoost that leads it on the mean but not

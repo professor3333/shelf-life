@@ -6,7 +6,7 @@
 #     ./scripts/rehearse.sh --check    # report the depth and run nothing
 #
 # **Why this stops short of `freeze`.** The test block opens once
-# (`CLAUDE.md` §4.2, `docs/design.md`). A legal split arrives days before one
+# (`docs/design.md` §8). A legal split arrives days before one
 # deep enough to cut rolling-origin folds from, so the first split this script
 # can run on is real but has no error bars — exactly the split you do *not*
 # want to spend the test set on. So it runs `train_baseline`, `train`,
