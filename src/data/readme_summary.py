@@ -12,7 +12,7 @@ that can drift are the ones a test holds equal to the reports.
 Canonical sources, and what is taken from each:
 
     reports/readiness.md          snapshot, the two gates, legal cuts today
-    reports/model_comparison.md   horizon, the ladder table, the verdict
+    reports/model_comparison_h1_calendar.md   horizon, the ladder table, the verdict
     reports/test_results.md       whether the held-out block has been opened
     reports/depth_ledger.jsonl    how many real and synthetic runs are kept
 
@@ -69,7 +69,7 @@ def _kv(text: str, key: str) -> str | None:
 
 def read(reports: Path = REPORTS) -> dict:
     readiness = (reports / "readiness.md").read_text()
-    comparison = (reports / "model_comparison.md").read_text()
+    comparison = (reports / "model_comparison_h1_calendar.md").read_text()
     held_out = (reports / "test_results.md").read_text()
     ledger_path = reports / "depth_ledger.jsonl"
     ledger = [
@@ -149,7 +149,8 @@ def render(state: dict) -> str:
             else ""
         )
         lines.append(
-            f"- **H=1 rehearsal** ([`model_comparison.md`](reports/model_comparison.md); "
+            f"- **H=1 rehearsal** ([`model_comparison_h1_calendar.md`]"
+            f"(reports/model_comparison_h1_calendar.md); "
             f"{state['h1_horizon']}): {state['candidates']} candidates, "
             f"{state['folds_scored']} rolling-origin folds scored. Verdict: **{chosen}** — "
             f"{reason}.{best_text}"

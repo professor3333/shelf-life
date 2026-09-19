@@ -392,6 +392,20 @@ def test_the_scripts_pass_the_panel_to_every_step_they_run():
         assert '--panel "${PANEL}"' in line, f"{module} is run without --panel"
 
 
+def test_a_rehearsal_at_another_horizon_keeps_its_ladder_reports_apart():
+    """`model_comparison.md` is the selection record a freeze is read against.
+    The H=1 smoke test wrote all four ladder reports over the H=7 names, so a
+    rehearsal run after the real comparison would have replaced that record
+    with another horizon's table. Each ladder report at any horizon but the
+    build's carries the horizon in its name, as the label audit already did."""
+    from pathlib import Path
+
+    script = Path("scripts/rehearse.sh").read_text()
+    assert 'LADDER_SUFFIX="_h${HORIZON}_${BASIS}"' in script
+    for report in ("baseline_results", "model_results", "experiment_log", "model_comparison"):
+        assert f'--out "reports/{report}${{LADDER_SUFFIX}}.md"' in script, report
+
+
 # --- a posting cannot close before it is first seen --------------------------
 
 

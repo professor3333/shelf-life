@@ -126,10 +126,25 @@ echo "== the ladder, on validation only"
 # H=7 panel, so leaving it off worked by coincidence at H=7 and silently read a
 # different horizon's parquet at any other — the gate above would report one
 # panel and the ladder below would score another.
-"${PYTHON}" -m src.models.train_baseline --panel "${PANEL}"
-"${PYTHON}" -m src.models.train --panel "${PANEL}"
-"${PYTHON}" -m src.models.experiments --panel "${PANEL}"
-"${PYTHON}" -m src.models.evaluate --panel "${PANEL}"
+# The four ladder reports at the build's horizon keep their plain names —
+# `model_comparison.md` is the selection record `freeze`, the ledger and the
+# model card all point at. At any other horizon they are written beside those,
+# the way the label audit above is: the H=1 smoke test used to write all four
+# over the H=7 names, so a rehearsal run after the real comparison would have
+# replaced the record a freeze is read against with a different horizon's.
+if [ "${HORIZON}" = "7" ] && [ "${BASIS}" = "calendar" ]; then
+  LADDER_SUFFIX=""
+else
+  LADDER_SUFFIX="_h${HORIZON}_${BASIS}"
+fi
+"${PYTHON}" -m src.models.train_baseline --panel "${PANEL}" \
+  --out "reports/baseline_results${LADDER_SUFFIX}.md"
+"${PYTHON}" -m src.models.train --panel "${PANEL}" \
+  --out "reports/model_results${LADDER_SUFFIX}.md"
+"${PYTHON}" -m src.models.experiments --panel "${PANEL}" \
+  --out "reports/experiment_log${LADDER_SUFFIX}.md"
+"${PYTHON}" -m src.models.evaluate --panel "${PANEL}" \
+  --out "reports/model_comparison${LADDER_SUFFIX}.md"
 # The fingerprint at this horizon, beside the H=1 one the report was first
 # written on: the release gate in `freeze` reads transfer on the candidate, and
 # this is the record of what there was to transfer past. Its own file at any
