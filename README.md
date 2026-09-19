@@ -83,7 +83,7 @@ those reports and held equal to them by a test — the one place in this file
 where a moving number lives.
 
 <!-- generated: begin — python -m src.data.readme_summary; do not edit by hand -->
-**Current state, read from the generated reports** — snapshot `2026-09-18`, regenerated at `36bdd499a`:
+**Current state, read from the generated reports** — snapshot `2026-09-18`, regenerated at `1e78edb74`:
 
 - **H=7 readiness** ([`readiness.md`](reports/readiness.md)): 11 labelled waves. A legal split needs 22 (short by 11, projected 2026-09-29); three rolling-origin folds need 34 (short by 23, projected 2026-10-11). Legal cuts today: 0.
 - **H=7 held-out block** ([`test_results.md`](reports/test_results.md)): **not opened**; the report records the refusal.
