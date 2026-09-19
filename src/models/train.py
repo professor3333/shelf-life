@@ -911,9 +911,9 @@ def _track(args, frame, split, ladder, ablations, sweep, fold_evidence, serve_ti
 
     The return value is the point as much as the logging is. An untracked run
     that says nothing looks exactly like a tracked one in the report, and
-    `CLAUDE.md` §4.6 asks that every run record its params, metrics, dataset
-    version and git SHA — a requirement that quietly stops holding is worse than
-    one that was never claimed.
+    every run must record its params, metrics, dataset version and git SHA —
+    a requirement that quietly stops holding is worse than one that was never
+    claimed.
     """
     if blocker is not None or split is None:
         return "Not tracked: nothing ran, so there is no run to log."

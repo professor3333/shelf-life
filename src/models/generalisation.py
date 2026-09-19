@@ -3,7 +3,7 @@
 `docs/design.md` §4 leaves "is `source` a feature?" open, and the model card
 says plainly that this is essentially a Greenhouse model. Both are statements
 about the same worry, and neither is measured by the per-source breakdown
-`CLAUDE.md` §4.5 already requires — that scores each board with a model **fitted
+the per-source breakdown already requires — that scores each board with a model **fitted
 on it**, which answers "does it work here" rather than "would it work somewhere
 new".
 

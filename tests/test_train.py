@@ -613,7 +613,7 @@ def test_an_untracked_run_says_so_in_the_report():
 
     MLflow is an optional extra, so the ladder has to run without it — but an
     untracked run that says nothing looks exactly like a tracked one in the
-    report, and `CLAUDE.md` §4.6 asks that every run record its params, metrics,
+    report, and every run records its params, metrics,
     dataset version and git SHA.
     """
     import argparse

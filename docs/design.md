@@ -244,7 +244,7 @@ it has to be applied to four columns and one missingness pattern together. See
 
 **How it gets answered — added 2026-09-07.** This section and the model card's
 "essentially a Greenhouse model" caveat are the same worry, and neither was
-measured. The per-source breakdown `CLAUDE.md` §4.5 requires is weaker evidence
+measured. The per-source breakdown the build requires is weaker evidence
 than it looks: it scores each board with a model **fitted on that board**, which
 answers *does it work here* rather than *would it work somewhere new*.
 
@@ -1812,12 +1812,12 @@ section.
    subtracting leaves a week's weather in the answer.
 3. **Parsimony decides among equals.** From the leader and everything tied with
    it, take the one earliest in `LADDER` — the simplest. Only a lead that survives
-   fold variance buys complexity. `CLAUDE.md` §4.4: *the goal is not to reach the
+   fold variance buys complexity. The build's own rule: *the goal is not to reach the
    top rung, it is to learn whether increasing model complexity actually buys
    anything on this problem.*
 4. **The heuristic floor is a gate.** If the pick is a fitted model whose lead over
    the best `HEURISTIC_RUNGS` entry does not itself survive fold variance, the
-   heuristic is selected instead. `CLAUDE.md` §4.4 #12: *a model that does not beat
+   heuristic is selected instead. The baseline rule: *a model that does not beat
    the baseline is not a model, it is a slower baseline.*
 
 ### What this changes, and the bug it closes

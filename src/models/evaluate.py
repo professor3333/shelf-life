@@ -546,7 +546,7 @@ def select(summary: pd.DataFrame, per_fold: dict[str, pd.DataFrame]) -> dict[str
 
     Step 3 is what the old implementation documented and did not do: it returned
     the highest mean whatever the spread, so a boosted model half a standard
-    deviation ahead of a logistic regression was crowned, and `CLAUDE.md` §4.4 is
+    deviation ahead of a logistic regression was crowned, and the build's rule is
     explicit that this is backwards — *"the goal is not to reach the top rung, it
     is to learn whether increasing model complexity actually buys anything"*.
 
@@ -563,7 +563,7 @@ def select(summary: pd.DataFrame, per_fold: dict[str, pd.DataFrame]) -> dict[str
     `age_only` — a fitted model that does not beat a constant — and the gate
     returns `prior`.
 
-    Together they are `CLAUDE.md` §4.4 #12: *a model that does not beat the
+    Together they are the baseline rule: *a model that does not beat the
     baseline is not a model, it is a slower baseline.*
     """
     scored = summary.dropna(subset=["cv_pr_auc_mean"]).copy()
@@ -644,7 +644,7 @@ def select(summary: pd.DataFrame, per_fold: dict[str, pd.DataFrame]) -> dict[str
         reason = (
             f"no fitted model separated from {chosen}: {beaten} was the simplest of those "
             f"tied with {leader}, and its lead over {chosen} does not survive fold "
-            f"variance either. CLAUDE.md §4.4 #12 — a model that does not beat the "
+            f"variance either. A model that does not beat the "
             f"baseline is not a model, it is a slower baseline."
         )
         floor = _floor(chosen, eligible, per_fold)
@@ -778,7 +778,7 @@ def _complexity_reading(summary: pd.DataFrame, frame_for_caveat: pd.DataFrame) -
     produce, which is why the rule requires folds before anything is chosen.
 
     It is written because the negative finding is worth stating early.
-    `CLAUDE.md` §4.4: the goal is not to reach the top rung, it is to learn
+    The build's rule: the goal is not to reach the top rung, it is to learn
     whether increasing complexity buys anything — and *it did not, here* is a
     finding about the data to be written down rather than tuned past. If it
     survives fold depth, step 4 of the rule returns a heuristic and this project
@@ -819,7 +819,7 @@ def _complexity_reading(summary: pd.DataFrame, frame_for_caveat: pd.DataFrame) -
         consequence = (
             "If that holds once folds exist, step 4 of the rule returns the heuristic and "
             "this project ships a rule a person could follow without a computer. That is a "
-            "legitimate result and not a failure to produce a model: `CLAUDE.md` §4.4 asks "
+            "legitimate result and not a failure to produce a model: the ladder asks "
             "whether increasing complexity buys anything, and *it did not* is an answer."
         )
 
