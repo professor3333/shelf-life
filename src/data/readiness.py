@@ -58,11 +58,30 @@ def render(panel: pd.DataFrame, prov, now: pd.Timestamp | None = None) -> str:
     accrual = accrual_status(panel, now=now)
     usable = int(feasible_cuts(panel)["valid"].sum())
 
+    if accrual["stalled"]:
+        verdict = "**No — the panel is not accruing.** Check the collector before proceeding."
+    elif usable == 0:
+        verdict = (
+            "**No.** No usable three-way split exists. Depth alone does not guarantee "
+            "usable labels in every block."
+        )
+    elif depth["folds_shortfall"] > 0 or depth["folds_available"] < depth["target_folds"]:
+        verdict = (
+            "**Not yet.** A legal split exists, but the panel does not support "
+            f"{depth['target_folds']} rolling-origin folds for model selection."
+        )
+    else:
+        verdict = (
+            "**Yes — the depth gates are open.** Run the validation rehearsal. "
+            "Model selection still requires review before a deliberate freeze opens "
+            "the held-out block."
+        )
+
     lines = [
         "# Readiness — can the seven-day model be trained yet?",
         "",
         *provenance.header(prov, "python -m src.data.readiness", horizon_banner(panel)),
-        "**No.** What follows is how far off, and whether the distance is closing.",
+        verdict,
         "",
         "## Is the panel still accruing?",
         "",
