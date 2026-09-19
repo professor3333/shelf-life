@@ -88,7 +88,7 @@ where a moving number lives.
 - **H=7 readiness** ([`readiness.md`](reports/readiness.md)): 11 labelled waves. A legal split needs 22 (short by 11, projected 2026-09-29); three rolling-origin folds need 34 (short by 23, projected 2026-10-11). Legal cuts today: 0.
 - **H=7 held-out block** ([`test_results.md`](reports/test_results.md)): **not opened**; the report records the refusal.
 - **H=1 rehearsal** ([`model_comparison.md`](reports/model_comparison.md); H=1 (calendar basis) — a pipeline smoke test, not the build's horizon): 10 candidates, 4 rolling-origin folds scored. Verdict: **random_forest** — random_forest leads xgboost by 0.1115 PR-AUC, winning 3 of 4 folds, and the lead is larger than its own spread. Best single validation draw: `random_forest` at PR-AUC 0.11 against a prior of 0.0203. Selection is based on the fold comparison.
-- **Depth ledger** ([`depth_ledger.md`](reports/depth_ledger.md)): 2 real run(s) kept, 1 synthetic.
+- **Depth ledger** ([`depth_ledger.md`](reports/depth_ledger.md)): 2 real run(s) kept, 2 synthetic.
 - **Latest data profile**: [`data_profile_2026-09-18.md`](reports/data_profile_2026-09-18.md).
 <!-- generated: end -->
 
