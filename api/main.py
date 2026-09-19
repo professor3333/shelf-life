@@ -79,7 +79,12 @@ ARTIFACT_TAG_ENV = "SHELF_LIFE_ARTIFACT_TAG"
 
 DESCRIPTION = """
 Predicts whether a job posting will be **removed from the board** within the
-model's horizon, from information available at the moment it is first seen.
+model's horizon, from information available at the moment it is scored — the
+request's `as_of`, now by default. Any posting on the board is a valid subject,
+not only one that has just appeared: a posting up for three weeks is scored as
+it stands today, and how long it has been up is itself an input. The product is
+a ranking of today's whole board, and `/rank` and the board endpoints exist
+for exactly that.
 
 *Removed is not filled.* A posting can be pulled, expire, or be reposted
 elsewhere. The label is absence from the board, and no claim beyond that is
