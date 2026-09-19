@@ -30,6 +30,8 @@
 # What HTTP cannot see is the rendered page — Streamlit draws it over a
 # WebSocket — so the fourth check, the one that catches the secret and the
 # network path to the API, needs a browser: `scripts/smoke_ui_browser.py`.
+# Run the browser check first for a sleeping app: its normal wake button can
+# succeed when the anonymous HTTP resume request is rejected.
 #
 # Exit codes: 0 all three passed · 1 a check failed · 2 usage.
 
@@ -86,8 +88,13 @@ while :; do
     IS_SHUTDOWN)
       if [ "${woken}" -eq 0 ]; then
         echo "    app status       IS_SHUTDOWN — asleep after inactivity; waking it, as a visitor's click would"
-        curl -sS -X POST -c "${JAR}" -b "${JAR}" --max-time 60 -o /dev/null \
-          "${BASE_URL}/api/v2/app/resume" || true
+        resume_code=$(curl -sS -X POST -c "${JAR}" -b "${JAR}" --max-time 60 \
+          -o /dev/null -w '%{http_code}' "${BASE_URL}/api/v2/app/resume") \
+          || fail "wake request did not answer — run scripts/smoke_ui_browser.py first"
+        case "${resume_code}" in
+          2??) ;;
+          *) fail "wake request returned HTTP ${resume_code} — run scripts/smoke_ui_browser.py first" ;;
+        esac
         woken=1
       fi ;;
     USER_ERROR|PLATFORM_ERROR|INSTALLER_ERROR|USER_SCRIPT_ERROR|DELETED|DELETING|POTENTIAL_MINER_DETECTED)

@@ -865,6 +865,9 @@ def test_the_deployed_ui_is_verified_after_app_changes(workflow_text: str) -> No
     steps = "\n".join(step.get("run", "") for step in workflow["jobs"]["verify-ui"]["steps"])
     assert "./scripts/smoke_ui.sh" in steps
     assert "scripts/smoke_ui_browser.py" in steps
+    assert steps.index("scripts/smoke_ui_browser.py") < steps.index("./scripts/smoke_ui.sh"), (
+        "the browser must wake a sleeping app before the HTTP health check"
+    )
     assert "vars.SHELF_LIFE_UI" in workflow_text and "skip=true" in steps
 
     assert "playwright" not in (ROOT / "pyproject.toml").read_text()

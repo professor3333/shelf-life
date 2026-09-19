@@ -4,6 +4,22 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-18 — deployment verification could not wake the sleeping UI
+
+- **Problem:** The public UI verification failed after eight minutes with
+  `IS_SHUTDOWN`, while the application tests and CI passed.
+- **Root cause:** The HTTP resume endpoint returned 403, but the smoke script
+  discarded its response and polled as though wake-up had succeeded. The
+  browser check, which can use the normal wake button, ran only afterward.
+- **Solution:** The deployment workflow now runs the browser check first.
+  `scripts/smoke_ui.sh` reports rejected or failed wake requests immediately.
+  The public browser button restored the UI and its API connection; offline
+  tests cover HTTP 403 and a transport failure without polling.
+- **Lesson:** Check the result of a state-changing request before waiting
+  for its effect. Run a dependent health check after the supported wake flow.
+
+---
+
 ## 2026-09-18 — report refreshes could freeze a model after the depth gate opened
 
 - **Problem:** The diagnostic refresh invoked `freeze` with a fixed XGBoost
