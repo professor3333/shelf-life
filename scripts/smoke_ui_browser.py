@@ -41,7 +41,7 @@ import time
 
 #: The sentence `app/streamlit_app.py` puts under its title. Its presence is
 #: how "the app rendered" is decided — the host's own pages never contain it.
-CAPTION = "Will this job posting come off the board soon?"
+CAPTION = "Which postings on today's board will come off it soon?"
 
 #: The page opens on the board-ranking mode — the product (`design.md` §15) —
 #: with or without a model: without one the buttons are disabled and the

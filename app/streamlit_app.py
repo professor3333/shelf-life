@@ -107,8 +107,9 @@ api = Api(api_url_from(st.session_state.get("api_url", ""), _secret_api_url()))
 
 st.title("shelf-life")
 st.caption(
-    "Will this job posting come off the board soon? A prediction made from what "
-    "is knowable the moment the posting is first seen."
+    "Which postings on today's board will come off it soon? A prediction made "
+    "from what is knowable about a posting as it stands now — however long it "
+    "has already been up."
 )
 
 # --- is there anything to talk to? ------------------------------------------
