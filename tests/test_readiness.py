@@ -20,6 +20,10 @@ def test_a_shallow_panel_reports_both_gates_and_no_legal_cut():
     assert "| 3 rolling-origin folds |" in text
     assert "Legal cuts available today: **0**" in text
     assert "## What runs on the day it clears" in text
+    # Short on depth is a different finding from deep-but-label-starved, and the
+    # headline must not describe the second when the first is what happened.
+    assert "**No.** The panel is" in text and "short of a legal split" in text
+    assert "Depth alone" not in text
 
 
 def test_a_deep_panel_reports_a_legal_cut():
@@ -44,7 +48,8 @@ def test_depth_without_usable_labels_is_not_ready():
     now = pd.Timestamp(panel["t"].max()) + pd.Timedelta(hours=1)
     text = readiness.render(panel, None, now=now)
     assert "Legal cuts available today: **0**" in text
-    assert "**No.** No usable three-way split exists" in text
+    assert "**No.** The panel is deep enough, but no usable three-way split exists" in text
+    assert "short of a legal split" not in text
 
 
 def test_a_stalled_panel_is_named_as_stalled_not_projected():
