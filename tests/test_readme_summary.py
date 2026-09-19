@@ -27,7 +27,12 @@ def test_the_block_reads_the_canonical_reports_and_names_them():
     assert state["snapshot"] and state["sha"]
     assert set(state["gates"]) >= {"a legal three-way split", "3 rolling-origin folds"}
     block = readme_summary.render(state)
-    for report in ("readiness.md", "test_results.md", "model_comparison.md", "depth_ledger.md"):
+    for report in (
+        "readiness.md",
+        "test_results.md",
+        "model_comparison_h1_calendar.md",
+        "depth_ledger.md",
+    ):
         assert f"reports/{report}" in block
     assert block.startswith(readme_summary.BEGIN) and block.endswith(readme_summary.END)
 
@@ -46,7 +51,7 @@ def test_a_large_single_draw_is_reported_as_a_draw_not_a_selection(tmp_path):
         "| 3 rolling-origin folds | 34 | 6 | 28 | 2026-10-03 |\n\n"
         "Legal cuts available today: **0**.\n"
     )
-    (reports / "model_comparison.md").write_text(
+    (reports / "model_comparison_h1_calendar.md").write_text(
         "| Horizon | H=1 (calendar basis) |\n\n"
         "| model | folds_scored | cv_pr_auc_mean | cv_pr_auc_sd | val_pr_auc |\n"
         "|---|---|---|---|---|\n"

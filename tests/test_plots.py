@@ -154,3 +154,22 @@ def test_figures_carry_no_library_version_in_their_bytes(tmp_path):
     )
     path = plots.complexity_gap(sweep, tmp_path / "gap.png")
     assert b"matplotlib version" not in path.read_bytes()
+
+
+def test_a_report_named_for_another_horizon_names_its_figures_the_same_way():
+    """`model_comparison_h1_calendar.md` draws `calibration_h1_calendar.png`;
+    the build's own report keeps the plain names. A path that is not that
+    report at all carries nothing over."""
+    from pathlib import Path
+
+    from src import plots
+
+    assert plots.report_suffix(Path("reports/model_comparison.md"), "model_comparison") == ""
+    assert (
+        plots.report_suffix(Path("reports/model_comparison_h1_calendar.md"), "model_comparison")
+        == "_h1_calendar"
+    )
+    assert plots.report_suffix(Path("/tmp/x/model_results_h1_calendar.md"), "model_results") == (
+        "_h1_calendar"
+    )
+    assert plots.report_suffix(Path("somewhere/else.md"), "model_comparison") == ""

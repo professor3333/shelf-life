@@ -445,8 +445,14 @@ def write_figures(
     split: SplitResult,
     val_scores: dict[str, np.ndarray],
     figures_dir: Path,
+    suffix: str = "",
 ) -> list[Path]:
     """The PR curve and the calibration diagram, for a fixed spread of the ladder.
+
+    `suffix` is the report's own: a comparison written as
+    `model_comparison_h1_calendar.md` draws `calibration_h1_calendar.png`, so a
+    rehearsal at another horizon never paints over the build's pictures the
+    way it once wrote over its tables.
 
     **These do not need a chosen model, and that is deliberate.** Every table
     below the verdict waits for a selection the panel cannot yet support, but a
@@ -467,11 +473,11 @@ def write_figures(
         curves[name] = (recall, precision)
 
     pr_path = plots.precision_recall(
-        curves, float(target.mean()), figures_dir / "precision_recall.png"
+        curves, float(target.mean()), figures_dir / f"precision_recall{suffix}.png"
     )
     calibration_path = plots.calibration(
         {name: reliability_curve(target, val_scores[name]) for name in drawn},
-        figures_dir / "calibration.png",
+        figures_dir / f"calibration{suffix}.png",
         eces={name: expected_calibration_error(target, val_scores[name]) for name in drawn},
     )
     return [pr_path, calibration_path]
@@ -1270,7 +1276,7 @@ def _first_observation_section(table: pd.DataFrame | None) -> list[str]:
     ]
 
 
-def _draw(val_scores, split, panel_path: Path, n_rows: int) -> list[Path]:
+def _draw(val_scores, split, panel_path: Path, n_rows: int, suffix: str = "") -> list[Path]:
     """Render the figures and log them, or say why not.
 
     Never fails the report over a picture, and never over a tracking server
@@ -1284,7 +1290,7 @@ def _draw(val_scores, split, panel_path: Path, n_rows: int) -> list[Path]:
         print("matplotlib is not installed — no figures. `pip install -e '.[plots]'`")
         return []
 
-    figures = write_figures(split, val_scores, plots.FIGURES_DIR)
+    figures = write_figures(split, val_scores, plots.FIGURES_DIR, suffix)
     run = tracking.log_figure_run(
         "comparison diagnostics",
         figures,
@@ -1311,11 +1317,14 @@ def main() -> None:
     generalisation = None
     by_source = by_carryover = by_first_observation = by_cohort = blocker = None
     recalibration = validation_intervals = board_context_decision = None
+    from src import plots
+
+    figure_suffix = plots.report_suffix(args.out, "model_comparison")
     try:
         split = temporal_split(frame, best_cuts(frame))
         summary, per_fold, val_scores = compare_models(split, args.budget)
         verdict = select(summary, per_fold)
-        figures = _draw(val_scores, split, args.panel, len(frame))
+        figures = _draw(val_scores, split, args.panel, len(frame), figure_suffix)
         print(summary.to_string(index=False))
         print(f"\nchosen: {verdict['chosen']} — {verdict['reason']}")
 
