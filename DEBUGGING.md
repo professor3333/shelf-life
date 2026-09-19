@@ -20,6 +20,24 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-18 — report refreshes could freeze a model after the depth gate opened
+
+- **Problem:** The diagnostic refresh invoked `freeze` with a fixed XGBoost
+  candidate, and readiness still said "No" on a synthetic panel with four
+  usable folds. An isolated shell test reproduced the refresh overwriting
+  held-out evidence when the invoked commands succeeded.
+- **Root cause:** The refresh relied on today's shallow panel to prevent a
+  freeze. The readiness headline also treated today's refusal as permanent.
+- **Solution:** `scripts/regenerate_reports.sh` no longer invokes `freeze`
+  and preserves the held-out report. `src/data/readiness.py` derives its
+  headline from accrual, legal cuts and the existing fold gate. Regression
+  tests exercise shallow, usable, stalled and label-deficient panels, plus
+  a successful refresh that must preserve held-out evidence.
+- **Lesson:** Test both sides of a changing data gate. A temporary refusal
+  cannot protect an operation that must always remain deliberate.
+
+---
+
 ## 2026-09-17 — the status summary contradicted the first selected rehearsal model
 
 - **Problem:** The September 17 refresh selected `random_forest` across three

@@ -30,6 +30,7 @@ Findings about job postings.
 | snapshot_date | waves | positives | base_rate | folds | chosen | period | pr_auc | pr_auc_ci | precision_at_budget | lift_at_budget | cv_pr_auc_mean | cv_pr_auc_sd | stage |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 2026-09-17 | 16 | 206 | 0.0112 | 3 | random_forest | 2026-09-10 – 2026-09-11 | 0.0838 | — | 0.1000 | 4.9362 | 0.2053 | 0.1245 | validation |
+| 2026-09-18 | 17 | 226 | 0.0116 | 4 | random_forest | 2026-09-10 – 2026-09-11 | 0.1100 | — | 0.1000 | 4.9362 | 0.1990 | 0.1024 | validation |
 
 ## Synthetic panel
 
@@ -38,6 +39,7 @@ Machinery checks on `tests/panels.py`, whose label is drawn independently of eve
 | snapshot_date | waves | positives | base_rate | folds | chosen | period | pr_auc | pr_auc_ci | precision_at_budget | lift_at_budget | cv_pr_auc_mean | cv_pr_auc_sd | stage |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 2026-09-11 | 18 | 143 | 0.1230 | 5 | 05-xgboost_engineered | — | 0.1830 | [0.1012, 0.3102] | — | — | — | — | held_out |
+| 2026-09-18 | 18 | 143 | 0.1230 | 5 | 05-xgboost_engineered | 2026-09-15 – 2026-09-17 | 0.1830 | [0.1012, 0.3102] | 0.1833 | 1.7893 | — | — | held_out |
 
 A dash in `cv_pr_auc_sd` means CV spread was not recorded for that row.
 It can be unavailable when fewer than two folds scored; `held_out` rows
@@ -45,4 +47,4 @@ do not store CV summaries even when folds exist. Their posting-clustered
 bootstrap interval is reported separately in `pr_auc_ci`. A missing CV
 spread does not imply that the run has no uncertainty estimate.
 
-1 of 2 row(s) were recorded from a **dirty tree** and are provisional: the code that produced them is not any commit.
+1 of 4 row(s) were recorded from a **dirty tree** and are provisional: the code that produced them is not any commit.

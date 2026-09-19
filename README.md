@@ -83,13 +83,13 @@ those reports and held equal to them by a test — the one place in this file
 where a moving number lives.
 
 <!-- generated: begin — python -m src.data.readme_summary; do not edit by hand -->
-**Current state, read from the generated reports** — snapshot `2026-09-17`, regenerated at `28c7ef6bf`:
+**Current state, read from the generated reports** — snapshot `2026-09-18`, regenerated at `1e78edb74`:
 
-- **H=7 readiness** ([`readiness.md`](reports/readiness.md)): 10 labelled waves. A legal split needs 22 (short by 12, projected 2026-09-29); three rolling-origin folds need 34 (short by 24, projected 2026-10-11). Legal cuts today: 0.
+- **H=7 readiness** ([`readiness.md`](reports/readiness.md)): 11 labelled waves. A legal split needs 22 (short by 11, projected 2026-09-29); three rolling-origin folds need 34 (short by 23, projected 2026-10-11). Legal cuts today: 0.
 - **H=7 held-out block** ([`test_results.md`](reports/test_results.md)): **not opened**; the report records the refusal.
-- **H=1 rehearsal** ([`model_comparison.md`](reports/model_comparison.md); H=1 (calendar basis) — a pipeline smoke test, not the build's horizon): 10 candidates, 3 rolling-origin folds scored. Verdict: **random_forest** — random_forest ties with xgboost inside fold variance and is already the simplest of them, so it stands. Best single validation draw: `random_forest` at PR-AUC 0.0838 against a prior of 0.0203. Selection is based on the fold comparison.
-- **Depth ledger** ([`depth_ledger.md`](reports/depth_ledger.md)): 1 real run(s) kept, 1 synthetic.
-- **Latest data profile**: [`data_profile_2026-09-17.md`](reports/data_profile_2026-09-17.md).
+- **H=1 rehearsal** ([`model_comparison.md`](reports/model_comparison.md); H=1 (calendar basis) — a pipeline smoke test, not the build's horizon): 10 candidates, 4 rolling-origin folds scored. Verdict: **random_forest** — random_forest leads xgboost by 0.1115 PR-AUC, winning 3 of 4 folds, and the lead is larger than its own spread. Best single validation draw: `random_forest` at PR-AUC 0.11 against a prior of 0.0203. Selection is based on the fold comparison.
+- **Depth ledger** ([`depth_ledger.md`](reports/depth_ledger.md)): 2 real run(s) kept, 2 synthetic.
+- **Latest data profile**: [`data_profile_2026-09-18.md`](reports/data_profile_2026-09-18.md).
 <!-- generated: end -->
 
 ---
@@ -961,11 +961,13 @@ cold-start gate. `freeze` sits by itself because it is the only line in the
 project that reads the test block, and it happens after the threshold is chosen
 and before anything is published.
 
-**Every report is regenerated from a clean tree, together.** `./scripts/regenerate_reports.sh`
-refuses if anything outside `reports/` is uncommitted, then runs every
-generator in the pipeline's order — pin and build, the H=7 audits, the H=7
-gate, the H=1 rehearsal, the ledger — so each report's `Code` row names a
-commit that reproduces it. The day the gate clears: merge → clean `main` → CI
+**Diagnostic reports are regenerated from a clean tree, together.** `./scripts/regenerate_reports.sh`
+refuses if anything outside `reports/` is uncommitted, then runs the diagnostic
+generators in the pipeline's order — pin and build, the H=7 audits and fingerprint,
+the H=1 rehearsal, the ledger — so each report's `Code` row names a
+commit that reproduces it. It never invokes `freeze`; `reports/test_results.md`
+keeps its previous evidence and provenance until the deliberate freeze.
+The day the gate clears: merge → clean `main` → CI
 green → this script → commit the reports → `freeze`, in that order, so the
 evidence is in history before the result that is read against it.
 

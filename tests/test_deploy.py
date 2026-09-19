@@ -25,6 +25,8 @@ import json
 import os
 import plistlib
 import re
+import subprocess
+import sys
 from fnmatch import fnmatch
 from pathlib import Path
 
@@ -885,14 +887,53 @@ def test_the_regeneration_runs_only_modules_that_exist() -> None:
 
 
 def test_the_regeneration_refuses_dirty_source_and_never_opens_the_block_itself() -> None:
-    """It refuses uncommitted source outside reports/, and the only freeze it
-    runs is the H=7 one, which refuses on depth until the gate clears — the
-    same freeze the day-of sequence runs, not a shortcut around it."""
+    """Report refreshes stay safe after the data becomes deep enough to freeze."""
     script = (ROOT / "scripts" / "regenerate_reports.sh").read_text()
     assert "git status --porcelain -- . ':!reports'" in script
     assert "exit 3" in script
     assert "--synthetic" not in script and "--accept-no-folds" not in script
+    assert "src.models.freeze" not in _invoked_modules(script)
     assert os.access(ROOT / "scripts" / "regenerate_reports.sh", os.X_OK)
+
+
+def test_regeneration_keeps_held_out_evidence_when_every_command_succeeds(tmp_path):
+    """A clean, deep-panel run must leave the previous held-out report intact.
+
+    Stub external commands so this exercises the shell orchestration without
+    touching real data. A successful freeze would overwrite the evidence.
+    """
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "regenerate_reports.sh").write_text(
+        (ROOT / "scripts" / "regenerate_reports.sh").read_text()
+    )
+    rehearsal = scripts / "rehearse.sh"
+    rehearsal.write_text("#!/bin/sh\nexit 0\n")
+    rehearsal.chmod(0o755)
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    evidence = reports / "test_results.md"
+    evidence.write_text("previous held-out evidence\n")
+    fake_git = tmp_path / "git"
+    fake_git.write_text("#!/bin/sh\nexit 0\n")
+    fake_git.chmod(0o755)
+    fake_python = tmp_path / "python"
+    fake_python.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\nfrom pathlib import Path\n"
+        "if sys.argv[1:3] == ['-m', 'src.models.freeze']:\n"
+        "    Path('reports/test_results.md').write_text('test block opened')\n"
+    )
+    fake_python.chmod(0o755)
+    result = subprocess.run(
+        ["bash", str(scripts / "regenerate_reports.sh"), "--no-net"],
+        env={**os.environ, "PYTHON": str(fake_python), "PATH": f"{tmp_path}:{os.environ['PATH']}"},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert evidence.read_text() == "previous held-out evidence\n"
 
 
 # --- the release chain, and where it stops --------------------------------------
