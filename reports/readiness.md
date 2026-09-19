@@ -6,15 +6,15 @@
 | Horizon | H=7 (calendar basis) |
 | Data | **real** · snapshot `2026-09-18` · `data/processed/features/job_days_h7_calendar.parquet` |
 | Panel | 20,724 rows · sha256 `18f0b1ad0044…` |
-| Code | `36bdd499a` on `phase-7-readiness-safety` (clean) |
+| Code | `1e78edb74` on `fix/readiness-shallow-verdict` (clean) |
 
 _Regenerate rather than edit._
 
-**No.** No usable three-way split exists. Depth alone does not guarantee usable labels in every block.
+**No.** The panel is 11 labelled wave(s) short of a legal split. What follows is how far off, and whether the distance is closing.
 
 ## Is the panel still accruing?
 
-Yes. The newest crawl is `2026-09-18 03:48Z`, 0 days 12:19:05.740208 old against a cadence of 0 days 23:59:58.980213 — within tolerance, so the projections below are meaningful.
+Yes. The newest crawl is `2026-09-18 03:48Z`, 0 days 23:41:01.928709 old against a cadence of 0 days 23:59:58.980213 — within tolerance, so the projections below are meaningful.
 
 ## The two gates
 

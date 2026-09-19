@@ -60,10 +60,15 @@ def render(panel: pd.DataFrame, prov, now: pd.Timestamp | None = None) -> str:
 
     if accrual["stalled"]:
         verdict = "**No — the panel is not accruing.** Check the collector before proceeding."
+    elif depth["shortfall"] > 0:
+        verdict = (
+            f"**No.** The panel is {depth['shortfall']} labelled wave(s) short of a legal "
+            "split. What follows is how far off, and whether the distance is closing."
+        )
     elif usable == 0:
         verdict = (
-            "**No.** No usable three-way split exists. Depth alone does not guarantee "
-            "usable labels in every block."
+            "**No.** The panel is deep enough, but no usable three-way split exists. "
+            "Depth alone does not guarantee usable labels in every block."
         )
     elif depth["folds_shortfall"] > 0 or depth["folds_available"] < depth["target_folds"]:
         verdict = (
