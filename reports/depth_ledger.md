@@ -31,6 +31,7 @@ Findings about job postings.
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 2026-09-17 | 16 | 206 | 0.0112 | 3 | random_forest | 2026-09-10 – 2026-09-11 | 0.0838 | — | 0.1000 | 4.9362 | 0.2053 | 0.1245 | validation |
 | 2026-09-18 | 17 | 226 | 0.0116 | 4 | random_forest | 2026-09-10 – 2026-09-11 | 0.1100 | — | 0.1000 | 4.9362 | 0.1990 | 0.1024 | validation |
+| 2026-09-19 | 18 | 252 | 0.0122 | 4 | random_forest | 2026-09-10 – 2026-09-12 | 0.1415 | — | 0.1000 | 7.0735 | 0.1990 | 0.1024 | validation |
 
 ## Synthetic panel
 
@@ -47,4 +48,4 @@ do not store CV summaries even when folds exist. Their posting-clustered
 bootstrap interval is reported separately in `pr_auc_ci`. A missing CV
 spread does not imply that the run has no uncertainty estimate.
 
-1 of 4 row(s) were recorded from a **dirty tree** and are provisional: the code that produced them is not any commit.
+1 of 5 row(s) were recorded from a **dirty tree** and are provisional: the code that produced them is not any commit.
