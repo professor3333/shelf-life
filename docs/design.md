@@ -1709,7 +1709,13 @@ once from the top. Caps: 250 per page, 5,000 per board, 32 live boards.
 says so.
 
 **Would change my mind:** a second instance, at which point in-memory boards
-become a bug rather than a shape and the store moves to something shared. Or
+become a bug rather than a shape and the store moves to something shared. The
+shape of that v2 is known and deliberately not built — board state in Redis
+or a database keyed by `board_id`, idempotent page uploads so a retried
+request cannot double-count, and a ranking that any instance can serve —
+because none of it is required by one free instance, and building it here
+would be building for a deployment this project does not have (added
+2026-09-20). Or
 a caller with a legitimate partial view of a board
 — a department's postings, say — for whom neither "impute" nor "this is the
 whole board" is honest. That needs a third answer (supply the board's size,
