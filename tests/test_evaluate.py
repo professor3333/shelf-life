@@ -985,7 +985,8 @@ def test_the_generalisation_section_reports_the_gate_the_table_and_the_refusals(
         for i, lift in enumerate([0.0, -0.02, 0.01])
     ]
     skipped = [Skipped("tiny", "3 positive(s) held out; the minimum is 10")]
-    text = "\n".join(_generalisation_section((folds, skipped, *report_tables(folds, skipped))))
+    scored, refused = report_tables(folds, skipped)
+    text = "\n".join(_generalisation_section((folds, skipped, scored, refused)))
     assert "collapsed" in text and "will **refuse** this candidate" in text
     assert "| b0 |" in text and "| tiny |" in text
     assert "3 positive(s) held out" in text
