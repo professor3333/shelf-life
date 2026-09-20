@@ -64,6 +64,21 @@ else
   echo "   (label_check skipped: --no-net; its report keeps its previous provenance)"
 fi
 
+echo "== the H=7 ladder, on validation only"
+# Every module here refuses on its own when the panel has no legal cut, and
+# writes a report that says so under the build's horizon and the pinned
+# snapshot — which is the honest state of `baseline_results.md`,
+# `model_results.md`, `experiment_log.md` and `model_comparison.md` until the
+# gate clears. Before 2026-09-20 nothing wrote these four at H=7: the H=1
+# rehearsal used to overwrite them, and once it was given its own file names
+# (`*_h1_calendar.md`) they went stale under H=7 headings. `rehearse.sh`
+# declines outright below the gate, which is right for a rehearsal and wrong
+# for a report that must always describe the present panel.
+"${PYTHON}" -m src.models.train_baseline
+"${PYTHON}" -m src.models.train
+"${PYTHON}" -m src.models.experiments
+"${PYTHON}" -m src.models.evaluate
+
 echo "== the H=7 fingerprint (held-out evidence is preserved)"
 # The fingerprint declines until there is a legal cut. Never call `freeze`
 # here: a temporary depth refusal is not a permanent test-set safeguard.
