@@ -1911,9 +1911,19 @@ screen rather than in a footnote — that is the mitigation, and it is deliberat
    ignores, and **one** after two. That one is now labelled removed and was not.
    The clause it replaces read the whole remaining panel, which meant no embargo
    of any width could seal a training label from the evaluation period.
-7. **No real evaluation has happened yet.** Everything above describes a system
-   that is built and verified on synthetic data. Until the depth gate clears,
-   treat every capability claim as *tested*, and no accuracy claim as *made*.
+7. **No evaluation at the build's horizon has happened yet, and no accuracy
+   claim is made.** The H=7 held-out block is unopened —
+   [`reports/test_results.md`](reports/test_results.md) records the refusal —
+   and the H=7 comparison stops before a verdict because no legal cut exists.
+   What *has* run on the real panel is the H=1 rehearsal: the full ladder
+   compared across rolling-origin folds by the pre-registered rule, with a
+   selection verdict
+   ([`reports/model_comparison_h1_calendar.md`](reports/model_comparison_h1_calendar.md);
+   the status block above quotes it). That is a pipeline smoke test at the
+   wrong horizon, not the build's result — a one-day label answers a different
+   question from a seven-day one. Until the depth gate clears, every capability
+   claim is *tested*, every validation number is an H=1 rehearsal, and nothing
+   here is a seven-day claim.
 
 ---
 
