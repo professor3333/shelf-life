@@ -63,14 +63,14 @@ class Comparison:
     """A rate and the rate it must be read against. Never one without the other."""
 
     key: str
-    closed_hits: int
-    closed_n: int
+    removed_hits: int
+    removed_n: int
     open_hits: int
     open_n: int
 
     @property
-    def closed_rate(self) -> float | None:
-        return self.closed_hits / self.closed_n if self.closed_n else None
+    def removed_rate(self) -> float | None:
+        return self.removed_hits / self.removed_n if self.removed_n else None
 
     @property
     def open_rate(self) -> float | None:
@@ -79,14 +79,14 @@ class Comparison:
     @property
     def standard_error(self) -> float | None:
         """SE of the difference between the two rates, normal approximation."""
-        if self.closed_rate is None or self.open_rate is None:
+        if self.removed_rate is None or self.open_rate is None:
             return None
-        p, q = self.closed_rate, self.open_rate
-        return (p * (1 - p) / self.closed_n + q * (1 - q) / self.open_n) ** 0.5
+        p, q = self.removed_rate, self.open_rate
+        return (p * (1 - p) / self.removed_n + q * (1 - q) / self.open_n) ** 0.5
 
     @property
     def verdict(self) -> str:
-        """Three states, not two, because `closed_rate > open_rate` is not a finding.
+        """Three states, not two, because `removed_rate > open_rate` is not a finding.
 
         The first version of this property was that bare comparison, and on the
         real panel it labelled a 12.0%-against-11.0% difference — twelve events
@@ -101,9 +101,9 @@ class Comparison:
         and crude is the right shape here, because its job is to refuse a reading
         the data cannot support rather than to price one it can.
         """
-        if self.closed_rate is None or self.open_rate is None:
+        if self.removed_rate is None or self.open_rate is None:
             return "not assessable"
-        difference = self.closed_rate - self.open_rate
+        difference = self.removed_rate - self.open_rate
         if abs(difference) <= 2 * (self.standard_error or 0):
             return "indistinguishable"
         return "elevated" if difference > 0 else "below control"
@@ -134,25 +134,25 @@ def _relisted(panel: pd.DataFrame, row, key: str, window: pd.Timedelta) -> bool:
 def compare_relisting(
     panel: pd.DataFrame, key: str, window: pd.Timedelta = RELIST_WINDOW
 ) -> Comparison:
-    """Relisting rate among closed postings, against the rate among survivors.
+    """Relisting rate among removed postings, against the rate among survivors.
 
-    The control arm is restricted to the same crawl instants as the closed arm,
+    The control arm is restricted to the same crawl instants as the removed arm,
     so the two are drawn from comparable board states rather than from different
     weeks of a growing panel.
     """
     labelled = panel[panel["label_observable"]]
-    closed = _last_sighting(labelled[labelled["y"] == 1])
+    removed = _last_sighting(labelled[labelled["y"] == 1])
     survivors = _last_sighting(labelled[labelled["y"] == 0])
-    survivors = survivors[survivors["t"].isin(set(closed["t"]))]
+    survivors = survivors[survivors["t"].isin(set(removed["t"]))]
 
     def count(sample: pd.DataFrame) -> tuple[int, int]:
         usable = sample[sample[key].notna()]
         hits = sum(_relisted(panel, row, key, window) for row in usable.itertuples())
         return hits, len(usable)
 
-    closed_hits, closed_n = count(closed)
+    removed_hits, removed_n = count(removed)
     open_hits, open_n = count(survivors)
-    return Comparison(key, closed_hits, closed_n, open_hits, open_n)
+    return Comparison(key, removed_hits, removed_n, open_hits, open_n)
 
 
 def board_stability(panel: pd.DataFrame) -> pd.DataFrame:
@@ -180,8 +180,8 @@ def board_stability(panel: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("largest", ascending=False)
 
 
-def closure_dispersion(panel: pd.DataFrame) -> pd.DataFrame:
-    """Closures per source per day. A systems change empties a board in one day."""
+def removal_dispersion(panel: pd.DataFrame) -> pd.DataFrame:
+    """Removals per source per day. A systems change empties a board in one day."""
     labelled = panel[panel["label_observable"]]
     positives = labelled[labelled["y"] == 1]
     if positives.empty:
@@ -194,7 +194,7 @@ def closure_dispersion(panel: pd.DataFrame) -> pd.DataFrame:
 #: How many complete crawls a posting has to have been seen in, *as of the row's
 #: own `t`*, before its disappearance is read as evidence about hiring rather
 #: than about the crawl. Six was chosen on 2026-09-10 as the bucket at which the
-#: H=1 closure rate collapsed to background — a measurement since traced to a
+#: H=1 removal rate collapsed to background — a measurement since traced to a
 #: label bug (`DEBUGGING.md`, 2026-09-11); on the corrected panel the rate is
 #: flat across every bucket. The threshold is kept so the check keeps asking.
 SETTLED_OBSERVATIONS = 6
@@ -210,8 +210,8 @@ def lifespan_concentration(panel: pd.DataFrame) -> pd.DataFrame:
     included a row it then stopped returning, and the label cannot tell them
     apart from the outside.
 
-    The signature of the second is that closures pile up on postings with almost
-    no observed life. If the closure rate among postings seen once is many times
+    The signature of the second is that removals pile up on postings with almost
+    no observed life. If the removal rate among postings seen once is many times
     the rate among postings seen throughout, the target is measuring the
     collection process, and any feature correlated with how long a posting has
     been around — `age_days` above all — will predict it beautifully and mean
@@ -301,7 +301,7 @@ def _verdict(comparison: Comparison) -> str:
     if verdict == "not assessable":
         return "not assessable — one arm is empty"
 
-    difference = (comparison.closed_rate or 0) - (comparison.open_rate or 0)
+    difference = (comparison.removed_rate or 0) - (comparison.open_rate or 0)
     margin = 2 * (comparison.standard_error or 0)
     arithmetic = f"{difference:+.1%} ± {margin:.1%}"
 
@@ -365,16 +365,16 @@ def render(panel: pd.DataFrame, prov: provenance.Provenance | None = None) -> st
         "|---|---|---|---|",
     ]
     for c in comparisons:
-        closed = f"{c.closed_hits}/{c.closed_n}" + (
-            f" = {c.closed_rate:.1%}" if c.closed_rate is not None else ""
+        removed = f"{c.removed_hits}/{c.removed_n}" + (
+            f" = {c.removed_rate:.1%}" if c.removed_rate is not None else ""
         )
         control = f"{c.open_hits}/{c.open_n}" + (
             f" = {c.open_rate:.1%}" if c.open_rate is not None else ""
         )
-        lines.append(f"| `{c.key}` | {closed} | {control} | {_verdict(c)} |")
+        lines.append(f"| `{c.key}` | {removed} | {control} | {_verdict(c)} |")
 
     stability = board_stability(panel)
-    dispersion = closure_dispersion(panel)
+    dispersion = removal_dispersion(panel)
     lines += [
         "",
         "`requisition_id` is the employer's own key for a role, so a match is the same",
@@ -453,7 +453,7 @@ def main() -> None:  # pragma: no cover - thin CLI
     for key in RELIST_KEYS:
         comparison = compare_relisting(panel, key)
         print(
-            f"{key:16} closed {comparison.closed_hits}/{comparison.closed_n}  "
+            f"{key:16} removed {comparison.removed_hits}/{comparison.removed_n}  "
             f"control {comparison.open_hits}/{comparison.open_n}"
         )
     print(f"wrote -> {args.out}")

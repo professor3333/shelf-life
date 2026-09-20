@@ -262,14 +262,14 @@ def test_the_reading_of_the_numbers_is_arithmetic_not_assertion(tmp_path, monkey
     days = max(1, frozen.test_days)
 
     assert reading["alerts_per_day"] == pytest.approx(confusion["flagged"] / days)
-    assert reading["real_closures_caught_per_day"] == pytest.approx(confusion["tp"] / days)
-    assert reading["closures_missed_per_day"] == pytest.approx(confusion["fn"] / days)
-    assert reading["share_of_closures_caught"] == pytest.approx(confusion["recall"])
+    assert reading["real_removals_caught_per_day"] == pytest.approx(confusion["tp"] / days)
+    assert reading["removals_missed_per_day"] == pytest.approx(confusion["fn"] / days)
+    assert reading["share_of_removals_caught"] == pytest.approx(confusion["recall"])
 
     # The counterfactual is the same reading effort with no model: the budget
     # drawn from a board closing at the block's own rate.
     base_rate = float(frozen.test["base_rate"])
-    assert reading["unaided_closures_caught_per_day"] == pytest.approx(
+    assert reading["unaided_removals_caught_per_day"] == pytest.approx(
         confusion["flagged"] * base_rate / days
     )
     assert reading["lift_over_unaided"] == pytest.approx(confusion["precision"] / base_rate)
@@ -315,8 +315,8 @@ def test_a_model_no_better_than_the_board_reports_a_lift_of_one():
     )
     reading = what_the_user_gets(useless, budget_per_day=20)
     assert reading["lift_over_unaided"] == pytest.approx(1.0)
-    assert reading["real_closures_caught_per_day"] == pytest.approx(
-        reading["unaided_closures_caught_per_day"]
+    assert reading["real_removals_caught_per_day"] == pytest.approx(
+        reading["unaided_removals_caught_per_day"]
     )
 
 

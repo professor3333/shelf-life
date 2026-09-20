@@ -18,11 +18,11 @@ the UI, and in every API response, which carries a `predicts` field that says
 
 **One word for the label: removal.** This document, the model card, the API
 and the UI say *removed*, *removal*, *disappearance*; never *filled*, *hired*
-or *closed* as the name of the event. Where a code identifier or a generated
-table still says `closure` — `closure_dispersion`, a `closures` column, the
-`closures_caught_per_day` family in the budget tables — it means removal and
-nothing more; those names predate the rule and are being retired as the files
-they live in are touched.
+or *closed* as the name of the event. The code identifiers that predated the
+rule — `closure_dispersion`, the `closures_caught_per_day` family behind the
+budget tables, the `closed_*` fields of the relisting comparison — were
+retired on 2026-09-20; no identifier, generated table, response field or
+report heading names the event anything but removal.
 
 **That the label measures removal has been checked against the boards, not just
 argued.** A sample of postings the panel calls removed was verified against each

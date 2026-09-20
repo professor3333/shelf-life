@@ -1,7 +1,7 @@
 """Does "removed from the board" mean what the label says it means?
 
 `src/data/label_audit.py` measures the label against *itself* — relisting rates,
-board stability, closure dispersion, the concentration of closures on postings
+board stability, removal dispersion, the concentration of removals on postings
 the crawl barely held. All of it is internal evidence, and its own closing
 section says what it cannot do: establish whether a posting the label calls
 closed is actually gone. That needs the board.

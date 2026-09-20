@@ -16,8 +16,8 @@ import pytest
 from src.data.label_audit import (
     Comparison,
     board_stability,
-    closure_dispersion,
     compare_relisting,
+    removal_dispersion,
     render,
 )
 
@@ -52,20 +52,24 @@ def test_a_difference_inside_the_noise_is_not_called_elevated():
     """The real numbers that exposed this: 12/100 against 8/73. One point of
     separation on twenty events was reported as contamination of the target,
     with a recommendation to change the labelling rule."""
-    comparison = Comparison("title", closed_hits=12, closed_n=100, open_hits=8, open_n=73)
+    comparison = Comparison("title", removed_hits=12, removed_n=100, open_hits=8, open_n=73)
     assert comparison.verdict == "indistinguishable"
 
 
 def test_a_real_elevation_is_still_called():
     """A guard that can only say 'indistinguishable' is not a guard."""
-    comparison = Comparison("requisition_id", closed_hits=60, closed_n=100, open_hits=5, open_n=100)
+    comparison = Comparison(
+        "requisition_id", removed_hits=60, removed_n=100, open_hits=5, open_n=100
+    )
     assert comparison.verdict == "elevated"
 
 
 def test_a_rate_below_its_control_is_named_as_such_not_as_absence():
     """'No elevation' and 'below control' are different facts, and collapsing
     them hides the case where closed postings relist *less* than survivors."""
-    comparison = Comparison("requisition_id", closed_hits=2, closed_n=100, open_hits=40, open_n=100)
+    comparison = Comparison(
+        "requisition_id", removed_hits=2, removed_n=100, open_hits=40, open_n=100
+    )
     assert comparison.verdict == "below control"
 
 
@@ -101,7 +105,7 @@ def test_a_relisting_under_a_new_id_is_counted():
             _row("stays", 1, y=0, req="R-2"),
         ]
     )
-    assert compare_relisting(panel, "requisition_id").closed_hits == 1
+    assert compare_relisting(panel, "requisition_id").removed_hits == 1
 
 
 def test_the_same_posting_reappearing_is_not_a_relisting():
@@ -109,12 +113,12 @@ def test_the_same_posting_reappearing_is_not_a_relisting():
     corroboration rule in `compute_labels` already handles. This audit is about
     the case that rule cannot see: a new id carrying the same role."""
     panel = _panel([_row("same", 0, y=1, req="R-1"), _row("same", 2, y=0, req="R-1")])
-    assert compare_relisting(panel, "requisition_id").closed_hits == 0
+    assert compare_relisting(panel, "requisition_id").removed_hits == 0
 
 
 def test_a_relisting_after_the_window_does_not_count():
     panel = _panel([_row("old", 0, y=1, req="R-1"), _row("new", 5, y=0, req="R-1")])
-    assert compare_relisting(panel, "requisition_id").closed_hits == 0
+    assert compare_relisting(panel, "requisition_id").removed_hits == 0
 
 
 def test_a_missing_requisition_id_is_excluded_rather_than_counted_as_no_match():
@@ -125,7 +129,7 @@ def test_a_missing_requisition_id_is_excluded_rather_than_counted_as_no_match():
         [_row("a", 0, y=1, req=None), _row("b", 0, y=1, req="R-1"), _row("c", 1, y=0, req="R-1")]
     )
     comparison = compare_relisting(panel, "requisition_id")
-    assert comparison.closed_n == 1 and comparison.closed_hits == 1
+    assert comparison.removed_n == 1 and comparison.removed_hits == 1
 
 
 def test_a_title_match_needs_the_company_to_agree():
@@ -135,7 +139,7 @@ def test_a_title_match_needs_the_company_to_agree():
             _row("other", 1, y=0, title="Engineer", company="Umbrella"),
         ]
     )
-    assert compare_relisting(panel, "title").closed_hits == 0
+    assert compare_relisting(panel, "title").removed_hits == 0
 
 
 def test_the_control_arm_is_drawn_from_the_same_crawl_instants():
@@ -157,7 +161,7 @@ def test_board_stability_reports_a_cliff_as_a_fall():
 
 
 def test_closure_dispersion_is_empty_when_nothing_has_closed():
-    assert closure_dispersion(_panel([_row("a", 0)])).empty
+    assert removal_dispersion(_panel([_row("a", 0)])).empty
 
 
 def _both_arms_panel() -> pd.DataFrame:
@@ -201,7 +205,7 @@ def test_the_report_states_the_arithmetic_behind_every_verdict():
 @pytest.mark.parametrize("key", ["requisition_id", "title"])
 def test_an_empty_panel_does_not_raise(key):
     empty = _panel([_row("a", 0)])
-    assert compare_relisting(empty, key).closed_n == 0
+    assert compare_relisting(empty, key).removed_n == 0
 
 
 # --- closures against observed lifespan --------------------------------------
