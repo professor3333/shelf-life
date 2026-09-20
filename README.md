@@ -1422,7 +1422,7 @@ module nothing exercises fails), and `pip-audit` over the installed lock
 against the advisory databases. CodeQL's `security-and-quality` queries run
 on push and weekly; findings land under the repository's Security tab.
 
-Coverage is line **and** branch — 88% on 2026-09-12 — with the per-file table
+Coverage is line **and** branch — 92% on 2026-09-20 — with the per-file table
 in every CI run's job summary and the HTML report as an artifact. The number
 is not the point; [`docs/critical_paths.md`](docs/critical_paths.md) is: the
 paths where this system could be quietly wrong — label construction, the
