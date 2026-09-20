@@ -906,11 +906,16 @@ exists, and either declines with exit 3 — *not yet* is not an error — or run
 `freeze`, and a test asserts so by parsing the script rather than trusting the
 comment that says it.
 
-What that buys is a dress rehearsal on real data. Every one of those modules has
-so far only run against `tests/panels.py`, whose columns are synthesised; the
-first contact with the real panel is where a dtype or an empty group shows up,
-and meeting that on a split whose numbers do not matter yet is much better than
-meeting it on the one afternoon the test block is available.
+What that buys is a dress rehearsal at the build's horizon. Those modules have
+already run on the real panel at H=1 — the pipeline smoke test, recorded in the
+`*_h1_calendar.md` reports and as `validation`-stage rows in the depth ledger —
+so the dtype and empty-group class of surprise has been met on real columns
+rather than on `tests/panels.py`. What no module has yet seen is the real H=7
+label: a far wider embargo at each block boundary, and blocks cut from a panel
+only just deep enough to hold them. The first real H=7 run still
+waits for a legal H=7 split, and meeting it on a split whose numbers do not
+matter yet is much better than meeting it on the one afternoon the test block
+is available.
 
 **The depth ledger keeps selected validation results and completed held-out
 runs.** `reports/depth_ledger.md`, rendered from the committed
