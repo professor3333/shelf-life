@@ -1,5 +1,16 @@
 # Leakage audit
 
+> **Historical document — read the dates.** Every count, rate, column list
+> and projected date below is the value on the date its entry carries, kept as
+> the record of a decision. It is *not* the current state, and it is not
+> updated when the panel grows. The current state is the generated block in the
+> README — [**Current state**](../README.md#current-state) — and the reports it
+> is built from: [`reports/readiness.md`](../reports/readiness.md) for depth
+> and the gates, the latest `reports/data_profile_<date>.md` for the data's
+> shape, [`reports/model_comparison.md`](../reports/model_comparison.md) for
+> the ladder. Where a number here disagrees with a report, the report is right
+> and this file is recording what was known when the decision was made.
+
 A verdict for every column of the assembled job-day panel
 (`data/processed/features/job_days_h*.parquet`, 44 columns, built by
 `src/features/assemble.py`). The rejected rows are the point of the document.
