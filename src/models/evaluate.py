@@ -740,7 +740,10 @@ def _generalisation_section(generalisation) -> list[str]:
                 "boards it has not seen it is no better than the prior."
                 if gate.collapsed
                 else "will proceed; the verdict travels on the artifact, and only `intact` "
-                "licenses describing the model as applicable to a board it has not seen."
+                "licenses describing the model as applicable to a board it has not seen — "
+                "of the kind these are, six Greenhouse boards and python_org; never to an "
+                "aggregator, another ATS family or a non-English board, which this "
+                "measurement cannot see (`docs/design.md` §17)."
             ),
             "",
         ]
