@@ -2170,14 +2170,24 @@ so many words — and nothing here can say anything about a board of a
 different kind, because there is none in the data.
 
 There could have been. arbeitnow is 78% of the collected postings and is
-excluded entirely, not because its postings are unlabelable in principle but
-because the crawls that collected them were truncated at a page cap, so a
-posting's absence meant *fell past page 8*, not *removed*
-(`docs/problem_definition.md` §4). That is an upstream collection defect. It
-is left unfixed **on purpose**: this build's assignment is the mess it was
-handed, and repairing the scraper to make the data better would delete the
-lesson (`README`: the non-goals). The cost of that choice is exactly the
-narrow source family above, and it is a cost, not a footnote.
+excluded entirely, for three reasons that all hold today
+(`docs/problem_definition.md` §4, corrected 2026-09-20 against the crawl log).
+Its crawls never observe the whole board: capped at 8 pages until 2026-09-07
+and at 30 since, with the feed longer than either, so a posting's absence may
+mean *fell past the cap*, not *removed*. The board reorders under the crawl,
+and pages re-serve records earlier pages returned (`incomplete_reason =
+overlap` on every run since it was recorded), so a posting can also be
+*missed* rather than gone. And even a complete, stable crawl could not label
+it: the feed retains roughly seven days of arrivals, so a posting leaves the
+observable universe by ageing out, and near that edge *aged out* and *removed*
+are one observation. The first two are upstream collection defects, left
+unfixed **on purpose**: this build's assignment is the mess it was handed, and
+repairing the scraper to make the data better would delete the lesson
+(`README`: the non-goals). The third is a property of the source, and the only
+rule that would work — label only postings young enough to sit inside the feed
+through `t + H` and its corroborating run — is a `rules_version` change with
+its own tests, not a consequence of any crawler fix. The cost of all this is
+exactly the narrow source family above, and it is a cost, not a footnote.
 
 **What this build claims, and does not.** Transfer, if the gate passes, is
 transfer *within* a source family. "Unseen-board performance" on a board
@@ -2190,10 +2200,14 @@ repository only to be refused.
 
 1. Fix the collector's completeness: crawl a board to its end, or record
    that it did not, per run — so absence can mean removal on every source.
+   For a rolling feed like arbeitnow that is necessary and not sufficient;
+   the age-bounded labelling rule in `docs/problem_definition.md` §4 is the
+   other half, and it is a label change with its own `rules_version`.
 2. Bring in genuinely different families: at least one aggregator with a
-   complete crawl (arbeitnow itself, once its crawls are whole), one ATS
-   that is not Greenhouse, one non-English board. Different templates,
-   different housekeeping habits, different base rates.
+   complete crawl and a label rule that respects its residence window
+   (arbeitnow itself, once both exist), one ATS that is not Greenhouse, one
+   non-English board. Different templates, different housekeeping habits,
+   different base rates.
 3. Only then re-run §4a's leave-one-*family*-out, which is the measurement
    the present leave-one-board-out is a stand-in for.
 

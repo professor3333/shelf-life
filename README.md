@@ -416,14 +416,22 @@ for one snapshot, and they were a week stale within a week.
 **The largest source is excluded, and that is the most important fact here.**
 arbeitnow is about three quarters of the collected postings (the exact share
 is in the current profile) — and every one of its crawls in the current rules
-epoch stopped at its page cap without observing the whole board.
-A posting's absence from a partial crawl is not evidence of removal; it may
-simply have fallen past page 8. Treating those absences as removals would have
-manufactured thousands of false positives, and the label would have been
-measuring pagination. So `complete_runs` admits only crawls that finished, which
-leaves the six Greenhouse boards and python_org. The defect is recorded in
-`DEBUGGING.md`; it cost three quarters of the dataset and it was the right
-trade.
+epoch stopped at its page cap without observing the whole board: 8 pages until
+2026-09-07, 30 since, and the feed is longer than either. A posting's absence
+from a partial crawl is not evidence of removal; it may simply have fallen
+past the cap. The board also reorders under the crawl — pages re-serve records
+earlier pages returned — so a posting can be missed rather than gone. Treating
+those absences as removals would have manufactured thousands of false
+positives, and the label would have been measuring pagination. So
+`complete_runs` admits only crawls that finished, which leaves the six
+Greenhouse boards and python_org. The defect is recorded in `DEBUGGING.md`; it
+cost three quarters of the dataset and it was the right trade. And a complete
+crawl would not have been enough: arbeitnow's feed retains roughly seven days
+of arrivals, so a posting leaves by *ageing out* whether or not anything
+happened to it, and near that edge *aged out* and *removed* are the same
+observation (`docs/problem_definition.md` §4). Raising the cap does not
+reopen the question; only an age-bounded label rule could, and that is a
+`rules_version` change, not a crawler fix.
 
 **Missingness is a fingerprint of the source, not noise.** `remote` is never
 populated on Greenhouse and always populated on arbeitnow. `first_published`,
@@ -1896,8 +1904,9 @@ screen rather than in a footnote — that is the mitigation, and it is deliberat
    this caveat with a number on it rather than a hedge.
 2. **It is trained on Greenhouse boards, though it does not use board identity.**
    arbeitnow — 78% of the collected postings — is excluded because its crawls
-   never observed a whole board, so whatever is learned here is learned from six
-   Greenhouse boards and python_org. `docs/design.md` §4 excludes board identity
+   never observe the whole board and because, even if they did, its rolling
+   feed makes ageing out indistinguishable from removal; so whatever is learned
+   here is learned from six Greenhouse boards and python_org. `docs/design.md` §4 excludes board identity
    as a feature, which is what lets a posting from an unseen board be scored at
    all; it does not make the *training population* representative. Those are
    different claims and only the first is settled. The per-source breakdown and
