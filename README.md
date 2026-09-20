@@ -990,11 +990,17 @@ The last two lines are the whole of the deployment, because the path around them
 already exists: [`docs/deploy.md`](docs/deploy.md) has the one-time cloud setup,
 the rollback and the teardown.
 
-Then the three decisions that have been waiting on real numbers rather than on
-thought — whether `source` is a feature, how wide the resurrection window is, and
-what to do about board context a caller cannot supply — get settled in
-`docs/design.md` with the numbers that settled them. Then the artifact is tagged,
-released, and fetched into an image by tag.
+The three decisions that once waited on real numbers — whether board identity
+is a feature, how wide the resurrection window is, and what to do about board
+context a caller cannot supply — are already settled in `docs/design.md`, each
+with the measurement that settled it: board identity is **not** a feature (§4,
+2026-09-09), the resurrection window is bounded at K = 2 (§11, 2026-09-09), and
+board context is kept, accepted from a caller and imputed when absent (§12,
+2026-09-09). Board *availability* patterns are allowed with transfer to an
+unseen board as the criterion (§4a, 2026-09-11), and a transfer collapse is a
+freeze refusal (§4a, 2026-09-12). Freeze day applies those decisions; it does
+not reopen them. Then the artifact is tagged, released, and fetched into an
+image by tag.
 
 **The order is not negotiable.** `freeze` is the only step that reads the test
 block, it happens after the threshold is chosen, and nothing downstream of it may
