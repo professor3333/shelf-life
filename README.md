@@ -1914,8 +1914,8 @@ screen rather than in a footnote — that is the mitigation, and it is deliberat
    ignores, and **one** after two. That one is now labelled removed and was not.
    The clause it replaces read the whole remaining panel, which meant no embargo
    of any width could seal a training label from the evaluation period.
-7. **No evaluation at the build's horizon has happened yet, and no accuracy
-   claim is made.** The H=7 held-out block is unopened —
+7. **No final real H=7 evaluation or held-out result exists yet, and no
+   accuracy claim is made.** The H=7 held-out block is unopened —
    [`reports/test_results.md`](reports/test_results.md) records the refusal —
    and the H=7 comparison stops before a verdict because no legal cut exists.
    What *has* run on the real panel is the H=1 rehearsal: the full ladder
