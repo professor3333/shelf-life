@@ -71,7 +71,7 @@ from src.data.split import (
 from src.features.assemble import horizon_banner
 from src.features.preprocessing import features_and_target, fit_on_frame
 from src.inference import artifact as artifact_module
-from src.models import board_context, calibration, ledger, provenance
+from src.models import board_context, calibration, evidence, ledger, provenance
 from src.models.evaluate import (
     calibration_summary,
     cross_validate,
@@ -639,6 +639,18 @@ these boards and nothing wider.
 """
 
 
+class MixedEvidence(RuntimeError):
+    """The reports the candidate was chosen on do not name one snapshot and one commit.
+
+    A clean tree says the code at HEAD is what will run. It does not say that
+    the comparison the choice was read from was produced by that code on this
+    panel — on 2026-09-20 the committed reports came from two commits and two
+    snapshots, and nothing would have noticed on the day one of them said
+    *ready*. `src/models/evidence.py` is the check; the remedy is
+    `scripts/regenerate_reports.sh`, and there is no flag.
+    """
+
+
 class TransferCollapse(RuntimeError):
     """On boards it has not seen, the candidate is no better than the prior.
 
@@ -1052,6 +1064,17 @@ def main() -> None:
                 "the artifact would not reproduce it. Commit (or stash) everything — "
                 "the regenerated reports included — and run freeze again."
             )
+        # And the one about the evidence: a clean tree at HEAD says nothing about
+        # whether the reports the choice was read from came from HEAD, or from
+        # this panel. Asked after the clean-tree check because its remedy —
+        # regenerate — dirties the tree, and "commit first" must come first.
+        if dataset == provenance.REAL and (mixed := evidence.check(panel_path)):
+            raise MixedEvidence(
+                "the reports this choice was read from are not one bundle:\n  - "
+                + "\n  - ".join(mixed)
+                + "\nRun ./scripts/regenerate_reports.sh, commit reports/ as one change, "
+                "and run freeze again."
+            )
         frozen = freeze(
             split,
             args.run,
@@ -1119,6 +1142,12 @@ def main() -> None:
         # "commit first" from "wait for depth".
         print(f"not run: {error}")
         raise SystemExit(4) from None
+    except MixedEvidence as error:
+        # Same reasoning as the dirty tree: about the evidence, not the data,
+        # so no report; and its own code, so a caller can tell *regenerate*
+        # from *commit* from *wait*.
+        print(f"not run: {error}")
+        raise SystemExit(5) from None
 
     write_report(
         args.out,
