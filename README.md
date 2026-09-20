@@ -994,13 +994,16 @@ The three decisions that once waited on real numbers — whether board identity
 is a feature, how wide the resurrection window is, and what to do about board
 context a caller cannot supply — are already settled in `docs/design.md`, each
 with the measurement that settled it: board identity is **not** a feature (§4,
-2026-09-09), the resurrection window is bounded at K = 2 (§11, 2026-09-09), and
-board context is kept, accepted from a caller and imputed when absent (§12,
-2026-09-09). Board *availability* patterns are allowed with transfer to an
-unseen board as the criterion (§4a, 2026-09-11), and a transfer collapse is a
-freeze refusal (§4a, 2026-09-12). Freeze day applies those decisions; it does
-not reopen them. Then the artifact is tagged, released, and fetched into an
-image by tag.
+2026-09-09) and board *availability* patterns are allowed with transfer to an
+unseen board as the criterion (§4a, 2026-09-11; a transfer collapse is a
+freeze refusal, 2026-09-12); a label is **final at corroboration** — two
+consecutive absent runs — with the resurrection window bounded at K = 2 (§11,
+2026-09-09); and board context is kept, accepted from a caller and imputed
+when absent (§12, 2026-09-09), with a **pre-registered rule at the freeze**
+for whether the shipped default is the full model or a refit without it —
+*ship the refit iff `imputed + fold_sd < without`* (§12, 2026-09-12). Freeze
+day applies those decisions; it does not reopen them. Then the artifact is
+tagged, released, and fetched into an image by tag.
 
 **The order is not negotiable.** `freeze` is the only step that reads the test
 block, it happens after the threshold is chosen, and nothing downstream of it may
