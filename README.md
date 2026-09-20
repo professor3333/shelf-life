@@ -1991,9 +1991,12 @@ screen rather than in a footnote — that is the mitigation, and it is deliberat
    the leave-one-board-out transfer measurement are mandatory reporting for
    exactly that reason — and even a passing transfer gate is transfer *within*
    this source family, never to a board of a different kind. Widening the
-   family means fixing the collector's page cap first; that is a v2 concern,
-   recorded in [`docs/design.md`](docs/design.md) §17, and not a gate on this
-   build.
+   family is not, first, a crawler fix: a complete crawl of a rolling feed
+   still cannot tell *aged out* from *removed*, so the binding change is an
+   age-bounded labelling rule — a `rules_version` bump — with reaching the end
+   of the board second, for what that rule cannot cover. Both are v2 concerns,
+   recorded in that order in [`docs/design.md`](docs/design.md) §17, and
+   neither is a gate on this build.
 3. **The panel is short and the positives are few.** 96 positives across 6,874
    labelled rows. Differences of a few points between models will be inside the
    noise, which is why fold variance is reported and paired differences are used
