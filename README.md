@@ -453,9 +453,16 @@ reopen the question; only an age-bounded label rule could, and that is a
 populated on Greenhouse and always populated on arbeitnow. `first_published`,
 `departments` and `content_chars` are null on exactly the 157 python_org rows.
 So an "is this missing?" indicator on any of them reconstructs board identity
-for free — which is a decision the project has *not* yet made (`docs/design.md`
-§4), so no such indicator exists. Each column's fill and the reason for it are
-recorded next to the code that applies it, in `src/features/preprocessing.py`.
+for free. That is decided, in two parts (`docs/design.md` §4 and §4a): the
+columns that *name* the board are out, but availability patterns are allowed,
+because at serve time a python_org posting genuinely has no `departments`.
+Numeric nulls are median-imputed with no indicator, deliberately; categorical
+nulls become a `__missing__` level; and `salary_stated` is a missingness
+indicator on purpose. What made this safe to allow is the measurement in §4a:
+missingness alone recovers little of the board; the identity lives in the
+*values*, which is why transfer to an unseen board is the gate (below).
+Each column's fill and the reason for it are recorded next to the code that
+applies it, in `src/features/preprocessing.py`.
 
 **Salaries are text in mixed formats and currencies** — `"90.000 € bis
 130.000 €"`, `"$150k-$200k"`, and nothing at all on three quarters of postings.
