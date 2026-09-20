@@ -196,9 +196,21 @@ OFFLINE — runs on my machine, on a pinned snapshot
 ONLINE — runs anywhere                                      │
                                                             ▼
    app/streamlit_app.py  ──HTTP──>  api/main.py  ──>  the same object
-        (a form)                    POST /predict      loaded once at
-                                    GET  /health       startup
+   (one posting, or a               POST /predict      loaded once at
+    board uploaded in               POST /rank         startup
+    pages and ranked                POST /boards …     (src/inference/)
+    under one budget)               GET  /health
+                                    GET  /contract
 ```
+
+`/predict` scores one posting. `/rank` scores a batch of up to 250 under a
+budget and derives board context from the batch itself. `/boards` is the
+server-managed version of the same thing for a board larger than one request:
+create, append pages of postings, score, rank once over the whole board, delete
+— `src/inference/boards.py` holds the board as one logical collection so a page's
+ranking is never mistaken for the board's. The four routes are one product;
+[`POST /rank`](#post-rank--the-shape-the-operating-point-was-designed-for)
+below is the shape the operating point was designed for.
 
 Three properties that shape everything else:
 
@@ -1075,28 +1087,49 @@ SQLite (read-only, upstream) · Parquet.
 ```
 shelf-life/
 ├── src/
-│   ├── data/         snapshot.py load.py clean.py archive.py profile.py split.py
+│   ├── data/         snapshot.py load.py clean.py archive.py split.py
+│   │                 profile.py readiness.py readme_summary.py
+│   │                 label_audit.py label_check.py cohort_audit.py
 │   ├── features/     assemble.py derive.py preprocessing.py leaky.py
 │   ├── models/       metrics.py baselines.py train_baseline.py train.py
-│   │                 evaluate.py experiments.py freeze.py provenance.py
-│   └── inference/    contract.py artifact.py predict.py fetch.py
-├── api/              main.py schemas.py
+│   │                 evaluate.py freeze.py provenance.py tracking.py experiments.py
+│   │                 calibration.py uncertainty.py generalisation.py
+│   │                 board_context.py board_fingerprint.py ledger.py
+│   ├── inference/    contract.py artifact.py fetch.py predict.py
+│   │                 board_snapshot.py boards.py
+│   └── plots.py      the diagnostic figures, matplotlib, headless
+├── api/              main.py schemas.py protection.py runtime.py
 ├── app/              streamlit_app.py client.py
-├── scripts/          smoke.sh await_release.sh cold_start.sh
+├── scripts/          release.sh rehearse.sh regenerate_reports.sh
+│                     await_release.sh smoke.sh smoke_ui.sh smoke_ui_browser.py
+│                     cold_start.sh artifact_cost.sh
+│                     watch_depth.sh com.shelflife.depthwatch.plist
 ├── render.yaml       the API service, as configuration rather than clicks
 ├── MODEL_TAG         which release is deployed; empty until one exists
 ├── requirements.txt  what the UI's host installs — and nothing that loads a model
 ├── tests/            the suite — no network, no data files
 ├── docs/             problem_definition.md design.md leakage_audit.md
-│                     data_dictionary.md deploy.md
-├── reports/          generated: profile, baselines, model results, comparison,
-│                     experiment log, test results, feature hypotheses
+│                     data_dictionary.md deploy.md critical_paths.md
+├── reports/          generated: profile, readiness, label validity and check,
+│                     cohort audit, board fingerprint, baselines, model results,
+│                     comparison, experiment log, test results, depth ledger,
+│                     cold start; figures/ beside them
 ├── data/             not committed — snapshots and derived frames
 ├── models/           not committed — the frozen artifact
-├── Dockerfile        .github/workflows/  ci.yml verify-deployment.yml
+├── MODEL_CARD.md     DEBUGGING.md  learning_log/
+├── Dockerfile        .github/workflows/  ci.yml codeql.yml verify-deployment.yml
 ├── pyproject.toml    what the code needs — lower bounds and extras
 └── uv.lock           what it actually runs against — every package, hashed
 ```
+
+By directory: `src/data` pins, loads and audits the snapshot and says whether
+the panel is deep enough; `src/features` builds the panel and the leakage-safe
+preprocessing; `src/models` climbs the ladder, compares by paired folds, decides
+recalibration, transfer and board context by pre-registered rules, and freezes
+one object; `src/inference` loads that object and serves one posting, a batch,
+or a board held as one collection. `api/` exposes it — with two cheap limits
+for a public endpoint on a tenth of a CPU, and the process's own account of
+what it cost to start, for the cold-start measurement. `app/` is the form.
 
 `docs/` holds decisions and audits, written by hand. `reports/` holds generated
 output — regenerate rather than edit; each file names the command that writes it.
@@ -1300,6 +1333,16 @@ serving a rehearsal must not look like a service serving a model.
 up-but-empty is a different fact from unreachable, and `/predict` answers 503
 while that is true. `GET /contract` publishes the field-by-field audit — what a
 caller may send, and whether somebody holding one posting could know it.
+
+`/predict` is the smallest call, not the main one. `POST /rank` takes up to 250
+postings and a budget and returns them ranked, the top `budget` flagged, board
+context derived from the batch; `POST /boards` → `/boards/{id}/postings` →
+`/boards/{id}/score` → `/boards/{id}/rank` → `DELETE` is the same operation for
+a board too large for one request, uploaded in pages and ranked once over the
+whole. Both are worked through with payloads in
+[`POST /rank`](#post-rank--the-shape-the-operating-point-was-designed-for)
+above, and `scripts/smoke.sh` exercises every route against a running service
+the way an operator would.
 
 ### The UI
 
