@@ -2282,3 +2282,45 @@ the freeze timing: a known structural break inside the first block — a board
 changing its housekeeping, a schema change at the scraper — would be a reason
 to wait for a block on the far side of it, and the label audit is where such a
 break would show.
+
+---
+
+## 19. Public reproducibility of the raw data — **DECIDED 2026-09-20: not a goal of this build; the panel is verifiable, not redistributable**
+
+**The situation.** The scraper is a separate, private project. A stranger who
+clones this repository can install the locked environment, run the suite, run
+the whole modelling path on the synthetic fixture, build the image, and hit the
+API and the UI. What they cannot do is rebuild the real panel from raw
+collection, so the numbers in `reports/` are numbers they can read but not
+re-derive. The README's Requirements and Reproducibility sections say so.
+
+**What was weighed.** Three ways to close that gap, none taken:
+
+| option | what it would give a reviewer | why not |
+|---|---|---|
+| publish the pinned snapshot (`jobs.db`, ~270 MB) as a release asset | byte-for-byte re-derivation of every report | it is the scraped text of a few thousand employer listings, descriptions included. The README's politeness statement says *nothing collected is redistributed here*, and that sentence is worth more than the re-derivation |
+| publish the assembled panel (0.7 MB) | re-derivation of everything from the split onward | it carries titles, companies, locations and URLs; still redistribution, only smaller |
+| publish the panel with the text columns removed | re-derivation of the ML from a file that names no listing | `title` is a model input (`preprocessing.TEXT_FEATURES`), so the reduced file would not reproduce the numbers, and a file that *almost* reproduces them is worse than none |
+
+**The decision.** Raw-collection reproducibility is not a goal of this build,
+and it is disclosed rather than worked around. What the build provides instead
+is **verifiability**: every report names the snapshot it read and the commit
+that produced it; the artifact carries the snapshot's and the panel's SHA-256,
+the lock's hash, the git SHA and a clean-tree flag; the release carries
+`SHA256SUMS`; and the synthetic path exercises every stage a stranger might
+doubt. A reviewer can establish that the numbers are what this code produces on
+data of this shape, and that the served model is the one the reports describe.
+They cannot establish that the panel was what it is claimed to be, and no
+document here pretends otherwise.
+
+**Why this is the right call for a portfolio, specifically.** The claim a
+reviewer is evaluating is *can this person build and evaluate a model
+honestly*, not *is this base rate true*. The former is fully inspectable. The
+latter would be settled by a data release that costs the repository its
+cleanest sentence about what it does with other people's content.
+
+**Would change my mind.** The scraper becoming public — then the honest
+answer is *run it for a fortnight*, and this entry becomes a pointer. Or a
+source's terms explicitly permitting redistribution of its listings, in which
+case a panel restricted to that source could be published beside the artifact
+with its own hash. Either is a v2 item behind §17's, not a gate on this build.

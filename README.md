@@ -1592,6 +1592,17 @@ machine when it comes from the logistic rung or from the feature matrix, and
 reproducible only on the same platform when it comes from a boosted one. Which
 kind it is, is stated wherever it matters.
 
+**And one thing is verifiable but not reproducible, on purpose.** The raw data
+comes from a private scraper and is not redistributed — not the snapshot, not
+the assembled panel, which carries titles, companies and URLs. So a stranger
+can re-derive everything from the synthetic fixture and inspect every stage,
+and can check that each report names its snapshot and commit and that the
+artifact's hashes match the release; they cannot rebuild the real panel and
+re-derive its numbers. That is a disclosed limitation, decided rather than
+drifted into: `docs/design.md` §19 weighs the three ways of closing it and
+says why keeping "nothing collected is redistributed here" true is worth more
+than any of them.
+
 ---
 
 ## Deployment
