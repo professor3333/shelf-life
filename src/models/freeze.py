@@ -525,7 +525,7 @@ def what_the_user_gets(frozen: FrozenModel, budget_per_day: int) -> dict[str, fl
     question only after arithmetic, and doing the arithmetic in a reader's head
     is where a metric quietly stops meaning anything — 0.21 precision sounds
     poor until it is set against a base rate of 0.10, and 0.44 recall sounds
-    fine until it is restated as *the majority of closures are missed*.
+    fine until it is restated as *the majority of removals are missed*.
 
     So both readings are computed and reported together, along with the honest
     counterfactual: what the same person would get by reading the same number of
@@ -544,13 +544,13 @@ def what_the_user_gets(frozen: FrozenModel, budget_per_day: int) -> dict[str, fl
 
     return {
         "alerts_per_day": flagged / days,
-        "real_closures_caught_per_day": true_positives / days,
+        "real_removals_caught_per_day": true_positives / days,
         "false_alarms_per_day": float(confusion["fp"]) / days,
-        "closures_missed_per_day": missed / days,
-        "share_of_closures_caught": float(confusion["recall"]),
+        "removals_missed_per_day": missed / days,
+        "share_of_removals_caught": float(confusion["recall"]),
         # What the same reading effort returns with no model at all: the budget
-        # drawn from a board whose closure rate is the base rate.
-        "unaided_closures_caught_per_day": (flagged * base_rate) / days,
+        # drawn from a board whose removal rate is the base rate.
+        "unaided_removals_caught_per_day": (flagged * base_rate) / days,
         "lift_over_unaided": (precision / base_rate) if base_rate else float("nan"),
     }
 
@@ -711,8 +711,8 @@ def _shortlist_section(frozen: FrozenModel, budget_per_day: int) -> list[str]:
         f"{cell(val, 'ndcg_at_budget')} | {cell(test, 'ndcg_at_budget')} | — |",
         "",
         f"On the test block the list ran to **{reading['alerts_per_day']:.0f} postings a "
-        f"day**; **{reading['real_closures_caught_per_day']:.1f}** of them were genuinely "
-        f"about to be removed, against **{reading['unaided_closures_caught_per_day']:.1f}** "
+        f"day**; **{reading['real_removals_caught_per_day']:.1f}** of them were genuinely "
+        f"about to be removed, against **{reading['unaided_removals_caught_per_day']:.1f}** "
         "for the same reading with no model — the lift is the whole case for the "
         "model, and below about 1.5× a person would do nearly as well reading the "
         "board directly, whatever the PR-AUC says. NDCG is secondary: a person who "
@@ -737,17 +737,17 @@ def _what_it_means_section(frozen: FrozenModel, budget_per_day: int) -> list[str
         "Restating the table above as that day:",
         "",
         f"- The list runs to **{reading['alerts_per_day']:.0f} postings a day**.",
-        f"- About **{reading['real_closures_caught_per_day']:.1f} of them are genuinely "
+        f"- About **{reading['real_removals_caught_per_day']:.1f} of them are genuinely "
         f"about to be removed**; the other {reading['false_alarms_per_day']:.1f} are not.",
-        f"- That is **{reading['share_of_closures_caught']:.0%} of the removals** that "
-        f"happen — so **{reading['closures_missed_per_day']:.1f} a day are missed**, and "
+        f"- That is **{reading['share_of_removals_caught']:.0%} of the removals** that "
+        f"happen — so **{reading['removals_missed_per_day']:.1f} a day are missed**, and "
         "missing one is the expensive error: a rushed application costs hours, a job "
         "never applied to is unrecoverable.",
         "",
         "**Against reading the same number of postings with no model at all**, off a "
         f"board losing {base_rate:.1%} of its postings a day: that person would find "
-        f"**{reading['unaided_closures_caught_per_day']:.1f}** real ones against this "
-        f"model's {reading['real_closures_caught_per_day']:.1f} — a lift of "
+        f"**{reading['unaided_removals_caught_per_day']:.1f}** real ones against this "
+        f"model's {reading['real_removals_caught_per_day']:.1f} — a lift of "
         f"**{reading['lift_over_unaided']:.1f}×**.",
         "",
         "**That ratio is the whole case for the model, and it is the number to argue",
