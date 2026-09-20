@@ -149,11 +149,14 @@ Limitations include daily interval censoring and horizon-boundary ambiguity,
 missed observations, reappearance/relisting, short panel depth, few independent
 removal events, a small incident cohort, unequal board coverage and structural
 missingness. **The source family is narrow by construction**: six Greenhouse
-boards and python_org, because the collector's page cap made the largest
-source (arbeitnow, 78% of postings) unlabelable; nothing here measures or
-claims performance on a board of a different kind. Fixing the collector and
-adding genuinely different families is a v2 concern, recorded in design §17,
-not a gate on this build. Excluding explicit identity does not remove source confounding:
+boards and python_org, because the largest source (arbeitnow, 78% of postings)
+is unlabelable: its crawls stop at a page cap short of the feed's end and the
+board reorders under them, and even a complete crawl could not tell a posting
+that aged out of its roughly seven-day feed from one that was removed; nothing
+here measures or claims performance on a board of a different kind. Fixing the
+collector, adding an age-bounded label rule for rolling feeds, and adding
+genuinely different families is a v2 concern, recorded in design §17, not a
+gate on this build. Excluding explicit identity does not remove source confounding:
 the H=1 [fingerprint diagnostic](reports/board_fingerprint.md) recovered board
 identity with 100% accuracy from production features. That diagnostic is not a
 disappearance score or evidence of transfer. Imputed board context and repeated

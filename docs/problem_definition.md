@@ -197,19 +197,30 @@ built from it would be wrong at an unknown rate, in an unknown direction, and
 would look exactly like labels that were right. A dataset's worst failure mode
 is a label that is confidently wrong, and this is one.
 
-**Reaffirmed 2026-09-07, after the pagination was fixed.** The scraper now walks
-arbeitnow to the end of its feed — `links.next` goes null at page 21, about
-2,010 postings — so from 2026-09-08 a run can be recorded complete and the
-reorder argument above no longer applies. **The exclusion stands anyway**, and
-the reason has changed rather than weakened.
+**Reaffirmed 2026-09-07, when the page cap was raised — and corrected
+2026-09-20 against the crawl log.** The 2026-09-07 change raised arbeitnow's
+cap from 8 pages to 30. An earlier version of this paragraph said the scraper
+"now walks arbeitnow to the end of its feed" and that a run could be recorded
+complete from 2026-09-08. The runs table says otherwise: **every arbeitnow run
+since 2026-09-08 fetches exactly 30 pages, 3,300 rows, and ends with
+`stopped at the 30-page cap — the board was not fully seen`**; no scheduled
+run has seen `links.next` go null, and `status` is `partial` on every one.
+The feed is longer than either cap. The reorder argument above has not lapsed
+either: since the collector began recording `incomplete_reason` (2026-09-14),
+every arbeitnow run says `overlap` — a later page re-served records an earlier
+page had already returned, which is the board moving under the crawl. So the
+two original reasons — capped, and reordering — both still hold. **The
+exclusion stands**, and there is a third reason that would survive fixing
+both.
 
-Completeness is not the binding constraint; **window residence** is. The feed
+That third reason is **window residence**, and it is the binding one. The feed
 retains roughly seven days of arrivals at about 400 a day, so a posting leaves
 the observable universe once it is old enough, whether or not anything happened
 to it. For a posting near that edge, absence is *ageing out* and *removal* at
 once, and no crawl however complete can separate them. That is the same class of
 error the paragraph above refuses — a label wrong at an unknown rate, in an
-unknown direction — arriving by a different route.
+unknown direction — arriving by a different route. A complete crawl is
+necessary for an arbeitnow label and is not sufficient.
 
 There is a rule that would work: label only arbeitnow postings young enough to
 sit inside the feed through `t + H` and its corroborating run. It is a real

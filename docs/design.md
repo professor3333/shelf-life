@@ -2170,14 +2170,24 @@ so many words — and nothing here can say anything about a board of a
 different kind, because there is none in the data.
 
 There could have been. arbeitnow is 78% of the collected postings and is
-excluded entirely, not because its postings are unlabelable in principle but
-because the crawls that collected them were truncated at a page cap, so a
-posting's absence meant *fell past page 8*, not *removed*
-(`docs/problem_definition.md` §4). That is an upstream collection defect. It
-is left unfixed **on purpose**: this build's assignment is the mess it was
-handed, and repairing the scraper to make the data better would delete the
-lesson (`README`: the non-goals). The cost of that choice is exactly the
-narrow source family above, and it is a cost, not a footnote.
+excluded entirely, for three reasons that all hold today
+(`docs/problem_definition.md` §4, corrected 2026-09-20 against the crawl log).
+Its crawls never observe the whole board: capped at 8 pages until 2026-09-07
+and at 30 since, with the feed longer than either, so a posting's absence may
+mean *fell past the cap*, not *removed*. The board reorders under the crawl,
+and pages re-serve records earlier pages returned (`incomplete_reason =
+overlap` on every run since it was recorded), so a posting can also be
+*missed* rather than gone. And even a complete, stable crawl could not label
+it: the feed retains roughly seven days of arrivals, so a posting leaves the
+observable universe by ageing out, and near that edge *aged out* and *removed*
+are one observation. The first two are upstream collection defects, left
+unfixed **on purpose**: this build's assignment is the mess it was handed, and
+repairing the scraper to make the data better would delete the lesson
+(`README`: the non-goals). The third is a property of the source, and the only
+rule that would work — label only postings young enough to sit inside the feed
+through `t + H` and its corroborating run — is a `rules_version` change with
+its own tests, not a consequence of any crawler fix. The cost of all this is
+exactly the narrow source family above, and it is a cost, not a footnote.
 
 **What this build claims, and does not.** Transfer, if the gate passes, is
 transfer *within* a source family. "Unseen-board performance" on a board
@@ -2186,16 +2196,34 @@ measured and is not claimed — the README's failure mode #2 and the model
 card's limitations say so, and the words *arbitrary boards* appear in this
 repository only to be refused.
 
-**What v2 would need, in order.** Not more models.
+**What v2 would need, in order — revised 2026-09-20.** Not more models, and
+not, first, a better crawler.
 
-1. Fix the collector's completeness: crawl a board to its end, or record
-   that it did not, per run — so absence can mean removal on every source.
-2. Bring in genuinely different families: at least one aggregator with a
-   complete crawl (arbeitnow itself, once its crawls are whole), one ATS
-   that is not Greenhouse, one non-English board. Different templates,
-   different housekeeping habits, different base rates.
-3. Only then re-run §4a's leave-one-*family*-out, which is the measurement
-   the present leave-one-board-out is a stand-in for.
+1. **A defensible labelling rule for rolling-window feeds.** The one that
+   would work is in `docs/problem_definition.md` §4: label an arbeitnow
+   posting only if it is young enough to sit inside the observed window —
+   the feed's residence *and* the crawl's cap, whichever is shorter, since
+   the feed is newest-first and the two are the same edge seen from two
+   sides — through `t + H` and its corroborating run. Under that rule a young
+   posting's absence is evidence again, whether or not the crawl reached the
+   end. It is a change to the target every number here is about, so it is a
+   `rules_version` bump with its own tests and its own provenance on the
+   artifact, and it is decided on evidence from the crawls as they are, not
+   promised by a crawler change.
+2. **The collector, for what the rule cannot cover.** arbeitnow's crawls are
+   still capped — 30 pages since 2026-09-07, `stopped at the 30-page cap`
+   on every run — and still overlap as the board reorders under them
+   (`incomplete_reason = overlap`). The collector already records both per
+   run, which is what the present exclusion relies on. Reaching the end
+   would let absence mean removal on the *whole* board rather than its
+   young end; it does not make the rule in (1) unnecessary, and (1) does not
+   need it.
+3. **Genuinely different families**, evaluated: at least one aggregator
+   under the rule from (1) — arbeitnow itself — one ATS that is not
+   Greenhouse, one non-English board. Different templates, different
+   housekeeping habits, different base rates. Then re-run §4a's
+   leave-one-*family*-out, which is the measurement the present
+   leave-one-board-out is a stand-in for.
 
 Until then the honest sentence is the one on the model card: fitted to these
 boards; applicable, if the gate says so, to boards of their kind.
