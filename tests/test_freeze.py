@@ -53,7 +53,12 @@ def _panel_file(tmp_path: Path, n_waves: int) -> Path:
 
 
 def _run_freeze(
-    tmp_path: Path, monkeypatch, n_waves: int, *extra: str, clean: bool = True
+    tmp_path: Path,
+    monkeypatch,
+    n_waves: int,
+    *extra: str,
+    clean: bool = True,
+    evidence_problems: list[str] | None = None,
 ) -> dict[str, object]:
     paths = {
         "panel": _panel_file(tmp_path, n_waves),
@@ -105,6 +110,11 @@ def _run_freeze(
     # The harness runs on whatever tree the developer has; the clean-tree
     # refusal is tested on its own below, not by every other test's luck.
     monkeypatch.setattr(freeze_module.provenance, "worktree_is_clean", lambda: clean)
+    # Likewise the evidence bundle: the fixture panel has no reports, so the
+    # real check would refuse every run. Its own tests are below.
+    monkeypatch.setattr(
+        freeze_module.evidence, "check", lambda *_args, **_kw: list(evidence_problems or [])
+    )
 
     with pytest.raises(SystemExit) as exit_info:
         freeze_module.main()
@@ -344,6 +354,43 @@ def test_the_clean_tree_check_comes_after_the_depth_checks(tmp_path, monkeypatch
     assert paths["exit_code"] == 3
     assert paths["report"].exists()
     assert "uncommitted" not in capsys.readouterr().out
+
+
+def test_a_real_freeze_refuses_a_mixed_evidence_bundle(tmp_path, monkeypatch, capsys):
+    """A clean tree says the code at HEAD is what runs. It does not say the
+    reports the candidate was chosen on came from HEAD, on this panel. On
+    2026-09-20 they came from two commits and two snapshots (`design.md` §16).
+    Its own exit code — *regenerate* is a different remedy from *commit* or
+    *wait* — and no report, for the same reason as the dirty tree."""
+    paths = _run_freeze(
+        tmp_path,
+        monkeypatch,
+        DEEP_ENOUGH_TO_CHOOSE,
+        evidence_problems=["commits disagree: readiness.md=aaaaaaaaa, model_results.md=bbbbbbbbb"],
+    )
+    assert paths["exit_code"] == 5
+    assert not paths["artifact"].exists(), "the test block was spent on mixed evidence"
+    assert not paths["report"].exists()
+    out = capsys.readouterr().out
+    assert "commits disagree" in out and "regenerate_reports.sh" in out
+
+
+def test_the_evidence_check_comes_after_the_clean_tree_check(tmp_path, monkeypatch, capsys):
+    """The remedy for mixed evidence dirties the tree, so 'commit first' must
+    be the message a dirty tree gets, not 'regenerate'."""
+    paths = _run_freeze(
+        tmp_path, monkeypatch, DEEP_ENOUGH_TO_CHOOSE, clean=False, evidence_problems=["x"]
+    )
+    assert paths["exit_code"] == 4
+    assert "not one bundle" not in capsys.readouterr().out
+
+
+def test_a_synthetic_freeze_is_exempt_from_the_evidence_check(tmp_path, monkeypatch):
+    paths = _run_freeze(
+        tmp_path, monkeypatch, DEEP_ENOUGH_TO_CHOOSE, "--synthetic", evidence_problems=["x"]
+    )
+    assert paths["exit_code"] == 0
+    assert paths["artifact"].exists()
 
 
 def test_a_synthetic_freeze_is_a_rehearsal_and_may_run_dirty(tmp_path, monkeypatch):

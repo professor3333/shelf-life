@@ -691,7 +691,12 @@ being tested. Both exit 3 and write the reason into `reports/test_results.md`
 instead of a number. A third, `DirtyWorktree`, is asked last and is about the
 code: a real freeze from a tree with uncommitted changes exits 4 and writes
 nothing, because the commit it would record could not reproduce the result
-([Freezing a model](#freezing-a-model)).
+([Freezing a model](#freezing-a-model)). A fourth, `MixedEvidence`, is about
+the reports the choice was read from: unless every one of them names the same
+snapshot — the panel's — and the same commit — `HEAD`, or one that differs
+from it only by the commit of the reports themselves — the freeze exits 5,
+and the remedy is `./scripts/regenerate_reports.sh`, not a flag
+(`python -m src.models.evidence` prints the table).
 
 The second check is the one that matters right now, and it was added on
 2026-09-09 after the first opened. Between those two dates
@@ -1010,7 +1015,9 @@ commit that reproduces it. It never invokes `freeze`; `reports/test_results.md`
 keeps its previous evidence and provenance until the deliberate freeze.
 The day the gate clears: merge → clean `main` → CI
 green → this script → commit the reports → `freeze`, in that order, so the
-evidence is in history before the result that is read against it.
+evidence is in history before the result that is read against it. Since
+2026-09-20 that order is enforced rather than followed: `freeze` refuses a
+bundle whose reports disagree about snapshot or commit (`src/models/evidence.py`).
 
 **`cold_start.sh` runs last, and it is a gate rather than a report.** It has to
 come after the deploy, because it measures a real instance waking from idle with

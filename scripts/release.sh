@@ -90,9 +90,20 @@ if gh release view "${TAG}" --repo "${REPO}" >/dev/null 2>&1; then
   exit 2
 fi
 
+# --- 0. is the evidence one bundle? ---------------------------------------------
+# `freeze` asks this itself and refuses with 5; asking first, aloud, prints the
+# table of what each report claims before anything is fitted, so the answer is
+# on screen rather than buried in a refusal. Rehearsals freeze a synthetic
+# panel that no report describes, and are exempt there too.
+if [ "${REHEARSE}" -eq 0 ]; then
+  echo "== 0/6 the evidence bundle"
+  "${PYTHON}" -m src.models.evidence || exit 3
+fi
+
 # --- 1. freeze ------------------------------------------------------------------
 # On a real panel `freeze` refuses on its own: too shallow (3), no folds (3),
-# dirty tree (4). Each is the right answer and this script has nothing to add.
+# dirty tree (4), mixed evidence (5). Each is the right answer and this script
+# has nothing to add.
 echo "== 1/6 freeze ${RUN}"
 mkdir -p "${DIR}"
 if ! "${PYTHON}" -m src.models.freeze --run "${RUN}" ${FREEZE_ARGS[@]+"${FREEZE_ARGS[@]}"}; then

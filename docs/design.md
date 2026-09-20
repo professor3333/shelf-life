@@ -2065,6 +2065,51 @@ enforces it.
 and it is more machinery than a project with one author needs; a clean
 committed tree is simpler and stricter.
 
+### The evidence is one bundle — **DECIDED 2026-09-20: a real freeze refuses reports from two pasts**
+
+A clean tree at `HEAD` says the code that will run is the code that is
+committed. It says nothing about whether the reports the candidate was
+*chosen* on came from that code, on this panel. On 2026-09-20 they had not:
+`readiness.md`, `label_validity.md`, `cohort_audit.md` and
+`board_fingerprint.md` were written at `55652f321` on a feature branch;
+`baseline_results.md`, `model_results.md`, `experiment_log.md` and
+`model_comparison.md` at `a8ca6b13c` on `main`; `test_results.md` from a
+snapshot two days older than either. Harmless, because every one of them
+said *not ready*. On the day one says *ready*, a selection read across a
+bundle like that is a choice no single commit produced, and the artifact's
+provenance line would be true of the freeze and false of the choice behind it.
+
+`regenerate_reports.sh` already produces the bundle correctly — one clean
+tree, one pinned snapshot, every generator in order. That is the procedure.
+**`src/models/evidence.py` is the check that the procedure was followed, and
+`freeze` on a real panel asks it** immediately after the clean-tree check:
+every report in `EVIDENCE_REPORTS` (the eight H=7 reports the run writes for
+the present panel) must be about the real panel, name the same snapshot, that
+snapshot must be the one the panel on disk was built from, all must name the
+same commit, and that commit must be `HEAD` or differ from it only under
+`reports/` and `README.md` — because the runbook commits the regenerated
+reports before freezing, which moves `HEAD` by exactly that commit. Exit `5`,
+no report written, for the same reasons as the dirty tree. Asked *after* the
+clean-tree check because its remedy dirties the tree, so *commit first* must
+be the first message. Synthetic freezes are exempt: no report describes the
+synthetic panel.
+
+Not in the set, on purpose: `test_results.md` is what the freeze writes;
+`label_check.md` samples live pages and keeps its provenance under `--no-net`;
+the dated profiles are each about their own snapshot; the `*_h1_*` reports
+are evidence about the machinery, not the candidate.
+
+**No override flag.** The remedy is a script that takes minutes, and a flag
+that skips a minutes-long step is how a rule becomes a suggestion. The two
+existing overrides (`--accept-no-folds`, `--accept-transfer-collapse`) are
+decisions about *evidence that exists*; this is a refusal to read evidence
+that is not one thing, and there is no version of that worth recording on an
+artifact.
+
+*Would change my mind:* a report in the set that legitimately cannot be
+regenerated on the day — a network-dependent one, say — which would move it
+out of the set beside `label_check.md`, not add a flag.
+
 ### The environment is the lock — **DECIDED 2026-09-11**
 
 The traceability table below names `lock_sha256` of `uv.lock`. On 2026-09-11,
