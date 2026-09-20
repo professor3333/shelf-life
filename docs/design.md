@@ -1126,6 +1126,69 @@ would end the option outright and promote the Koyeb question from "unverified" t
 
 ---
 
+### 7e-iii. The load path, measured on the platform — **2026-09-20**
+
+§7e-ii added a locally measured unpickle cost to the remote baseline and
+called the sum an estimate. This is the first measurement of that term on the
+instance itself, and it replaces the estimate. **It is the rehearsal kind, and
+it accepts nothing**: the artifact loaded was `artifact-rehearsal-2026-09-11`,
+fitted on the synthetic panel, and the criterion is about the one that ships.
+
+**How.** The never-merged `rehearsal` branch — today's `main` plus two lines,
+`MODEL_TAG` naming the synthetic prerelease and the blueprint's service
+renamed to `shelf-life-rehearsal` — was pushed, and a second free Render
+service was created from it. That executes, at a public URL, the one path the
+production service has never taken: Render's own build fetching a release and
+verifying it against `SHA256SUMS`, then serving it. `scripts/cold_start.sh`
+read `/health`, filed the run as `REHEARSAL`, and ran three cycles of sixteen
+idle minutes. The synthetic model never touched the real URL; `main`'s
+`MODEL_TAG` is still empty. The service is deleted after this entry.
+
+**The result** is `reports/cold_start_rehearsal.md`, and the report is the
+record; the reading is this:
+
+| term | 09-12 baseline (no artifact) | 09-20 rehearsal (artifact loaded) |
+|---|---|---|
+| cold `/health`, three cycles | 43.6 – 52.5 s | 42.5 – 52.6 s |
+| process ready, from inside | 18.9 – 19.6 s | 19.3 – 19.8 s |
+| of which the unpickle | — | 0.59 – 0.71 s |
+| first `/predict` after wake | not reachable | 0.78 – 1.01 s |
+| first `/rank`, three postings | not reachable | 1.28 – 1.50 s |
+| peak RSS | 200 – 208 MB | 217 – 220 MB |
+| worst request, worst cycle | 52.51 s | **52.56 s** |
+
+**The load path is not where the seconds are.** The unpickle costs under a
+second on the tenth of a CPU, and the first prediction about one; the process
+is ready in the same nineteen seconds with the artifact as without. The whole
+of the cold start is the platform wake plus the imports, and the platform's
+term is the one that varies — the same 43-versus-52 split across cycles that the
+baseline showed, apparently by which host the container lands on. **The 25.18 s
+estimate in §7e-ii was wrong by a factor of forty**, and the direction of the
+error is the one worth keeping: Docker's hard CFS quota starves a start in a way
+Render's burstable share does not, so a locally throttled number is not a
+pessimistic bound on the platform, it is a different quantity. The 7e-ii
+arithmetic gave 77 s "tight, not comfortable"; the measurement gives 53 s with
+thirty-seven to spare.
+
+**What it does and does not settle.** Settled: the load path fits, the image's
+fetch-and-verify works under Render's builder, memory is at 43% of the instance
+with a booster resident, and the acceptance protocol's every column has now been
+produced by a real cold start against a public URL. Not settled: the number for
+the artifact that ships. The real H=7 model is the same libraries and the same
+pipeline shape, so a materially different unpickle would be a surprise — but the
+criterion is not applied to what would be a surprise. `reports/cold_start.md`
+does not exist, `DEFINITIVE` has never been printed, and §7e's sentence stands:
+the architecture is provisional until it has.
+
+**One thing the run caught that was not about the service.** The first attempt
+lost its third cycle to the measuring laptop sleeping through the idle wait —
+`curl` reported a 1,014-second "timeout" on a 180-second limit, zero bytes —
+and because the script aborts on a failed request and its temp dir goes with
+it, two valid cold cycles were discarded. The re-run was wrapped in
+`caffeinate -i`; `DEBUGGING.md` has the entry. The script's fragility is
+recorded there as a known weakness rather than fixed here, because this
+measurement's deliverable was the number, not a better script.
+
 ### 7f. The deploy path, and the gate on it — **REVISED 2026-09-06**
 
 Written first against Cloud Run, then rewritten the same day when the platform

@@ -4,6 +4,34 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-09-20 — the cold-start run lost two good cycles to a sleeping laptop
+
+- **Problem:** Cycle 3 of the first model-loaded cold-start run ended with
+  `curl: (28) Operation timed out after 1014561 milliseconds with 0 bytes
+  received` — on a request carrying `--max-time 180` — and the script exited
+  without a report. Cycles 1 and 2, both valid cold starts, survived only in the
+  terminal log.
+- **Root cause:** Two things. The measuring Mac idled to sleep during the
+  sixteen-minute wait; the request never left the machine, and on wake curl's
+  clock had advanced through the sleep, so it declared a timeout it never
+  actually spent waiting for. Then the script's own design turned one lost
+  request into a lost run: `set -e` on a failed `timed` call ends the script
+  before the report step, and the `trap` removes the temp dir holding
+  `cycles.jsonl`, so every finished cycle is discarded with the failed one.
+- **Solution:** Re-run in full under `caffeinate -i ./scripts/cold_start.sh …`,
+  which holds off idle sleep for the life of the process. All three cycles went
+  cold and `reports/cold_start_rehearsal.md` was written. The script is
+  unchanged: this measurement's deliverable was the number.
+- **Lesson:** A measurement that spans an hour of wall-clock waiting must be run
+  under something that forbids the machine to sleep, every time, as part of the
+  command and not as a thing to remember. And a script that accumulates results
+  over a long run should write each one to a durable path as it lands and record
+  a failed cycle as a row rather than abort — losing the finished work to the
+  unfinished piece is the expensive failure, and it is the script's to prevent,
+  not the operator's.
+
+---
+
 ## 2026-09-18 — deployment verification could not wake the sleeping UI
 
 - **Problem:** The public UI verification failed after eight minutes with

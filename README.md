@@ -74,7 +74,7 @@ it describes — and this README links to them rather than restating them:
 | The ladder, folds, threshold, calibration, per-board and transfer | [`model_comparison.md`](reports/model_comparison.md) |
 | The held-out result, or the refusal to produce one | [`test_results.md`](reports/test_results.md) |
 | Selected validation results and completed held-out runs | [`depth_ledger.md`](reports/depth_ledger.md) |
-| What the free instance's cold start measures, cycle by cycle | [`cold_start_baseline.md`](reports/cold_start_baseline.md) (the definitive `cold_start.md` does not exist yet) |
+| What the free instance's cold start measures, cycle by cycle | [`cold_start_rehearsal.md`](reports/cold_start_rehearsal.md) with a synthetic artifact loaded; [`cold_start_baseline.md`](reports/cold_start_baseline.md) with none (the definitive `cold_start.md` does not exist yet) |
 
 Where a number in this README carries a date, it is the value on that date and
 is kept as the record of a decision, not as the current state. The current
@@ -1700,6 +1700,24 @@ CPU. One line in the Dockerfile fixes it; `docs/design.md` §7e records the
 diagnosis and the re-measurement replaces the report. The definitive figure is
 still owed.
 
+**The load path has since been measured on the platform itself, and it is not
+where the seconds are.** On 2026-09-20 a throwaway second Render service was
+built from a never-merged branch naming the synthetic prerelease — the one path
+the production service has never taken, a release fetched and checksum-verified
+inside Render's own build — and `scripts/cold_start.sh` ran three cycles
+against it with a model loaded. The report is
+[`reports/cold_start_rehearsal.md`](reports/cold_start_rehearsal.md), filed as
+a **rehearsal**, which accepts nothing: worst request of the worst cycle
+**52.56 s** against 90, the process ready in the same nineteen seconds as
+without an artifact, the unpickle itself **under a second**, the first
+`/predict` about one and the first three-posting `/rank` about a second and a
+half, peak memory 220 MB of 512. The whole of the cold start is the platform
+wake plus the imports; the 25 s load estimate below, taken under Docker's hard
+CPU quota, was wrong by a factor of forty, and `docs/design.md` §7e-iii says
+why the direction of that error is the lesson. The definitive figure is still
+the one with the real artifact, and `reports/cold_start.md` still does not
+exist.
+
 **And the term the baseline is missing is now estimated: 25.18 s.** The baseline
 covers everything *except* the one thing the criterion exists to bound — reading
 a fitted pipeline off disk and unpickling it on a tenth of a CPU.
@@ -1729,7 +1747,10 @@ that produced the 25.18 s.
 The honest reading of **57.83 s against 90 s** is deliberately narrow. It is an
 estimate assembled from two measurements of different things on different
 machines, and the acceptance is one measurement of the right thing on the right
-one — `reports/cold_start.md`, which does not exist yet. It does not
+one — `reports/cold_start.md`, which does not exist yet (the platform's own
+load-path number, with a synthetic artifact, is in
+`reports/cold_start_rehearsal.md` and is forty times smaller than this
+estimate). It does not
 accept the architecture — nothing measured locally can, and the artifact in
 `models/` is the synthetic-fixture one, so its size is not the frozen model's
 size. What it buys is the removal of the largest unknown from the critical path
