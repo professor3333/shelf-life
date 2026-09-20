@@ -516,18 +516,23 @@ observation count is constant at serve time and encodes left truncation.
 **Board identity, which was excluded and is still there.** `source` and
 `company` are out so a posting from a board never scraped can be scored. A
 classifier fitted on the production feature matrix — same `Pipeline`, target
-swapped for `source` — **names the board for 100% of validation rows**
-([`reports/board_fingerprint.md`](reports/board_fingerprint.md)). Not through
-missingness, which alone scores 19%, but through values: `board_size_at_t` is a
-board's name in integer form (100% on its own), and each employer's office
-cities and posting template carry it redundantly (97.6% with every
-board-context column removed). On seven boards, any feature set rich enough to
-describe a posting identifies its employer, so matrix neutrality was the wrong
-criterion. `docs/design.md` §4a allows availability patterns and template
-features explicitly and makes **transfer** the criterion instead: the
-leave-one-board-out table in `model_comparison.md` is read before any freeze,
-and a held-out board whose score collapses to its base rate is a candidate not
-to freeze.
+swapped for `source` — **names the board for every validation row**. Not
+through missingness, which alone scores below the majority guess, but through
+values: `board_size_at_t` is a board's name in integer form and identifies it
+alone, and each employer's office cities and posting template carry it
+redundantly, so removing every board-context column barely dents it. The
+measurement is
+[`reports/board_fingerprint_h1_calendar.md`](reports/board_fingerprint_h1_calendar.md)
+(the H=1 run; the H=7 report,
+[`reports/board_fingerprint.md`](reports/board_fingerprint.md), declines until
+a legal cut exists and is the one that counts at freeze) — the figures live
+there, not here, because they move with the snapshot. On seven boards, any
+feature set rich enough to describe a posting identifies its employer, so
+matrix neutrality was the wrong criterion. `docs/design.md` §4a allows
+availability patterns and template features explicitly and makes **transfer**
+the criterion instead: the leave-one-board-out table in `model_comparison.md`
+is read before any freeze, and a held-out board whose score collapses to its
+base rate is a candidate not to freeze.
 
 ---
 
