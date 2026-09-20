@@ -16,7 +16,7 @@ the HTML report as an artifact (`coverage-report`).
 | **The test block is opened once, in one place** | a module reading `split.test` for tuning | `test_evaluate.py`: `test_the_test_block_is_read_only_where_it_should_be` (an AST walk of `src/`), `test_the_shell_scripts_do_not_read_the_test_block_either`; `test_deploy.py`: `test_the_rehearsal_never_opens_the_test_block`, `test_the_regeneration_refuses_dirty_source_and_never_opens_the_block_itself` |
 | **Leakage enforcement** — every column has a verdict; transformers fit on the training fold only | a new panel column reaching the model unaudited; an imputer learning the full frame's median | `test_preprocessing.py`: `test_every_panel_column_has_exactly_one_verdict`, `test_a_column_with_no_verdict_is_refused`, `test_imputer_learns_the_training_folds_median_not_the_full_frames`, `test_fit_on_training_fold_cannot_see_validation_or_test`, `test_a_category_unseen_at_fit_time_does_not_raise` |
 | **Threshold selection** — the budget-th validation score, never 0.5 | a threshold chosen on test, or a budget the sweep does not cover | `test_evaluate.py`: `test_threshold_for_budget_on_the_hand_computed_array`, `test_the_sweep_covers_the_chosen_budget_so_the_choice_is_defended`; `test_metrics.py` |
-| **Model selection by the pre-registered rule** | a winner named with no folds; complexity read as a selection | `test_evaluate.py`: `test_selection_refuses_a_candidate_with_too_few_folds`, `test_selection_says_so_when_nothing_could_be_scored`, `test_the_complexity_reading_never_reads_as_a_selection` |
+| **Model selection by the pre-registered rule** | a winner named with no folds; complexity read as a selection | `test_evaluate.py`: `test_selection_refuses_a_candidate_with_too_few_folds`, `test_selection_says_so_when_nothing_could_be_scored`, `test_a_gap_inside_one_standard_deviation_hands_the_pick_to_the_simpler_model`, `test_the_heuristic_floor_is_a_gate_on_the_pick_not_only_on_the_leader`, `test_a_fitted_pick_that_clears_the_floor_carries_the_measurement_that_says_so`, `test_the_complexity_reading_never_reads_as_a_selection` |
 | **Recalibration, transfer and board-context rules** — decided before the numbers | a rule that fires on the wrong comparison; a monotone map reordering the alert list | `test_calibration.py` (fires where it says; ranks survive; the alert list never loses a member); `test_generalisation.py` (collapse needs two boards; serve-time withholding); `test_board_context.py` (imputed vs refit, not supplied vs refit) |
 | **The freeze's refusals** | a freeze on a shallow split, with no folds, on a collapsed candidate, or from a dirty tree | `test_freeze.py`: `test_a_legal_split_with_no_folds_is_refused`, `test_a_candidate_that_collapses_on_unseen_boards_is_refused`, `test_the_transfer_check_never_opens_the_test_block`, `test_a_real_freeze_refuses_a_dirty_worktree`, `test_the_clean_tree_check_comes_after_the_depth_checks`; each override exists, works, and is recorded |
 | **Artifact compatibility and traceability** | a bare estimator saved; a booster read by a different XGBoost; a hash naming a file nobody has | `test_inference.py`: `test_a_fixed_posting_scores_the_same_number_forever`, `test_loading_a_missing_artifact_says_how_to_build_one`; `test_freeze.py`: `test_the_artifact_names_everything_it_is_traceable_to`; `test_deploy.py`: `test_the_image_refuses_an_artifact_from_a_different_library`, `test_the_lock_is_committed_and_nothing_ignores_it` |
@@ -28,18 +28,22 @@ the HTML report as an artifact (`coverage-report`).
 
 ## What is not covered, and why
 
-Measured on 2026-09-12, 88% of statements and branches over `src/`, `api/`
-and `app/`; the lowest files and the reason each is where it is:
+Measured on 2026-09-12 at 88% of statements and branches over `src/`, `api/`
+and `app/`, and re-measured on 2026-09-20 at 92% after the five files below
+were given tests that need no scraper snapshot, no network and no Linux
+kernel — a miniature SQLite database, a server on localhost, and hand-written
+`/proc` files. What remains uncovered, and the reason each line is where it is:
 
-| file | cover | why |
-|---|---|---|
-| `src/data/profile.py` | 0% | reads the raw SQLite snapshot, which CI does not have; its output is a report a reader checks, not a number the system acts on |
-| `src/data/label_check.py` | 68% | the uncovered paths make HTTP requests to the live boards; the parsing and the Wilson-interval arithmetic are covered |
-| `api/runtime.py` | 74% | the `/proc` branch is Linux-only; the fallback is what runs under the test runner on macOS, the `/proc` path is what runs in the image |
-| `src/models/evaluate.py` | 78% | the uncovered lines are the `main()` driver's report assembly on a real panel; every rule it applies is tested through the functions it calls |
-| `src/plots.py` | omitted | matplotlib figures; a plot is checked by looking at it |
+| file | 09-12 | 09-20 | what is still uncovered, and why |
+|---|---|---|---|
+| `src/data/profile.py` | 0% | 85% | the coverage fingerprint, run completeness, panel shape, the markdown renderer and the report's determinism are now pinned on the same miniature snapshot `test_load.py` builds (`test_profile.py`); what remains is the figure branch, which renders with matplotlib and logs to MLflow — both side effects on the working tree |
+| `src/data/label_check.py` | 68% | 99% | the fetcher is exercised against a server on localhost (200 with body, 404 as a status, not an exception), the sampler's proportional draw, the "no instrument" verdict and the whole report — relisted titles counted as removals, unverifiable rows excluded from the rate — are pinned (`test_label_check.py`); the one line left is the `--delay` sleep between live requests |
+| `api/runtime.py` | 74% | 100% | the `/proc` arithmetic — field 22 after the *last* `)`, since a command name may contain one — and the kB/bytes disagreement in `ru_maxrss` are exercised with fake files on the macOS runner (`test_runtime.py`) |
+| `src/models/evaluate.py` | 78% | 91% | the selection rule's remaining branches are now pinned: a sole eligible candidate, a leader that is already the simplest of its tied set, and **the step-4 heuristic-floor gate** on a geometry where parsimony alone would ship a fitted model that never beat a constant (`test_evaluate.py`); the figure writer and the leave-one-board-out section too. Left: `_draw`'s MLflow logging and a handful of report sentences the `main()` driver assembles only on a real panel |
+| `src/plots.py` | omitted | omitted | matplotlib figures; a plot is checked by looking at it |
 
-Nothing in that list is a path where the system could be quietly wrong about
-a label, a split, a threshold, or a served number. Raising these figures would
-mean mocking a SQLite file, a network and a kernel interface for the sake of
-the total, and the total is not the point.
+Nothing in that list was a path where the system could be quietly wrong about
+a label, a split, a threshold, or a served number — with one exception worth
+naming: the heuristic-floor gate in `select` *is* such a path, and until
+2026-09-20 its only evidence was a sentence in a docstring. The total is still
+not the point; the floor stays at 85%.

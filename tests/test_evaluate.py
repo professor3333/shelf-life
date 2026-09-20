@@ -840,3 +840,154 @@ def test_the_comparison_says_what_the_freeze_will_ship_as_the_default():
     decision["ship"] = "full"
     assert "as specified" in "\n".join(_board_context_verdict(decision))
     assert _board_context_verdict(None) == []
+
+
+# --- the selection rule's remaining branches ---------------------------------------
+#
+# Each of these is a path `select` can take on the day, and each was reachable
+# only through the CLI on a real panel until now. The fold numbers are chosen
+# so the geometry is unambiguous: which pairs are inside fold variance and
+# which are not is printed by `paired_fold_difference`, not assumed.
+
+
+def test_a_sole_eligible_candidate_is_chosen_as_such_and_still_measured_against_the_floor():
+    """One model with three folds and one with two: the first is the only
+    candidate, the verdict says so rather than claiming a lead over nothing,
+    and the floor fields are present so the report can still ask whether it
+    beat a rule."""
+    summary = pd.DataFrame({"model": ["xgboost", "logistic"], "cv_pr_auc_mean": [0.6, 0.5]})
+    per_fold = {
+        "xgboost": pd.DataFrame({"fold": [0, 1, 2], "pr_auc": [0.6, 0.6, 0.6]}),
+        "logistic": pd.DataFrame({"fold": [0, 1], "pr_auc": [0.5, 0.5]}),
+    }
+    verdict = select(summary, per_fold)
+    assert verdict["chosen"] == "xgboost"
+    assert verdict["chosen_on"] == "sole candidate"
+    assert "only model with 3 scored folds" in verdict["reason"]
+    assert verdict["best_heuristic"] is None and verdict["chosen_is_heuristic"] is False
+
+
+def test_a_leader_that_is_already_the_simplest_of_its_tied_set_stands():
+    """`logistic` leads `xgboost` inside fold variance. Parsimony among equals
+    picks the simplest, which is the leader itself — and the reason says it
+    *stands*, not that it beat anything."""
+    summary = pd.DataFrame({"model": ["logistic", "xgboost"], "cv_pr_auc_mean": [0.45, 0.44]})
+    per_fold = {
+        "logistic": pd.DataFrame({"fold": [0, 1, 2], "pr_auc": [0.60, 0.20, 0.55]}),
+        "xgboost": pd.DataFrame({"fold": [0, 1, 2], "pr_auc": [0.20, 0.60, 0.52]}),
+    }
+    verdict = select(summary, per_fold)
+    assert verdict["chosen"] == "logistic" == verdict["leader"]
+    assert verdict["chosen_on"] == "parsimony"
+    assert verdict["tied_with"] == ["xgboost"]
+    assert "is already the simplest of them, so it stands" in verdict["reason"]
+
+
+def test_the_heuristic_floor_is_a_gate_on_the_pick_not_only_on_the_leader():
+    """Step 4 of the rule, and the case its docstring says step 3 alone gets wrong.
+
+    `xgboost` leads and is genuinely separated from `prior` (lead 0.15, spread
+    0.09). `logistic` ties with `xgboost` inside variance, so parsimony hands
+    the pick to `logistic` — but `logistic`'s own lead over `prior` (0.13) does
+    not clear its spread (0.14). Without the gate the rule would ship a fitted
+    model that never demonstrated it beats a constant; with it, `prior` ships,
+    and the floor fields describe `prior`, not the model it replaced.
+    """
+    per_fold = {
+        "xgboost": pd.DataFrame({"fold": [0, 1, 2], "pr_auc": [0.60, 0.50, 0.70]}),
+        "logistic": pd.DataFrame({"fold": [0, 1, 2], "pr_auc": [0.38, 0.70, 0.67]}),
+        "prior": pd.DataFrame({"fold": [0, 1, 2], "pr_auc": [0.40, 0.45, 0.50]}),
+    }
+    summary = pd.DataFrame(
+        {"model": list(per_fold), "cv_pr_auc_mean": [f["pr_auc"].mean() for f in per_fold.values()]}
+    )
+    verdict = select(summary, per_fold)
+    assert verdict["leader"] == "xgboost" and verdict["tied_with"] == ["logistic"]
+    assert verdict["chosen"] == "prior"
+    assert verdict["chosen_on"] == "heuristic floor"
+    assert verdict["chosen_is_heuristic"] is True
+    assert verdict["best_heuristic"] == "prior"
+    assert "logistic was the simplest of those tied with xgboost" in verdict["reason"]
+    assert "slower baseline" in verdict["reason"]
+    # The floor was re-measured for what was finally chosen: no "vs best
+    # heuristic" numbers describing the model that lost.
+    assert not any(key.startswith("vs_best_heuristic_") for key in verdict)
+
+
+def test_a_fitted_pick_that_clears_the_floor_carries_the_measurement_that_says_so():
+    """The other side of the gate: a lead over the best rule larger than its
+    spread is recorded on the verdict, fold count and wins beside it."""
+    per_fold = {
+        "xgboost": pd.DataFrame({"fold": [0, 1, 2], "pr_auc": [0.60, 0.61, 0.59]}),
+        "prior": pd.DataFrame({"fold": [0, 1, 2], "pr_auc": [0.30, 0.31, 0.29]}),
+        "age_ceiling": pd.DataFrame({"fold": [0, 1, 2], "pr_auc": [0.35, 0.34, 0.36]}),
+    }
+    summary = pd.DataFrame(
+        {"model": list(per_fold), "cv_pr_auc_mean": [f["pr_auc"].mean() for f in per_fold.values()]}
+    )
+    verdict = select(summary, per_fold)
+    assert verdict["chosen"] == "xgboost" and verdict["chosen_on"] == "separation"
+    assert verdict["best_heuristic"] == "age_ceiling"  # the *best* rule, not the first
+    assert verdict["clears_heuristic_floor"] is True
+    assert verdict["vs_best_heuristic_folds"] == 3.0
+    assert verdict["vs_best_heuristic_wins"] == 3.0
+    assert verdict["vs_best_heuristic_mean_difference"] == pytest.approx(0.25)
+
+
+# --- the report assembly the CLI runs on a real panel --------------------------------
+
+
+def test_the_figures_draw_the_fixed_rungs_and_only_those_present(split, tmp_path):
+    """Which rungs are drawn is decided by ladder position, never by score —
+    drawing the three best would be selection on the validation block wearing
+    a picture. A rung that was not scored is skipped, not invented."""
+    from src.models.evaluate import FIGURE_RUNGS, write_figures
+
+    rng = np.random.default_rng(0)
+    n = len(split.val)
+    val_scores = {
+        "prior": np.full(n, float(split.train["y"].mean())),
+        "logistic": rng.uniform(size=n),
+        "random_forest": rng.uniform(size=n),  # scored, but not a figure rung
+    }
+    figures = write_figures(split, val_scores, tmp_path, suffix="_test")
+    assert [f.name for f in figures] == ["precision_recall_test.png", "calibration_test.png"]
+    assert all(f.exists() and f.stat().st_size > 0 for f in figures)
+    assert "random_forest" not in FIGURE_RUNGS
+
+
+def test_the_generalisation_section_says_when_it_could_not_run():
+    from src.models.evaluate import _generalisation_section
+
+    lines = _generalisation_section(None)
+    assert lines[0] == "## Would it work on a board it has never seen?"
+    assert "Not run on this snapshot: there is no split to fit on." in lines
+
+
+def test_the_generalisation_section_reports_the_gate_the_table_and_the_refusals():
+    """Folds with no lift on three boards read as *collapsed*, the section says
+    `freeze` will refuse, the scored table carries its denominators, and a
+    refused board is listed with its reason rather than dropped."""
+    from src.models.evaluate import _generalisation_section
+    from src.models.generalisation import BoardFold, Skipped, report_tables
+
+    folds = [
+        BoardFold(
+            board=f"b{i}",
+            eval_rows=200,
+            eval_positives=20,
+            train_positives=80,
+            train_share=0.8,
+            base_rate=0.1,
+            transfer_pr_auc=0.1 + lift,
+            ceiling_pr_auc=0.1 + lift + 0.05,
+        )
+        for i, lift in enumerate([0.0, -0.02, 0.01])
+    ]
+    skipped = [Skipped("tiny", "3 positive(s) held out; the minimum is 10")]
+    scored, refused = report_tables(folds, skipped)
+    text = "\n".join(_generalisation_section((folds, skipped, scored, refused)))
+    assert "collapsed" in text and "will **refuse** this candidate" in text
+    assert "| b0 |" in text and "| tiny |" in text
+    assert "3 positive(s) held out" in text
+    assert "**Folds refused.**" in text
