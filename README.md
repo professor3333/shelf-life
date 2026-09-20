@@ -56,8 +56,12 @@ the posting left, the role did not. [`reports/label_check.md`](reports/label_che
 >
 > The ladder *has* run end to end on the real panel at H = 1, the pipeline smoke
 > test. Its current fold evidence and selection verdict are recorded in
-> [`reports/model_comparison.md`](reports/model_comparison.md). Those numbers
-> describe the one-day rehearsal; they do not establish seven-day performance.
+> [`reports/model_comparison_h1_calendar.md`](reports/model_comparison_h1_calendar.md);
+> [`reports/model_comparison.md`](reports/model_comparison.md) is the H = 7
+> file and records that no verdict is possible yet. The H = 1 numbers describe
+> the one-day rehearsal; they do not establish seven-day performance.
+
+<a id="current-state"></a>
 
 **Where the numbers live.** The scraper runs daily, so every count, rate and
 date in this project moves. The generated reports under `reports/` are the
