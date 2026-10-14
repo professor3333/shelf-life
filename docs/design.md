@@ -2375,3 +2375,71 @@ answer is *run it for a fortnight*, and this entry becomes a pointer. Or a
 source's terms explicitly permitting redistribution of its listings, in which
 case a panel restricted to that source could be published beside the artifact
 with its own hash. Either is a v2 item behind §17's, not a gate on this build.
+
+---
+
+## 20. The held-out result — **RECORDED 2026-10-14: final; what it showed, and what the next epoch changes**
+
+**What happened.** The fold gate opened on 2026-10-08 and was first acted on
+2026-10-14 (the six days between are `DEBUGGING.md`'s locked-database entry).
+Reports were regenerated from clean `main` at `b640656` on snapshot
+2026-10-14; §14's rule selected `03-random_forest` over four rolling-origin
+folds; `./scripts/release.sh --run 03-random_forest` froze it at `ab2d207`,
+opened the test block once and published
+[`artifact-2026-10-14`](https://github.com/professor3333/shelf-life/releases/tag/artifact-2026-10-14).
+The image built from that release passed `await_release` and `smoke`.
+
+**The number.** At the frozen threshold (0.3409) on the 2026-10-04 – 10-07
+block: precision 0.75 [0.46, 1.00], recall 0.071 [0.030, 0.116], lift 6.8×
+[4.2×, 9.3×] over a 0.110 base rate, PR-AUC 0.241 [0.181, 0.308]. It is
+**final**: no feature, threshold, calibration or candidate is changed on its
+basis, and `freeze` is not run again on this epoch. Nothing in code enforces
+that; this entry does.
+
+**The finding.** Test PR-AUC is 0.304 on postings the model also saw in
+training and **0.132 on postings it did not**, against base rates of 0.112 and
+0.105; a posting's first sighting scores 0.131 against 0.102. Training PR-AUC
+was 0.93 against 0.22 on validation. The lift is mostly the model recognising
+postings already on the board.
+
+**Why selection did not see it.** §8 lets the same posting appear in every
+block, which is what the product does — it ranks a board whose stock persists
+— and asked for the seen/unseen split to be *reported*. It was not asked to
+*select*. Every fold and the validation block mix the two populations in about
+the proportion the test block does, so §14 rewarded recognition along with
+everything else, and the forest, the most able to memorise, led. The report
+that §8 required is the one that caught it, which is §8 working; the rule
+that ignored it is §14 working as written.
+
+**A defect in the report, not the result.** The first table in
+`reports/test_results.md` prints point estimates from a threshold recomputed on
+the test block's own budget — 80 alerts, widened to 138 by ties at the isotonic
+plateau — beside intervals computed at the frozen threshold, so its recall
+(0.153) sits outside its own interval [0.030, 0.116]. The frozen-threshold row
+further down the same report, the artifact's metrics and `MODEL_CARD.md` are
+consistent with each other. The report is left as written: regenerating it
+means opening the test block again.
+
+**Pre-registered for the next epoch** (decided now, before any of its numbers
+exist):
+
+1. **Selection reads the unseen slice too.** Each rolling-origin fold is also
+   scored on rows whose posting is absent from that fold's training window. A
+   fitted candidate is eligible only if its mean unseen-slice PR-AUC beats the
+   best heuristic rung's by more than the fold spread of that difference;
+   otherwise §14's heuristic floor applies on that slice. The pooled rule is
+   unchanged otherwise.
+2. **The headline table prints frozen-threshold points beside
+   frozen-threshold intervals**, and the recomputed-budget figures move to a
+   separately labelled hindsight row.
+3. **Score resolution is reported**: the count of distinct predicted
+   probabilities on validation and test, because isotonic plateaus turn a
+   ranking into a handful of tiers (five smoke-test postings shared 0.1222),
+   and a 20-a-day list drawn from a tie is drawn by input order.
+
+**Would change my mind.** The next epoch's unseen-slice numbers, which item 1
+makes a standing output rather than a one-off: if the unseen-slice PR-AUC
+closes toward the seen slice as that cohort grows past its current 119 test
+positives, the gap was sample size and item 1 is a cost without a benefit. If it stays near the base rate, the honest
+product claim narrows to *ranking a board's existing stock*, and the README
+says so in those words.
