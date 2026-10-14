@@ -26,40 +26,41 @@ report heading names the event anything but removal.
 
 **That the label measures removal has been checked against the boards, not just
 argued.** A sample of postings the panel calls removed was verified against each
-source's live listing: **59 of 60 are genuinely gone under their own id** (98.3%,
-95% Wilson 91.1–99.7%), against a control drift of 3.3% among postings that were
-up at the last crawl. Twelve percent of those verified removals had their title
-relisted under a new id within days — which is the caveat above, measured:
-the posting left, the role did not. [`reports/label_check.md`](reports/label_check.md).
+source's live listing. On the 2026-10-14 check, **57 of 60 are genuinely gone
+under their own id** (95.0%, 95% Wilson 86.3–98.3%), against a control drift of
+0 in 60 among postings that were up at the last crawl, and 7 of those 57 had
+their title relisted under a new id — which is the caveat above, measured: the
+posting left, the role did not. The current figures are
+[`reports/label_check.md`](reports/label_check.md).
 
 > **Status, stated plainly.** The full system is built: ingestion, labelling,
 > the leakage audit, the temporal split, the model ladder, experiment tracking,
 > the frozen-artifact packaging, the API, the container and the UI.
 >
-> **It is deployed, and it is serving no model.** The API answers at
+> **It is deployed, and it serves the frozen H = 7 model.** The API answers at
 > <https://shelf-life-5hin.onrender.com> and the UI at
 > <https://shelf-life-2l8tanmdatboms9mhxh3rj.streamlit.app/> — both public, both
-> free tier, both live as you read this. `/health` reports `degraded` and
-> `/predict` returns 503, because `MODEL_TAG` names no release yet. That is the
-> intended state, not an outage: see [Deployment](#deployment). The UI reaches
-> the API and shows that state — verified from a browser by the `verify-ui`
-> job, which on 2026-09-11 was what found the UI's `SHELF_LIFE_API` secret had
-> never been set (fixed 2026-09-12; `DEBUGGING.md`).
+> free tier. `MODEL_TAG` names
+> [`artifact-2026-10-14`](https://github.com/professor3333/shelf-life/releases/tag/artifact-2026-10-14),
+> and the `Verify deployment` workflow on the commit that set it is what checks
+> the public URL serves that release ([Deployment](#deployment)). The free
+> instance sleeps; the first request after a quiet spell waits for it to wake.
 >
-> **No model has been fitted at H = 7 yet.** An honest three-way split needs
-> more labelled crawl waves than the panel has, and choosing a model needs more
-> still. [`reports/readiness.md`](reports/readiness.md) says how many, how far
-> off, whether the panel is still accruing, and the projected dates;
-> [`reports/test_results.md`](reports/test_results.md) records the refusal
-> rather than a number. `scripts/watch_depth.sh` re-measures both daily.
-> [Why, and when it clears](#why-there-is-no-test-number-yet).
+> **The model and its held-out number.** `03-random_forest`, chosen by the
+> pre-registered rule over four rolling-origin folds on the 2026-10-14
+> snapshot, frozen once at `ab2d207`. On the held-out block (2026-10-04 – 10-07),
+> at the frozen threshold, its daily shortlist is **75% genuine removals
+> [46%, 100%] — 6.8× [4.2×, 9.3×] what reading the board unaided finds** — and
+> catches 7% of the removals that happen; PR-AUC 0.241 [0.181, 0.308] against
+> a base rate of 0.110. [`reports/test_results.md`](reports/test_results.md) is
+> the result; [`MODEL_CARD.md`](MODEL_CARD.md) is the reading of it.
 >
-> The ladder *has* run end to end on the real panel at H = 1, the pipeline smoke
-> test. Its current fold evidence and selection verdict are recorded in
-> [`reports/model_comparison_h1_calendar.md`](reports/model_comparison_h1_calendar.md);
-> [`reports/model_comparison.md`](reports/model_comparison.md) is the H = 7
-> file and records that no verdict is possible yet. The H = 1 numbers describe
-> the one-day rehearsal; they do not establish seven-day performance.
+> **What that number is mostly made of.** On postings the model had also seen in
+> training it scores PR-AUC 0.304; on postings it had never seen, **0.132**,
+> against a base rate of 0.105. It ranks a board's existing stock well and a
+> brand-new posting barely better than chance. That is the build's main
+> finding, it is final, and what the next epoch changes because of it is
+> pre-registered in `docs/design.md` §20.
 
 <a id="current-state"></a>
 
@@ -74,9 +75,9 @@ it describes — and this README links to them rather than restating them:
 | The base rate, the label's stability, relisting, removals against lifespan | [`label_validity.md`](reports/label_validity.md) |
 | Are removals real removals (checked against the boards) | [`label_check.md`](reports/label_check.md) |
 | Does the label treat the initial stock and new arrivals alike | [`cohort_audit.md`](reports/cohort_audit.md) |
-| Can the features name the board without `source` | [`board_fingerprint.md`](reports/board_fingerprint.md) at H=7 (declines until a legal cut exists); the finding so far is the H=1 run, [`board_fingerprint_h1_calendar.md`](reports/board_fingerprint_h1_calendar.md) |
+| Can the features name the board without `source` | [`board_fingerprint.md`](reports/board_fingerprint.md) at H=7; the H=1 run is [`board_fingerprint_h1_calendar.md`](reports/board_fingerprint_h1_calendar.md) |
 | The ladder, folds, threshold, calibration, per-board and transfer | [`model_comparison.md`](reports/model_comparison.md) |
-| The held-out result, or the refusal to produce one | [`test_results.md`](reports/test_results.md) |
+| The held-out result — opened once, final | [`test_results.md`](reports/test_results.md) |
 | Selected validation results and completed held-out runs | [`depth_ledger.md`](reports/depth_ledger.md) |
 | What the free instance's cold start measures, cycle by cycle | [`cold_start_rehearsal.md`](reports/cold_start_rehearsal.md) with a synthetic artifact loaded; [`cold_start_baseline.md`](reports/cold_start_baseline.md) with none (the definitive `cold_start.md` does not exist yet) |
 
@@ -90,9 +91,9 @@ where a moving number lives.
 **Current state, read from the generated reports** — snapshot `2026-10-14`, regenerated at `b640656b8`:
 
 - **H=7 readiness** ([`readiness.md`](reports/readiness.md)): 41 labelled waves. A legal split needs 22 (short by 0, projected already open); three rolling-origin folds need 34 (short by 0, projected already open). Legal cuts today: 215.
-- **H=7 held-out block** ([`test_results.md`](reports/test_results.md)): **not opened**; the report records the refusal.
+- **H=7 held-out block** ([`test_results.md`](reports/test_results.md)): **opened** — the result is in the report.
 - **H=1 rehearsal** ([`model_comparison_h1_calendar.md`](reports/model_comparison_h1_calendar.md); H=1 (calendar basis) — a pipeline smoke test, not the build's horizon): 10 candidates, 18 rolling-origin folds scored. Verdict: **random_forest** — random_forest ties with xgboost inside fold variance and is already the simplest of them, so it stands. Best single validation draw: `random_forest` at PR-AUC 0.4104 against a prior of 0.0293. Selection is based on the fold comparison.
-- **Depth ledger** ([`depth_ledger.md`](reports/depth_ledger.md)): 5 real run(s) kept, 2 synthetic.
+- **Depth ledger** ([`depth_ledger.md`](reports/depth_ledger.md)): 6 real run(s) kept, 2 synthetic.
 - **Latest data profile**: [`data_profile_2026-10-14.md`](reports/data_profile_2026-10-14.md).
 <!-- generated: end -->
 
@@ -641,7 +642,13 @@ budget — a list of 500 alerts nobody reads has perfect recall and zero value.
 
 ---
 
-## Why there is no test number yet
+## Why the test number waited
+
+**There is a test number now** — opened once on 2026-10-14, in
+[`reports/test_results.md`](reports/test_results.md) and read in
+[`MODEL_CARD.md`](MODEL_CARD.md). This section is the record of the six weeks
+before it, kept because the refusals in it are what make that number worth
+reading: for most of the build the honest output of `freeze` was *not yet*.
 
 **At H = 7, the horizon this build is about**, an honest three-way split needs
 more labelled crawl waves than the panel has, and a model *choice* needs more
@@ -715,13 +722,13 @@ say so at the endpoint.
 [`reports/model_comparison.md`](reports/model_comparison.md), regenerated by
 `scripts/rehearse.sh` on every run, and summarised in the generated block at
 the top of this file — not restated here, because an earlier version of this
-paragraph described a table that a later run no longer supported. What the
-table shows today, and will keep showing until the folds exist, is the shape
-that matters: single validation draws with no error bar, some of them large,
-and a verdict of **nothing selected**. A large single-draw number is not a
-selection; with zero folds there is nothing to compare it against, and naming
-the leader would be selection on the validation block. That refusal is the
-machinery working, and the number beside it is what it is refusing to act on.
+paragraph described a table that a later run no longer supported. Until
+2026-10-08 the table had the shape that matters here: single validation draws
+with no error bar, some of them large, and a verdict of **nothing selected**. A
+large single-draw number is not a selection; with zero folds there is nothing
+to compare it against, and naming the leader would have been selection on the
+validation block. On 2026-10-14, with four folds, the rule selected
+`random_forest` on the fold evidence.
 
 **The leak reproduces on real data**, not only on the fixture. On the
 2026-09-09 run, run 06 admitted the panel-wide aggregates and scored 0.0290;
@@ -894,6 +901,12 @@ carry an error bar. `DEBUGGING.md` has the entry.
 ---
 
 ## What happens on the day it clears
+
+**That day was 2026-10-14** — the gate opened on 2026-10-08, and the six days
+between are `DEBUGGING.md`'s entry for a locked scraper database. What ran is
+`docs/design.md` §20: reports regenerated from clean `main`, the verdict read,
+then `./scripts/release.sh --run 03-random_forest`. The description below is
+the plan as written beforehand; the order it gives is the order that was followed.
 
 **The rehearsal comes first, and it is not the same day.** A legal split arrives
 before one deep enough to cut rolling-origin folds from, so the first real split
@@ -1279,6 +1292,12 @@ reports no progress, which is indistinguishable from a scraper that has stopped.
 python -m src.models.freeze --run 05-xgboost_engineered
 ```
 
+**On a real panel, run it through `./scripts/release.sh --run <spec>`, not by
+hand.** The script calls `freeze` and then checksums, releases, builds and
+smoke-tests the same artifact; freezing by hand first and releasing afterwards
+would open the test block twice. The command above is the module's interface,
+and with `--synthetic` the way to exercise it.
+
 `--run` is required and names one of the specs in `src/models/experiments.py`
 (`01-prior`, `02-logistic`, `03-random_forest`, `04-xgboost_panel_native`,
 `05-xgboost_engineered`, `07-xgboost_leak_removed`, `08-xgboost_tuned`). There is
@@ -1631,74 +1650,61 @@ than any of them.
 
 ## Deployment
 
-**Live, and serving no model — deliberately.** Both URLs answer right now:
+**Live, serving `artifact-2026-10-14`.** Both URLs are public:
 
-|     | URL                                                     | what it does today                                                |
+|     | URL                                                     | what it does                                                      |
 | --- | ------------------------------------------------------- | ----------------------------------------------------------------- |
-| API | <https://shelf-life-5hin.onrender.com>                  | `/health` → `degraded` · `/docs` browsable · `/predict` → **503**  |
-| UI  | <https://shelf-life-2l8tanmdatboms9mhxh3rj.streamlit.app/> | loads, reaches the API, and reports its state — "up, no model loaded" — before showing a form |
-
-**What is absent is the model, not the deployment.** The service, the container,
-the UI and the release-fetching build all went up on 2026-09-06, before there was
-anything to serve, and that was the point: the cold-start baseline below is a
-measurement of a *real* instance, which is only possible if a real instance
-exists, and proving the deploy path while a failure is still cheap means the day
-the first artifact is frozen the only new thing in the chain is the artifact.
-
-`MODEL_TAG` is empty, so the image builds without a model and says so in the open
-rather than answering with a number nobody should trust:
+| API | <https://shelf-life-5hin.onrender.com>                  | `/health` names the release, model, horizon, threshold and `validated_on` · `/docs` browsable · `/predict`, `/rank`, `/boards` |
+| UI  | <https://shelf-life-2l8tanmdatboms9mhxh3rj.streamlit.app/> | a form, a probability against the threshold, and the caveat on screen |
 
 ```
 $ curl -s -X POST https://shelf-life-5hin.onrender.com/predict \
     -H 'Content-Type: application/json' \
     -d '{"title":"Senior Data Engineer","location":"Berlin"}'
-{"detail":"no model loaded: no artifact at models/shelf_life.joblib. ..."}
-                                                          # HTTP 503
 ```
 
-A 503 that names its own cause is the honest state for a service with no model in
-it. The alternative — shipping the synthetic-fixture model so the link returns
-*something* — would make the URL look more finished and mean strictly less, which
-is why the deploy verification refuses any build whose loaded model was fitted on
-that fixture.
+returns a probability, the frozen threshold, whether the posting is flagged,
+`board_context_supplied: false`, and `predicts: "removal from the board within
+7 days — not filled"`. The free instance sleeps after idle minutes; the first
+request after that waits for the container to wake (measured below).
 
-**So the Stage 1 criterion — "the model is deployed and returns predictions over
-HTTP from a URL you can share" — is not met, and the deployment is not finished.**
-URLs existing is not the criterion; the URLs serving the frozen H=7 artifact is.
-The chain between the two, link by link, with what has actually executed:
+**How it got here.** The service, the container, the UI and the
+release-fetching build all went up on 2026-09-06, before there was anything to
+serve, and served a deliberate 503 — *no model loaded* — for five weeks. That
+was the point: proving the deploy path while a failure was cheap meant that on
+the day the artifact was frozen, the only new thing in the chain was the
+artifact. The deploy verification still refuses any build whose loaded model
+was fitted on the synthetic fixture.
+
+The chain, link by link, with what executed:
 
 | link | status | proven by |
 |---|---|---|
-| selected run | **not done** — waits for the fold gate ([`reports/readiness.md`](reports/readiness.md)) | — |
-| frozen artifact | machinery run on the synthetic panel; on the real panel `freeze` refuses, correctly | `reports/test_results.md`, [`reports/depth_ledger.md`](reports/depth_ledger.md) |
-| `SHA256SUMS` beside it | run | rehearsal, 2026-09-11 |
-| GitHub release with the three assets | run — [`artifact-rehearsal-2026-09-11`](https://github.com/professor3333/shelf-life/releases/tag/artifact-rehearsal-2026-09-11), a prerelease marked synthetic | rehearsal |
-| image built *from that release*: fetch, checksum verify, strict load under the lock | run, locally, against GitHub — first time any release was fetched for real | rehearsal |
-| container: `await_release.sh` then `smoke.sh` | run, locally, with `ALLOW_SYNTHETIC=1` | rehearsal |
-| `MODEL_TAG` commit → Render rebuild → CI verification against the public URL | **never executed** — every `Verify deployment` run so far has exited in seconds with "no release to verify" | `gh run list --workflow=verify-deployment.yml` |
-| the public URL answering from the H=7 artifact | **not done** | — |
-| the UI on Community Cloud, verified as deployed | run and green — `./scripts/smoke_ui.sh` (exists, `RUNNING`, server answers) and `scripts/smoke_ui_browser.py` (rendered, reached the API). Its first run found the `SHELF_LIFE_API` secret unset and the public UI saying "cannot reach the API at localhost"; set 2026-09-12 | the `verify-ui` job, on every change to `app/` |
+| selected run | `03-random_forest`, by the pre-registered rule over 4 folds | [`reports/model_comparison.md`](reports/model_comparison.md) at `b640656` |
+| frozen artifact, test block opened once | run 2026-10-14 at `ab2d207` | [`reports/test_results.md`](reports/test_results.md), [`reports/depth_ledger.md`](reports/depth_ledger.md) |
+| `SHA256SUMS` beside it | run | the release |
+| GitHub release with the three assets | [`artifact-2026-10-14`](https://github.com/professor3333/shelf-life/releases/tag/artifact-2026-10-14) | the release |
+| image built *from that release*: fetch, checksum verify, strict load under the lock | run locally by `release.sh`: "checksum verified", "lock: the one the artifact was frozen against" | `release.sh` output |
+| container: `await_release.sh` then `smoke.sh` | run locally, **without** `ALLOW_SYNTHETIC` — `SMOKE PASS` | `release.sh` output |
+| `MODEL_TAG` commit → Render rebuild → CI verification against the public URL | the commit that set `MODEL_TAG`; its `Verify deployment` run is the proof | `gh run list --workflow=verify-deployment.yml` |
+| the UI on Community Cloud, verified as deployed | `./scripts/smoke_ui.sh` and `scripts/smoke_ui_browser.py`; its first run found the `SHELF_LIFE_API` secret unset, set 2026-09-12 | the `verify-ui` job, on every change to `app/` |
 
-Everything above the bracket is one command, `./scripts/release.sh --rehearse`,
-and the same script with `--run <spec>` is the real thing: it stops before
-`MODEL_TAG` and prints the commit, because pointing the public URL at a model is
-a decision a person makes reading the smoke output, not a step a script reaches.
-The rehearsal found what an unexecuted chain hides: `smoke.sh` was asserting a
-response field the API had renamed two days earlier, and the first real release
-would have failed at the last link on a field name (`DEBUGGING.md`, 2026-09-11).
-A test now holds the smoke test's field list to `PredictionResponse`.
-
-What has not run, and cannot from a laptop, is Render's own build and the
-verification against the public URL — the same Dockerfile, the same fetch, the
-same release mechanism, on the platform's machine. That is the day the gate
-clears, and until then `MODEL_TAG` stays empty on purpose: a synthetic model on
-the public URL would make the link look more finished and mean strictly less.
+Everything up to the `MODEL_TAG` commit is one command, `./scripts/release.sh
+--run <spec>` (`--rehearse` runs it on the synthetic panel as a prerelease). It
+stops before `MODEL_TAG` and prints the commit, because pointing the public URL
+at a model is a decision a person makes reading the smoke output, not a step a
+script reaches. The 2026-09-11 rehearsal found what an unexecuted chain hides:
+`smoke.sh` was asserting a response field the API had renamed two days earlier
+(`DEBUGGING.md`, 2026-09-11). A test now holds the smoke test's field list to
+`PredictionResponse`.
 
 **Where it goes, revised 2026-09-06:** the API on a **Render free web service**,
 the Streamlit UI on **Streamlit Community Cloud**, and the frozen model shipped
 as a GitHub release asset rather than copied from a laptop — `models/` is derived
-output and is not committed, so an image built from a clean clone has no model in
-it and says so through `/health`.
+output and is not committed, so an image built from a clean clone fetches the
+release `MODEL_TAG` names at build time, verifies it against that release's
+`SHA256SUMS`, and loads it strictly under the lock; with `MODEL_TAG` empty it
+has no model in it and says so through `/health`.
 
 **This replaces yesterday's answer, and the reason is worth reading.** The
 2026-09-05 plan was Cloud Run plus a Hugging Face Space. Two things killed it:
@@ -1908,16 +1914,19 @@ measurement by asking `/health`, and only the last can print `ACCEPTED`.
 ## Model card
 
 The short, structured version of everything above, in the form that survives
-being pasted into someone else's document. The full card — every pending field
-named, the identifiers that pin the reviewed evidence, and what to copy from
-the frozen artifact on the day — is [`MODEL_CARD.md`](MODEL_CARD.md).
+being pasted into someone else's document. The full card — every result with
+its interval, every slice, and the identifiers that pin the released artifact —
+is [`MODEL_CARD.md`](MODEL_CARD.md).
 
 **Model.** Discrete-time hazard classifier over job-day rows: a scikit-learn
 `Pipeline` carrying derivation, column selection, imputation, encoding and a
 tree-based estimator, with the decision threshold and full provenance stored in
-the same artifact. **No estimator has been selected on the real panel yet** — the
-ladder is built and the selection rule is written, and the run that ships will be
-named here with its number when the panel clears.
+the same artifact. **The estimator is a random forest** (`03-random_forest`:
+300 trees, `min_samples_leaf=5`, balanced class weights), isotonically
+recalibrated on validation, released as `artifact-2026-10-14`. Held-out, at the
+frozen threshold: shortlist precision 0.75 [0.46, 1.00], lift 6.8× [4.2×,
+9.3×], recall 0.071, PR-AUC 0.241 [0.181, 0.308] against a 0.110 base rate —
+and PR-AUC 0.132 on postings it never saw in training.
 
 **Intended use.** Ordering a watched job board so that a person with a fixed
 daily attention budget looks at the postings most likely to disappear first. The
@@ -1944,8 +1953,8 @@ employer-published listings; no personal data is collected, and nothing under
 training by an embargo wide enough that no training label was computed from it.
 Opened once. Rolling-origin folds inside the training window for everything else.
 
-**Validated on a period, and only that period.** The held-out block will
-cover a few weeks of autumn 2026, and every number here is a number about
+**Validated on a period, and only that period**: 2026-09-23 – 2026-10-07,
+validation and held-out together, and every number here is a number about
 those weeks: the artifact carries the dates of each block, the held-out report
 opens with them, and `/health` reports `validated_on` so a caller learns which
 weeks before reading the number. Weekday and month effects over a longer span,
@@ -1984,9 +1993,10 @@ screen rather than in a footnote — that is the mitigation, and it is deliberat
 1. **"Removed" is not "filled."** The label is disappearance from the board. A
    posting can be pulled, expire, be reposted, or be moved to another system.
    Every claim this project makes is about disappearance. The disappearance
-   itself is verified — 59 of 60 sampled removals are genuinely gone from the
-   board — and **12% of them were relisted under a new id within days**, which is
-   this caveat with a number on it rather than a hedge.
+   itself is verified — on the 2026-10-14 check, 57 of 60 sampled removals are
+   genuinely gone from the board — and **7 of those 57 were relisted under a new
+   id**, which is this caveat with a number on it rather than a hedge
+   ([`reports/label_check.md`](reports/label_check.md) holds the current figures).
 2. **It is trained on Greenhouse boards, though it does not use board identity.**
    arbeitnow — 78% of the collected postings — is excluded because its crawls
    never observe the whole board and because, even if they did, its rolling
@@ -2004,10 +2014,13 @@ screen rather than in a footnote — that is the mitigation, and it is deliberat
    of the board second, for what that rule cannot cover. Both are v2 concerns,
    recorded in that order in [`docs/design.md`](docs/design.md) §17, and
    neither is a gate on this build.
-3. **The panel is short and the positives are few.** 96 positives across 6,874
-   labelled rows. Differences of a few points between models will be inside the
-   noise, which is why fold variance is reported and paired differences are used
-   rather than differences of averages.
+3. **The panel is short and the positives are few.** Six weeks of collection,
+   a two-day validation block and a four-day test block with 504 positive
+   job-days; current counts are in [`reports/readiness.md`](reports/readiness.md).
+   Random forest and XGBoost were inside each other's fold variance, and the
+   test intervals are wide — precision@20 runs from 0.46 to 1.00 — which is why
+   fold variance is reported and paired differences are used rather than
+   differences of averages.
 4. **Board context is missing at serve time, and it costs something.** Four
    features describe the board rather than the posting, and a caller holding one
    job ad cannot supply them. `/predict` does not accept them; they are imputed,
@@ -2015,9 +2028,10 @@ screen rather than in a footnote — that is the mitigation, and it is deliberat
    `board_context_supplied`. `/rank` derives them from a declared board snapshot,
    which is where they genuinely exist. `docs/design.md` §12 keeps them on that
    basis, with a rule at the freeze for whether the default model carries them. The cost is measured
-   rather than assumed: **0.0019 validation PR-AUC**, against the 0.0005 that a
-   refit-without-them suggests. The refit redistributes their weight; the
-   deployed model cannot, so it is the larger number that a stranger gets.
+   rather than assumed: for the released model, validation PR-AUC was 0.2187
+   with them supplied, 0.2189 imputed and 0.2199 for a refit without them — all
+   inside the 0.0087 fold spread, so on this panel the cost of not knowing the
+   board is not measurable.
 5. **Left truncation.** Postings already on the board when collection started
    had been open for an unknown time. `age_days` is measured from the employer's
    own publication instant where the archive provides one, never from when this
@@ -2029,19 +2043,19 @@ screen rather than in a footnote — that is the mitigation, and it is deliberat
    ignores, and **one** after two. That one is now labelled removed and was not.
    The clause it replaces read the whole remaining panel, which meant no embargo
    of any width could seal a training label from the evaluation period.
-7. **No final real H=7 evaluation or held-out result exists yet, and no
-   accuracy claim is made.** The H=7 held-out block is unopened —
-   [`reports/test_results.md`](reports/test_results.md) records the refusal —
-   and the H=7 comparison stops before a verdict because no legal cut exists.
-   What *has* run on the real panel is the H=1 rehearsal: the full ladder
-   compared across rolling-origin folds by the pre-registered rule, with a
-   selection verdict
-   ([`reports/model_comparison_h1_calendar.md`](reports/model_comparison_h1_calendar.md);
-   the status block above quotes it). That is a pipeline smoke test at the
-   wrong horizon, not the build's result — a one-day label answers a different
-   question from a seven-day one. Until the depth gate clears, every capability
-   claim is *tested*, every validation number is an H=1 rehearsal, and nothing
-   here is a seven-day claim.
+7. **It mostly recognises postings it has already seen.** On the held-out
+   block, PR-AUC is 0.304 on postings also seen during training and **0.132**
+   on postings that were not, against base rates of 0.112 and 0.105; a
+   posting's first sighting scores 0.131. Training PR-AUC was 0.93. Ranking a
+   board's existing stock is what it does well; scoring a posting nobody has
+   seen before, it is close to the base rate. The selection rule never looked
+   at that slice, which is why it picked the model best at memorising; the
+   next epoch's rule does (`docs/design.md` §20).
+8. **Isotonic calibration makes the scores coarse.** The probabilities are
+   calibrated on test (ECE 0.0067), but they sit on a few plateaus: 97% of
+   held-out rows are below 0.2, and the release smoke test ranked five
+   postings all at 0.1222. A shortlist cut inside a plateau is ordered by input
+   order, not by the model.
 
 ---
 

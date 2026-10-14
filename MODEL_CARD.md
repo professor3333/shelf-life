@@ -1,13 +1,24 @@
 # Shelf-life model card
 
-**Status: awaiting final H=7 selection — no released model.** Reviewed
-2026-09-11; the [README's model card](README.md#model-card) is the short form
-of this one and the two say the same thing or one of them is wrong. This is the release summary to complete after selection; pending
-fields are unavailable evidence, not zero scores. The current comparison is an
-H=1 rehearsal, and both local model sidecars identify synthetic H=1 artifacts.
-Neither supplies final seven-day results. `MODEL_TAG` has no release value.
+**Status: released as [`artifact-2026-10-14`](https://github.com/professor3333/shelf-life/releases/tag/artifact-2026-10-14)
+— the H=7 freeze of `03-random_forest`.** Completed 2026-10-14 from the
+artifact's sidecar (`shelf_life.json`), the release's `SHA256SUMS` and
+[`reports/test_results.md`](reports/test_results.md); nothing here is from
+memory or recomputed. The [README's model card](README.md#model-card) is the
+short form of this one and the two say the same thing or one of them is wrong.
+The service serves this model when `MODEL_TAG` names the tag.
 
 > A positive prediction means likely disappearance from the monitored board within seven days; it does not establish that the vacancy was filled.
+
+**The finding to read first.** On held-out postings the model also saw during
+training (at earlier crawls), test PR-AUC is **0.304** against a base rate of
+0.112; on postings it never saw it is **0.132** against 0.105, and on a
+posting's first sighting **0.131** against 0.102. Most of the lift comes from
+recognising postings already on the board, not from anything that carries to a
+new one. Ranking a board's existing stock is the product, so this is useful
+for that; it is close to the base rate for a posting nobody has seen yet. The
+result is final — the test block has been opened and nothing is re-tuned
+against it (design §20).
 
 ## Target, population and use
 
@@ -25,7 +36,7 @@ costs attention. This is not a total-lifetime or first-appearance-only model.
 | Disappearance | `t_gone` is the earliest complete run after first sight at which the posting is absent, corroborated by absence in the next complete run (`K=2`). The label is final at corroboration; subsequent reappearance does not revise it. |
 | Positive label | First require a complete run on or after the horizon date for that source. Then `y=1` if `t_gone` is defined and its date is on or before the horizon date. |
 | Negative / censored | Otherwise `y=0` only if the posting was observed in a complete run on or after the horizon date. All other rows are excluded, including early known removals whose source's horizon has not elapsed. Unknown is never negative. |
-| Eligible boards | Greenhouse: Airtable, Anthropic, Discord, Duolingo, Figma and GitLab; plus `python_org`. Complete runs use `status=ok`, `rules_version=2` in the reviewed snapshot. |
+| Eligible boards | Greenhouse: Airtable, Anthropic, Discord, Duolingo, Figma and GitLab; plus `python_org`. Complete runs use `status=ok`; the panel was built at scraper `rules_version=2`. |
 | Excluded population | Arbeitnow: leaving its rolling feed cannot reliably distinguish removal from ageing out of the observation window. |
 
 The label implementation is [compute_labels](src/features/assemble.py); its
@@ -35,17 +46,30 @@ Incumbent postings are retained despite unobserved arrival times.
 
 ## Model and inputs
 
-**Selected family, run and parameters: pending.** The comparison includes a
-constant prior, age rules, an age-only logistic fit, board hazard, logistic
-regression, a decision tree, random forest and XGBoost. The registered rule
-requires at least three scored rolling-origin folds, compares paired PR-AUC
-differences against their spread, favours simplicity among tied candidates and
-falls back to a heuristic when fitted complexity has no supported advantage.
-Final selection remains a reviewed decision.
+**Selected: `03-random_forest`** — scikit-learn `RandomForestClassifier`
+(`n_estimators=300`, `min_samples_leaf=5`, `class_weight="balanced_subsample"`,
+`random_state=0`), inside the project `Pipeline`, wrapped in an isotonic
+calibrator fitted on validation. Fitted on the **training block only**.
 
-**Final feature subset: pending.** The current default pipeline allows the
-following 24 features; this is a candidate inventory, not a claim that a final
-model uses all of them:
+**How it was chosen.** By the rule pre-registered in design §14 and coded in
+`select()` (`src/models/evaluate.py`), applied mechanically to four scored
+rolling-origin folds inside the training window
+([`reports/model_comparison.md`](reports/model_comparison.md), snapshot
+2026-10-14, commit `b640656`):
+
+| candidate | CV PR-AUC mean | SD |
+|---|---:|---:|
+| prior (constant) | 0.0791 | 0.0062 |
+| best rule: `board_hazard` | 0.1004 | 0.0029 |
+| logistic | 0.1021 | 0.0174 |
+| xgboost (`05-xgboost_engineered`) | 0.1146 | 0.0138 |
+| **random_forest** | **0.1255** | 0.0087 |
+
+Random forest led; xgboost was inside fold variance of it and the rule's
+parsimony step kept the simpler of the two; the lead over the best heuristic
+rung is larger than fold variance, so the heuristic floor did not apply.
+
+**Features: all 24 of the default pipeline** (the artifact's `features` list):
 
 | Group | Features |
 |---|---|
@@ -58,13 +82,13 @@ derivations rather than a text encoder; publication and update timestamps feed
 age calculations. Imputation, scaling and category encoding are fitted inside
 the training fold only. Missing numerics use per-column median/zero/one rules;
 missing categoricals get explicit levels, and unseen categories are supported.
-There is no blanket numeric missingness-indicator step. Optional board context
-is currently accepted and imputed when absent; its two serving regimes get
-separate final results, and which pipeline ships as the default is decided by
-the rule fixed 2026-09-12 in `src/models/board_context.py` (design §12): the
-refit without the four columns ships iff the full model, with them imputed,
-scores below the refit by more than the candidate's fold spread. The decision
-and its three validation numbers travel on the artifact as `board_context`.
+
+**Board context ships imputed.** By the rule in `src/models/board_context.py`
+(design §12) — ship the refit without the four board columns iff the full
+model, with them imputed, scores below it by more than fold spread. Validation
+PR-AUC: supplied 0.2187, imputed 0.2189, refit without 0.2199, fold spread
+0.0087 — inside the spread, so the full model ships and imputes when a caller
+cannot supply them. `/rank` with `is_board_snapshot=true` derives them.
 
 **Excluded inputs:** direct board identity (`source`, `company`,
 `company_posting_volume`); identifiers and split axes (`source_id`, `url`,
@@ -76,118 +100,186 @@ lifetime observation/change counts, `n_observations_total`,
 `n_complete_runs_observed`, `t_dow`, `posted_month`, `remote`, `n_departments`,
 `salary_period`, `salary_parsed`, upstream `salary_min`, `salary_max`,
 `currency`, `posted_at`, raw `salary_raw` text, `job_type_raw`, `tags_raw`.
-Raw `first_published` and `updated_at` are consumed by derivation, not passed
-directly to the estimator. See the [feature audit](docs/leakage_audit.md) and
+See the [feature audit](docs/leakage_audit.md) and
 [executable registry](src/features/preprocessing.py) for individual verdicts.
 
 ## Periods, split and operating point
 
-| Item | Recorded status / policy |
+| Item | Recorded value |
 |---|---|
-| Available observation period | 2026-08-31 03:45:25.789180Z to 2026-09-11 04:23:58.090801Z; 12,675 job-days in the reviewed H=7 panel. |
-| Final training period | Pending: no legal H=7 three-way split. Record actual retained `t` bounds, rows, postings and positives after selection. Default final fit is training only. |
-| Final evaluation period | Validation and held-out test periods both pending; the real test set has not been opened. Record both cut instants and actual retained bounds — the artifact carries them as `periods`, and the claim is scoped to them: *validated on the collected \<dates\> period*, nothing longer (design §18). Long-range robustness — seasons, holidays, policy and schema changes — is not claimed; the depth ledger across later snapshots is where it would show. |
-| Temporal policy | Earliest train, middle validation, latest test; never random rows. `best_cuts` prefers three rolling-origin folds within train, then approximately 60/20/20 of retained waves after embargoes. This simulates training on past boards and scoring later observations. |
-| Posting overlap | The implemented job-day split permits the same posting at different times across blocks, a deliberate departure recorded in [design §8](docs/design.md#8-the-split--decided-2026-09-04). It does not guarantee disjoint posting IDs; report carried-over versus unseen-in-training performance separately. |
-| Embargo | At each boundary: `H days + largest observed within-source complete-run gap`, for one corroborating run. On this snapshot: **9 days 13:43:51.653374**, discarding 10 crawl waves per boundary. Recompute and record it for the final snapshot. |
-| Current depth | On 2026-09-11: five labelled waves, zero legal cuts, zero folds, against 22 labelled waves for a legal split and 34 for three folds. The live figure is [readiness](reports/readiness.md); this row is the reviewed one and is not updated by hand. |
-| Selected threshold | Pending. Default policy selects the validation score at rank `min(validation rows, 20 × prediction days)` and freezes it with the fitted pipeline. |
-| Serving modes | `/predict` is the individual-posting mode and does not accept the four board-context fields (imputed; `board_context_supplied=false`). `/rank` is the board-ranking mode: with `is_board_snapshot=true` the service derives the four from the batch by the panel's definitions and reports `board_context_source` and `board_size`; undeclared, they are supplied per posting or imputed. Decided 2026-09-12, design §12. |
-| Budget behaviour | `probability >= threshold` includes ties and need not yield exactly 20 alerts on a later day. `/rank` with an explicit budget selects exactly the requested top count, capped at batch size, using input order to break ties; it reports `threshold_source=batch_budget`. Without that override, the frozen threshold applies. A board larger than one request goes through `POST /boards` (upload in pages, score in pages, rank once server-side, same rule); the client never merges. A batch rank cutoff is not a calibrated probability guarantee. |
-
-See [readiness](reports/readiness.md) and the
-[selection record](reports/model_comparison.md). This card does not trigger
-training, selection, freezing or another opening of the held-out test set.
+| Available observation period | 2026-08-31 03:45:25Z to 2026-10-14 03:48:29Z: 54,195 job-days in the H=7 panel, 47,199 labelled, 4,602 positive. |
+| Training block | 2026-08-31 – 2026-09-13 (14 days): 14,924 job-days, 1,348 postings, 1,232 positives. |
+| Validation block | 2026-09-23 – 2026-09-24 (2 days): 4,628 job-days, 1,177 postings, 463 positives, base rate 0.100. |
+| Held-out test block | 2026-10-04 – 2026-10-07 (4 days): 4,580 job-days, 1,197 postings, 504 positives, base rate 0.110. Opened once, by `freeze` at `ab2d207`. |
+| Claim scope | *Validated on the collected 2026-09-23 – 2026-10-07 period* (design §18). Seasons, holidays, hiring cycles, policy and schema changes are not demonstrated and not claimed. |
+| Temporal policy | Earliest train, middle validation, latest test; never random rows. Rolling-origin folds inside train for selection. Simulates training on past boards and scoring later observations. |
+| Posting overlap | The job-day split permits the same posting at different times across blocks (design §8): 881 of the 1,197 test postings were also seen in training. Their performance is reported separately below, and the difference is the headline finding. |
+| Embargo | At each boundary: `H days + largest within-source complete-run gap` = **9 days 13:43:51**, discarding 10 crawl waves per boundary. |
+| Threshold | **0.340909** — the validation score at rank 40 (20 a day × 2 validation days), frozen with the pipeline. |
+| Serving modes | `/predict` is the individual-posting mode and does not accept the four board-context fields (imputed; `board_context_supplied=false`). `/rank` is the board-ranking mode: with `is_board_snapshot=true` the service derives the four from the batch and reports `board_context_source` and `board_size`. |
+| Budget behaviour | `probability >= threshold` includes ties and need not yield exactly 20 alerts on a later day — on the test block it flagged 12 a day. Isotonic calibration maps scores onto a few plateaus, so many postings share one probability (the release smoke test ranked five postings all at 0.1222); `/rank` with an explicit budget breaks ties by input order and reports `threshold_source=batch_budget`. |
 
 ## Results and uncertainty
 
-**No final validation or test result is available.** Populate these fields from
-the selected H=7 run and its frozen artifact, retaining the split and operating
-point alongside every result. Do not substitute H=1 or synthetic scores.
+Every interval is a 95% posting-clustered percentile bootstrap (2,000 draws,
+seed 0, `(source, source_id)` clusters with all their rows, model and threshold
+held fixed). These intervals do not measure model-selection uncertainty or
+unseen-board shift.
 
-| Final evidence | Status and required reporting |
-|---|---|
-| Validation | Pending. **Headline: precision@20/day, recall@20/day, lift over the base rate, removals caught per day** (the product's numbers, `metrics.at_budget`), then baseline and selected PR-AUC (average precision), fold mean/SD, F1, and TP/FP/FN/TN at the selected threshold; NDCG@20 secondary. Accuracy is not reported; ROC-AUC is secondary. |
-| Held-out test | Pending: the same metrics, the shortlist table first with 95% posting-clustered intervals on precision@20, recall@20 and lift; threshold-dependent results at the frozen validation threshold distinguished from a recomputed test-budget diagnostic. |
-| Bootstrap confidence intervals | Pending. Existing test protocol: 95% percentile intervals, 2,000 draws, seed 0; resample `(source, source_id)` posting clusters with all their rows, keeping the model and threshold fixed. Report PR-AUC, precision, recall, Brier and ECE intervals, retained resample counts and the fewer-than-30-positive fragility flag. Zero-positive draws are discarded. These intervals do not measure model-selection uncertainty or unseen-board shift. Validation intervals are emitted by both `evaluate` and `freeze` as of 2026-09-12, at the frozen threshold. |
-| Calibration | Pending: Brier, ECE and the ten equal-width-bin reliability table, including bin counts. Whether to recalibrate is **decided by a rule fixed 2026-09-12** (`src/models/calibration.py`, design §5): isotonic on validation iff validation ECE > 0.25 × base rate and ≥ 30 positives; the decision and its numbers travel on the artifact as `recalibration`. No final calibration quality has been established. |
-| Per-board / cohort performance | Pending: each eligible board, incident versus incumbent stock, first-observation-only rows, and carried-over versus unseen-in-training postings. **Every row carries `n` rows, `postings` (independent units), `positives`, a posting-clustered 95% interval on PR-AUC and on precision@20, and a `fragile` flag under thirty positives** — per-board positive rates on this panel run from 0% (airtable) to 13.5% (python_org) and several groups hold a handful of events, so a bare PR-AUC per board is not evidence. Produced by `evaluate` (validation) and `freeze` (test) as of 2026-09-12. |
-| Unseen-board transfer | Pending: leave-one-board-out score, board base rate, comparison with the board included in training, and skipped-board reasons — on the selected candidate, with board context withheld as at serve time (the driver built XGBoost regardless until 2026-09-12). **A release gate**: `freeze` refuses a candidate that collapses to the base rate on held-out boards (design §4a); the verdict travels on the artifact as `transfer`, and only `intact` licenses any claim about unseen boards, scoped to boards of this kind. |
+**At the frozen threshold — what the deployed model does:**
 
-The following are **descriptive H=7 label counts, not model performance**, from
-the 2026-09-11 [cohort audit](reports/cohort_audit.md):
+| metric | validation | test | test 95% interval |
+|---|---:|---:|---|
+| precision@20/day | 0.800 | **0.750** | [0.462, 1.000] |
+| recall@20/day | 0.069 | **0.071** | [0.030, 0.116] |
+| lift over the base rate | 8.00× | **6.82×** | [4.24×, 9.34×] |
+| flagged per day | 20.0 | 12.0 | — |
+| removals caught per day | 16.0 | 9.0 | — |
+| TP / FP / FN / TN | 32 / 8 / 431 / 4,157 | 36 / 12 / 468 / 4,064 | — |
+| F1 | 0.127 | 0.130 | — |
+| PR-AUC (threshold-free) | 0.2082 | **0.2408** | [0.181, 0.308] |
+| ROC-AUC (secondary) | 0.619 | 0.644 | — |
+| Brier | 0.0835 | 0.0899 | [0.077, 0.103] |
+| ECE | 0.000 (in-sample: the calibrator was fitted here) | 0.0067 | [0.0048, 0.0249] |
 
-| Board | Labelled job-days | Positive job-days | Rate |
+Test PR-AUC is above validation (gap −0.033), inside both intervals. Accuracy
+is not reported: at a base rate of 0.110, predicting "stays" for everything
+scores 89%.
+
+**Read the frozen row, not the test report's headline table.** The first table
+in `test_results.md` ("The shortlist") prints point estimates from a threshold
+*recomputed on the test block's own budget* — 80 alerts, which ties at the
+isotonic plateau expand to 138 flagged: precision 0.558, recall 0.153, lift
+5.07×, 19.25 caught a day — beside intervals computed at the *frozen*
+threshold. Recall 0.153 therefore sits outside its own printed interval. The
+recomputed figures are a hindsight diagnostic of what a test-chosen threshold
+would have done; the frozen figures above are the model's. The report is not
+regenerated, because regenerating it would open the test block again; the
+rendering is fixed for the next epoch (design §20).
+
+**Calibration.** Recalibrated by the rule fixed 2026-09-12
+(`src/models/calibration.py`, design §5): isotonic on validation, because
+validation ECE 0.0756 exceeded 0.25 × base rate (0.0250) with 463 positives.
+On test:
+
+| predicted | n | mean predicted | observed |
 |---|---:|---:|---:|
-| Greenhouse: Airtable | 80 | 0 | 0.0% |
-| Greenhouse: Anthropic | 2,874 | 210 | 7.3% |
-| Greenhouse: Discord | 245 | 29 | 11.8% |
-| Greenhouse: Duolingo | 430 | 25 | 5.8% |
-| Greenhouse: Figma | 795 | 40 | 5.0% |
-| Greenhouse: GitLab | 1,107 | 115 | 10.4% |
-| python_org | 126 | 17 | 13.5% |
-| **Total** | **5,657** | **436** | **7.7%** |
+| 0.0–0.1 | 2,526 | 0.079 | 0.075 |
+| 0.1–0.2 | 1,896 | 0.119 | 0.123 |
+| 0.2–0.3 | 20 | 0.240 | 0.200 |
+| 0.3–0.4 | 90 | 0.341 | 0.456 |
+| 0.5–0.6 | 26 | 0.600 | 0.538 |
+| 0.9–1.0 | 22 | 1.000 | 1.000 |
 
-Incident postings (first seen after that board's initial collection wave):
-254 labelled rows, 105 postings, 25 positive rows (9.8%). Incumbent stock:
-5,403 rows, 1,135 postings, 411 positive rows (7.6%). Incident does not mean
-newly published, and its rows are not limited to first observations. These
-small, correlated cohorts do not establish equal performance or equal hazards.
+The curve transferred (ECE 0.0067), but 97% of rows sit below 0.2: the model
+says "about the base rate" for almost everything and is confident about very
+little.
+
+**Carried over, cohort and first sighting** (test block):
+
+| slice | n | postings | positives | base rate | PR-AUC [95%] | precision@20 [95%] | fragile |
+|---|---:|---:|---:|---:|---|---|---|
+| seen in training | 3,447 | 881 | 385 | 0.112 | 0.304 [0.233, 0.380] | 0.880 [0.740, 0.978] | no |
+| **not seen in training** | 1,133 | 316 | 119 | 0.105 | **0.132** [0.090, 0.194] | 0.142 [0.093, 0.199] | no |
+| incumbent stock | 2,824 | 721 | 303 | 0.107 | 0.312 [0.227, 0.404] | 0.688 [0.500, 0.856] | no |
+| incident flow | 1,756 | 476 | 201 | 0.115 | 0.188 [0.124, 0.271] | 0.238 [0.058, 0.424] | no |
+| first observation | 186 | 186 | 19 | 0.102 | 0.131 [0.079, 0.224] | 0.137 [0.080, 0.207] | **yes** |
+| later observations | 4,394 | 1,178 | 485 | 0.110 | 0.247 [0.184, 0.319] | 0.589 [0.427, 0.756] | no |
+
+**Per board** (test block; a model fitted on every board, so this answers
+*does it work here*, not *would it work somewhere new*):
+
+| board | n | postings | positives | base rate | PR-AUC [95%] | precision@20 [95%] | fragile |
+|---|---:|---:|---:|---:|---|---|---|
+| Greenhouse: Airtable | 16 | 4 | 2 | 0.125 | 0.417 [0.417, 0.417] | 0.125 [0.125, 0.375] | **yes** |
+| Greenhouse: Anthropic | 2,556 | 669 | 257 | 0.101 | 0.273 [0.182, 0.369] | 0.613 [0.382, 0.801] | no |
+| Greenhouse: Discord | 198 | 51 | 25 | 0.126 | 0.239 [0.059, 0.563] | 0.135 [0.045, 0.259] | **yes** |
+| Greenhouse: Duolingo | 237 | 60 | 16 | 0.068 | 0.077 [0.018, 0.190] | 0.097 [0.000, 0.217] | **yes** |
+| Greenhouse: Figma | 635 | 167 | 84 | 0.132 | 0.196 [0.103, 0.316] | 0.128 [0.055, 0.224] | no |
+| Greenhouse: GitLab | 833 | 219 | 111 | 0.133 | 0.299 [0.171, 0.461] | 0.162 [0.104, 0.222] | no |
+| python_org | 105 | 27 | 9 | 0.086 | 0.189 [0.052, 0.503] | 0.106 [0.023, 0.238] | **yes** |
+
+Four of seven boards are fragile (fewer than thirty positives); their point
+estimates are orders of magnitude, not bounds. Anthropic is 56% of the test
+rows and carries the pooled shortlist precision.
+
+**Unseen-board transfer** (leave-one-board-out on train and validation,
+computed before the test block was opened; design §4a release gate):
+**`intact`**. Transfer PR-AUC minus base rate: Discord +0.0648, Figma +0.0011,
+GitLab −0.0246; mean +0.0138. Seeing a board at fit time was worth +0.0480
+PR-AUC against a spread of 0.1121. Skipped: Airtable, Duolingo and python_org
+(fewer than 10 validation positives); Anthropic (holding it out leaves 57% of
+training positives, under 60%). `intact` licenses describing the model as
+applicable to a Greenhouse-family board of the kind these are — and two of the
+three measured boards sit at or below their base rate, so that licence is thin.
+
+**Label counts** (H=7, all labelled rows of the 2026-10-14 panel, from
+[`reports/cohort_audit.md`](reports/cohort_audit.md); descriptive, not model
+performance):
+
+| Board | Labelled job-days | Postings | Positive job-days | Rate |
+|---|---:|---:|---:|---:|
+| Greenhouse: Airtable | 414 | 19 | 113 | 27.3% |
+| Greenhouse: Anthropic | 25,069 | 871 | 2,084 | 8.3% |
+| Greenhouse: Discord | 1,973 | 76 | 220 | 11.2% |
+| Greenhouse: Duolingo | 3,305 | 105 | 342 | 10.3% |
+| Greenhouse: Figma | 6,486 | 215 | 495 | 7.6% |
+| Greenhouse: GitLab | 8,771 | 360 | 1,240 | 14.1% |
+| python_org | 1,181 | 40 | 108 | 9.1% |
+| **Total** | **47,199** | **1,686** | **4,602** | **9.8%** |
+
+Incident rows are removed at 9.8% against 9.7% for incumbent stock (10,809
+against 36,390 rows): the label does not key on which population a row came
+from. The model, per the cohort table above, does.
 
 ## Validity, limitations and prohibited interpretations
 
-The [external board check](reports/label_check.md), using the 2026-09-08
-snapshot, found **59/60** sampled labelled removals absent under their original
-IDs: 98.3%, with a **95% Wilson interval of 91.1%–99.7%**. Seven had the same
-title listed under a new ID. In the control arm, 2/60 postings had disappeared
-since the last crawl. This supports board-disappearance validity, not hiring
-outcome validity. It is a later membership check, not proof of the exact
-historical disappearance time; same-ID reinstatement remains possible. Its
-Wilson interval is not a bootstrap interval for predictive performance.
+The [external board check](reports/label_check.md) on the 2026-10-14 snapshot
+found **57 of 60** sampled labelled removals absent under their original IDs:
+95.0%, with a **95% Wilson interval of 86.3%–98.3%**. Seven of the 57 had the
+same title listed under a new ID. In the control arm, 0 of 60 postings live at
+the final crawl had disappeared since. This supports board-disappearance
+validity, not hiring-outcome validity. It is a later membership check, not
+proof of the exact historical disappearance time; same-ID reinstatement remains
+possible. Its Wilson interval is not a bootstrap interval for predictive
+performance.
 
 Limitations include daily interval censoring and horizon-boundary ambiguity,
-missed observations, reappearance/relisting, short panel depth, few independent
-removal events, a small incident cohort, unequal board coverage and structural
-missingness. **The source family is narrow by construction**: six Greenhouse
-boards and python_org, because the largest source (arbeitnow, 78% of postings)
-is unlabelable: its crawls stop at a page cap short of the feed's end and the
-board reorders under them, and even a complete crawl could not tell a posting
-that aged out of its roughly seven-day feed from one that was removed; nothing
-here measures or claims performance on a board of a different kind. Fixing the
-collector, adding an age-bounded label rule for rolling feeds, and adding
-genuinely different families is a v2 concern, recorded in design §17, not a
-gate on this build. Excluding explicit identity does not remove source confounding:
-the H=1 [fingerprint diagnostic](reports/board_fingerprint.md) recovered board
-identity with 100% accuracy from production features. That diagnostic is not a
-disappearance score or evidence of transfer. Imputed board context and repeated
-posting observations create additional serving and memorisation risks.
+missed observations, reappearance/relisting, a short panel (six weeks), few
+independent removal events, a two-day validation block, unequal board coverage
+and structural missingness. **The source family is narrow by construction**:
+six Greenhouse boards and python_org, because the largest source (arbeitnow) is
+unlabelable: its crawls stop at a page cap short of the feed's end and the board
+reorders under them, and even a complete crawl could not tell a posting that
+aged out of its roughly seven-day feed from one that was removed; nothing here
+measures or claims performance on a board of a different kind. Fixing the
+collector, an age-bounded label rule for rolling feeds, and genuinely different
+families are v2 concerns, recorded in design §17. Excluding explicit identity
+does not remove source confounding: the
+[fingerprint diagnostic](reports/board_fingerprint.md) recovers the board from
+the production features at 100%. **The model memorises postings**: training
+PR-AUC is 0.93 against 0.22 on validation, and the held-out lift is concentrated
+in postings seen during training (table above).
 
 Do not interpret a positive as a filled vacancy, successful hire, applicant
 success probability, hiring deadline, or proof that the role no longer exists
-elsewhere. Do not interpret a negative as guaranteed continued availability.
-Do not claim validated seven-day probabilities, calibration, or generalisation
-to unmonitored boards before the corresponding final evidence exists.
+elsewhere. Do not interpret a negative as guaranteed continued availability. Do
+not claim the model scores a never-seen posting much better than the base rate,
+or that it generalises to boards outside the Greenhouse family or to periods
+outside 2026-09-23 – 2026-10-07.
 
-## Provenance and release completion
-
-These identifiers pin the **reviewed evidence**, not a selected model:
+## Provenance
 
 | Item | Identifier |
 |---|---|
-| Reviewed source commit | `98cd96d3cc841b8e0559d6dca388352cb14f2b84` |
-| H=7 report source commit | `bfa63a9469238c97b215469b3f2b0f812711c883`; reports record a dirty tree, so this alone cannot reproduce their full source state. |
-| Dataset snapshot ID | `2026-09-11`, pinned at `2026-09-11T04:30:05.520890+00:00` |
-| Snapshot database SHA-256 | `658cd4831d9cb7487dc7b3729fa5296d7d6f6feb20911425f88d7c7cb548d311` |
-| H=7 feature panel SHA-256 | `bf14a21d28a678b67a791cef84f3966e82a10c9b1885a661c10e5cc6eafe8151` (`data/processed/features/job_days_h7_calendar.parquet`) |
-| Reviewed dependency lock SHA-256 | `195c41368c2bac6e97a26038c745b990b22103b9b41632848af1595bfd82c0e1` ([uv.lock](uv.lock)); not yet a final model's lock attestation. |
-| Final artifact SHA-256 / release tag | **Pending — no real H=7 artifact or release.** |
-| Final training source / lock / snapshot | **Pending.** Copy the selected artifact's `provenance.git_sha`, `lock_sha256`, `snapshot_date`, `panel_sha256` and `rules_version`; do not assume the reviewed values above remain current. |
-
-After final selection, complete this card from the matching
-`models/shelf_life.json`, release `SHA256SUMS`, validation report and existing
-[test report](reports/test_results.md). Verify the artifact checksum and clean
-training commit, record actual periods, family, parameters, feature subset,
-library versions, seed and budget, then replace pending results with the
-recorded evidence. Preserve the distinction between validation, held-out test,
-label audit and transfer; reading recorded results does not require rerunning
-the test evaluation.
+| Release tag | [`artifact-2026-10-14`](https://github.com/professor3333/shelf-life/releases/tag/artifact-2026-10-14), published 2026-10-14T10:26:49Z |
+| Artifact SHA-256 (`shelf_life.joblib`) | `c5b9adebe1333b041848696d07f25137b187114eebb7cbf2ed2516d8d662124c` |
+| Sidecar SHA-256 (`shelf_life.json`) | `73edbcabea91b0ab09211b395a497f08796d62867b3a8aef5c041b0b1da8c7e7` |
+| Frozen at | 2026-10-14T10:26:40Z, commit `ab2d207dc889d5d92eaa64cfac73088cc98e4559` on `main`, clean tree |
+| Evidence it was selected on | reports at `b640656`, all naming snapshot 2026-10-14 (`python -m src.models.evidence`: one bundle) |
+| Dataset snapshot | `2026-10-14`, pinned 2026-10-14T09:40:05Z through SQLite's online backup; database SHA-256 `e8a6fedac29bcf3ffc0525ca8fc1d3f73b1869d45357a1e670e377de481ccd73` (473 runs, 36,852 jobs) |
+| H=7 feature panel | `data/processed/features/job_days_h7_calendar.parquet`, 54,195 rows, SHA-256 `716c8cac7f63190fee809124729aa427d8475d84053201ff7bf9625f5bc7bc7b` |
+| Scraper rules version | 2 |
+| Dependency lock SHA-256 | `faed2403246939c85b469937506842fb1423348d2e1346b7f3a4db89ae253d14` ([uv.lock](uv.lock)); scikit-learn 1.9.0, xgboost 3.4.1, joblib 1.6.0 |
+| Seed / budget / folds | seed 0 · 20 postings a day · `selection_folds=4` |
+| Recalibration / board context / transfer | `isotonic` · `full` (imputed when absent) · `intact` — each with its rule and numbers on the artifact |
