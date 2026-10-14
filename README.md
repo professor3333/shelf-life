@@ -87,13 +87,13 @@ those reports and held equal to them by a test — the one place in this file
 where a moving number lives.
 
 <!-- generated: begin — python -m src.data.readme_summary; do not edit by hand -->
-**Current state, read from the generated reports** — snapshot `2026-09-19`, regenerated at `55652f321`:
+**Current state, read from the generated reports** — snapshot `2026-10-14`, regenerated at `b640656b8`:
 
-- **H=7 readiness** ([`readiness.md`](reports/readiness.md)): 12 labelled waves. A legal split needs 22 (short by 10, projected 2026-09-29); three rolling-origin folds need 34 (short by 22, projected 2026-10-11). Legal cuts today: 0.
+- **H=7 readiness** ([`readiness.md`](reports/readiness.md)): 41 labelled waves. A legal split needs 22 (short by 0, projected already open); three rolling-origin folds need 34 (short by 0, projected already open). Legal cuts today: 215.
 - **H=7 held-out block** ([`test_results.md`](reports/test_results.md)): **not opened**; the report records the refusal.
-- **H=1 rehearsal** ([`model_comparison_h1_calendar.md`](reports/model_comparison_h1_calendar.md); H=1 (calendar basis) — a pipeline smoke test, not the build's horizon): 10 candidates, 4 rolling-origin folds scored. Verdict: **random_forest** — random_forest leads xgboost by 0.1115 PR-AUC, winning 3 of 4 folds, and the lead is larger than its own spread. Best single validation draw: `random_forest` at PR-AUC 0.1415 against a prior of 0.0141. Selection is based on the fold comparison.
-- **Depth ledger** ([`depth_ledger.md`](reports/depth_ledger.md)): 3 real run(s) kept, 2 synthetic.
-- **Latest data profile**: [`data_profile_2026-09-19.md`](reports/data_profile_2026-09-19.md).
+- **H=1 rehearsal** ([`model_comparison_h1_calendar.md`](reports/model_comparison_h1_calendar.md); H=1 (calendar basis) — a pipeline smoke test, not the build's horizon): 10 candidates, 18 rolling-origin folds scored. Verdict: **random_forest** — random_forest ties with xgboost inside fold variance and is already the simplest of them, so it stands. Best single validation draw: `random_forest` at PR-AUC 0.4104 against a prior of 0.0293. Selection is based on the fold comparison.
+- **Depth ledger** ([`depth_ledger.md`](reports/depth_ledger.md)): 5 real run(s) kept, 2 synthetic.
+- **Latest data profile**: [`data_profile_2026-10-14.md`](reports/data_profile_2026-10-14.md).
 <!-- generated: end -->
 
 ---
