@@ -48,6 +48,15 @@ PANEL="data/processed/features/job_days_h${HORIZON}_${BASIS}.parquet"
 # repository artifact, and committing a line a day would be a changelog of
 # nothing happening.
 LOG="data/depth_watch.log"
+mkdir -p "$(dirname "${LOG}")"
+
+# A failure lands where the successes do. From 2026-10-08 to 10-14 every run
+# died on a locked scraper database and this log simply stopped — six days that
+# read as a quiet week, with the tracebacks only in the scheduler's stderr file
+# (DEBUGGING.md, 2026-10-14). The lines that read yesterday's entry back skip
+# these, so a failed day cannot pass for a day with no legal cut.
+trap 'rc=$?; printf "%s\tFAILED\texit=%s\tline=%s\n" "$(date -u "+%Y-%m-%dT%H:%M:%SZ")" "${rc}" "${LINENO}" >> "${LOG}"' ERR
+previous_entry() { grep -v $'\tFAILED\t' "${LOG}" | tail -n 2 | head -n 1; }
 
 QUIET=0
 for arg in "$@"; do
@@ -124,7 +133,8 @@ PY
 )
 STATUS=$?
 set -e
-[ "${STATUS}" -eq 0 ] || { echo "${MEASURED}" >&2; exit "${STATUS}"; }
+# A subshell exit rather than `exit`, so the failure trips the trap and is logged.
+[ "${STATUS}" -eq 0 ] || { echo "${MEASURED}" >&2; (exit "${STATUS}"); }
 
 field() { printf '%s\n' "${MEASURED}" | awk -F'\t' -v k="$1" '$1==k{print $2; exit}'; }
 
@@ -137,7 +147,6 @@ CLEARS=$(field CLEARS)
 STALLED=$(field STALLED)
 STAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 
-mkdir -p "$(dirname "${LOG}")"
 printf '%s\twaves=%s\tfolds=%s\tshortfall=%s\tcuts=%s\tval_pos=%s\tclears=%s\n' \
   "${STAMP}" "${WAVES}" "${FOLDS}" "${SHORTFALL}" "${USABLE}" "${VAL_POS}" "${CLEARS}" \
   >> "${LOG}"
@@ -147,7 +156,7 @@ printf '%s\twaves=%s\tfolds=%s\tshortfall=%s\tcuts=%s\tval_pos=%s\tclears=%s\n' 
 # then the one morning it says something is the morning it gets ignored.
 CHANGED=1
 if [ "${QUIET}" -eq 1 ] && [ "${FOLDS}" -eq 0 ]; then
-  PREVIOUS=$(tail -n 2 "${LOG}" | head -n 1 | awk -F'\t' '{print $2}')
+  PREVIOUS=$(previous_entry | awk -F'\t' '{print $2}')
   [ "${PREVIOUS}" = "waves=${WAVES}" ] && CHANGED=0
 fi
 
@@ -188,7 +197,7 @@ fi
 # not — that is the only day this fires, so a scheduled job and an impatient
 # person running it twice in the same hour see the rehearsal once. It is not
 # a gate: the exit code below is unchanged, and nothing here reads `FOLDS`.
-PREVIOUS_CUTS=$(tail -n 2 "${LOG}" | head -n 1 | awk -F'\t' '{for(i=1;i<=NF;i++) if($i ~ /^cuts=/) {sub(/^cuts=/,"",$i); print $i}}')
+PREVIOUS_CUTS=$(previous_entry | awk -F'\t' '{for(i=1;i<=NF;i++) if($i ~ /^cuts=/) {sub(/^cuts=/,"",$i); print $i}}')
 if [ "${SHORTFALL}" -gt 0 ] && [ "${PREVIOUS_CUTS:-0}" = "0" ]; then
   echo
   echo "== the first legal cut: running the rehearsal once, for first contact"
