@@ -4,6 +4,31 @@ What broke, why, and the rule that stops it recurring. Newest entry first.
 
 ---
 
+## 2026-10-14 — the depth watch failed silently for six days on a locked database
+
+- **Problem:** Every scheduled `watch_depth.sh` from 2026-10-08 on died in
+  `src.data.snapshot` with `sqlite3.OperationalError: database is locked`. The
+  10-08 run had just reported the fold gate open (34 waves, 3 folds) and never
+  produced its rehearsal; nothing after it reached `depth_watch.log`, so the
+  only trace was 19 tracebacks in the gitignored `depth_watch.err.log`.
+- **Root cause:** After each crawl the scraper rebuilds its derived tables in
+  one transaction that rewrites every `jobs` row (`UPDATE jobs SET company_id =
+  NULL`). At 37k postings in a 778 MB file on a swapping 8 GB laptop that
+  transaction ran for over five hours, and `newest_run_date` waited sqlite3's
+  default five seconds. Underneath it sat a worse bug: `pin` took a byte copy
+  (`shutil.copy2`), and a rollback-journal writer that outgrows its cache writes
+  uncommitted pages into `jobs.db` itself. A copy taken then holds rows no
+  commit produced — and passes `PRAGMA integrity_check`.
+- **Solution:** `src/data/snapshot.py` — `copy_consistently` uses SQLite's
+  online backup, which copies under a shared lock and so lands on the last
+  commit; reads of the live DB wait up to `LOCK_WAIT_SECONDS` (6 h). The test
+  `test_a_pin_taken_mid_transaction_copies_the_last_commit_not_the_torn_file`
+  first proves a byte copy of a mid-rewrite DB is torn, then that the pin waits
+  and copies the committed state.
+- **Lesson:** Never copy a live SQLite file as bytes; copy it through SQLite.
+  And a scheduled job's failure must land where its successes do — a watch that
+  logs only good days reads a crash as a quiet week.
+
 ## 2026-09-20 — the cold-start run lost two good cycles to a sleeping laptop
 
 - **Problem:** Cycle 3 of the first model-loaded cold-start run ended with

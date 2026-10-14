@@ -17,7 +17,6 @@ import argparse
 import datetime as dt
 import hashlib
 import json
-import shutil
 import sqlite3
 from pathlib import Path
 
@@ -27,6 +26,16 @@ RAW_ROOT = Path("data/raw")
 #: Tables the snapshot is expected to contain. A snapshot missing any of these
 #: is unusable, so we fail at pin time rather than at load time.
 REQUIRED_TABLES = ("runs", "jobs", "job_observations", "job_changes")
+
+#: How long a read of the live database waits for the scraper's write lock.
+#: The scraper rebuilds its derived tables in one transaction after every
+#: crawl, and on 2026-10-14 that transaction held the lock for over five hours;
+#: sqlite3's default of five seconds turned every scheduled pin from 2026-10-08
+#: on into `database is locked`. Waiting is the right answer — the crawl is
+#: already committed, and the pin wants it — so the wait is long. It bounds the
+#: read that names the snapshot, which runs first, so a wedged writer fails the
+#: pin there; the backup that follows retries a busy source without a limit.
+LOCK_WAIT_SECONDS = 6 * 60 * 60
 
 
 def sha256_of(path: Path, chunk_size: int = 1 << 20) -> str:
@@ -66,11 +75,40 @@ def newest_run_date(db_path: Path) -> str | None:
     has nothing new to record. Run it again after the crawl and it names itself
     correctly.
     """
-    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=LOCK_WAIT_SECONDS)
+    try:
         row = conn.execute("SELECT MAX(started_at) FROM runs").fetchone()
+    finally:
+        conn.close()
     if not row or row[0] is None:
         return None
     return str(row[0])[:10]
+
+
+def copy_consistently(source_db: Path, target_db: Path) -> None:
+    """Copy a live SQLite database as of its last commit, never mid-transaction.
+
+    Until 2026-10-14 this was `shutil.copy2`, which copies whatever bytes the
+    file holds at that instant. The scraper uses a rollback journal: once a
+    long transaction outgrows its page cache, its uncommitted pages are written
+    into `jobs.db` itself, with the originals parked in `jobs.db-journal`. A
+    byte copy taken then has the new pages and not the journal — a database no
+    commit ever produced, which may still open and count rows cleanly.
+
+    SQLite's online backup copies pages under a shared lock, so the writer
+    cannot spill or commit while it runs, and what lands is exactly the last
+    committed state. The target is a fresh file: same rows, not necessarily the
+    same bytes, which is why the manifest hashes the copy rather than the source.
+    """
+    source = sqlite3.connect(f"file:{source_db}?mode=ro", uri=True, timeout=LOCK_WAIT_SECONDS)
+    try:
+        target = sqlite3.connect(target_db)
+        try:
+            source.backup(target)
+        finally:
+            target.close()
+    finally:
+        source.close()
 
 
 def pin(source_db: Path = DEFAULT_SOURCE_DB, date: str | None = None) -> Path:
@@ -97,7 +135,7 @@ def pin(source_db: Path = DEFAULT_SOURCE_DB, date: str | None = None) -> Path:
         )
 
     snapshot_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source_db, target_db)
+    copy_consistently(source_db, target_db)
 
     manifest = {
         "snapshot_date": date,

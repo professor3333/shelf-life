@@ -2,8 +2,10 @@
 
 There were none until 2026-09-07, which is why `pin` shipped naming snapshots
 after the wall clock. The bug is in `DEBUGGING.md`; these are the tests that
-would have caught it, and they are all about the *name* rather than the copy,
-because the copy was never the part that was wrong.
+would have caught it, and they were all about the *name* rather than the copy,
+because the copy did not look like the part that could be wrong. On 2026-10-14
+it was: a byte copy of a database mid-transaction is a database no commit
+produced, and the last test here is the one that shows it.
 """
 
 from __future__ import annotations
@@ -106,3 +108,73 @@ def test_a_database_with_no_runs_falls_back_to_today(tmp_path):
 def test_newest_run_date_reads_the_date_not_the_instant(tmp_path):
     source = _db(tmp_path / "jobs.db", ["2026-09-06T03:45:43.085104+00:00"])
     assert newest_run_date(source) == "2026-09-06"
+
+
+def _spill_an_uncommitted_rewrite(path: Path, spilled, release) -> None:
+    """Hold a write transaction open after it has overwritten committed pages.
+
+    A one-page cache forces SQLite to write uncommitted pages into the database
+    file itself, originals parked in the rollback journal. Rewriting existing
+    rows matters: appended pages lie past the header's page count and a byte
+    copy ignores them, but rewritten ones replace committed data in place —
+    the scraper's `UPDATE jobs SET company_id = NULL` over every posting.
+    """
+    conn = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
+    try:
+        conn.execute("PRAGMA cache_size = 1")
+        conn.execute("BEGIN")
+        conn.execute("UPDATE jobs SET started_at = 'uncommitted'")
+        spilled.set()
+        release.wait(10)
+        conn.execute("ROLLBACK")
+    finally:
+        conn.close()
+
+
+def test_a_pin_taken_mid_transaction_copies_the_last_commit_not_the_torn_file(tmp_path):
+    """2026-10-14: the scraper held `jobs.db` in one transaction for five hours.
+
+    A byte copy taken then holds pages no commit ever produced. The pin must
+    wait out the writer and land on what was committed — here the writer
+    rolls back, so the copy must contain none of its writes.
+    """
+    import shutil
+    import threading
+
+    source = _db(tmp_path / "jobs.db", ["2026-10-13T03:45:00+00:00"])
+    with sqlite3.connect(source) as conn:
+        conn.executemany("INSERT INTO jobs (started_at) VALUES (?)", [("x" * 2000,)] * 400)
+    spilled, release = threading.Event(), threading.Event()
+    writer = threading.Thread(target=_spill_an_uncommitted_rewrite, args=(source, spilled, release))
+    writer.start()
+    assert spilled.wait(10)
+
+    # The precondition, so this test cannot pass vacuously: a byte copy now
+    # really is a database that no commit produced — and SQLite's own
+    # integrity check cannot tell.
+    torn = tmp_path / "torn.db"
+    shutil.copy2(source, torn)
+    with sqlite3.connect(torn) as conn:
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        uncommitted = "SELECT COUNT(*) FROM jobs WHERE started_at = 'uncommitted'"
+        assert conn.execute(uncommitted).fetchone()[0] > 0
+
+    target = tmp_path / "copy.db"
+    copier = threading.Thread(target=snapshot.copy_consistently, args=(source, target))
+    copier.start()
+    copier.join(0.3)
+    assert copier.is_alive(), "the copy must wait for the writer, not read past it"
+    release.set()
+    writer.join(10)
+    copier.join(10)
+    assert not copier.is_alive()
+
+    with sqlite3.connect(target) as conn:
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 400
+        assert conn.execute(uncommitted).fetchone()[0] == 0
+
+
+def test_the_pin_waits_out_a_lock_longer_than_sqlites_default():
+    """sqlite3 gives up after five seconds; the scraper's lock lasted hours."""
+    assert snapshot.LOCK_WAIT_SECONDS >= 60 * 60
