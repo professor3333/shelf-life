@@ -79,7 +79,7 @@ it describes — and this README links to them rather than restating them:
 | The ladder, folds, threshold, calibration, per-board and transfer | [`model_comparison.md`](reports/model_comparison.md) |
 | The held-out result — opened once, final | [`test_results.md`](reports/test_results.md) |
 | Selected validation results and completed held-out runs | [`depth_ledger.md`](reports/depth_ledger.md) |
-| What the free instance's cold start measures, cycle by cycle | [`cold_start_rehearsal.md`](reports/cold_start_rehearsal.md) with a synthetic artifact loaded; [`cold_start_baseline.md`](reports/cold_start_baseline.md) with none (the definitive `cold_start.md` does not exist yet) |
+| What the free instance's cold start measures, cycle by cycle | [`cold_start.md`](reports/cold_start.md), the definitive run with the released model; [`cold_start_rehearsal.md`](reports/cold_start_rehearsal.md) with a synthetic artifact and [`cold_start_baseline.md`](reports/cold_start_baseline.md) with none, for the record |
 
 Where a number in this README carries a date, it is the value on that date and
 is kept as the record of a decision, not as the current state. The current
@@ -1782,6 +1782,15 @@ callers ranking full batches at once would push each other past the 90 s rule.
 The cap is calibrated for one caller at a time, and there is no rate limit by
 design; the same functions run in-process in the test suite on every push.
 
+**The definitive cold start is accepted.** On 2026-10-14, three cycles against
+the live service serving `artifact-2026-10-14`, each after 16 idle minutes and
+each genuinely cold: the slowest request of the slowest cycle took **63.53 s**
+against the 90 s criterion. The process was ready in about 23–25 s, the
+unpickle took under 2 s, and the first `/predict` after a wake about 1.2 s; the
+rest is Render waking the container. The cycle-by-cycle table is
+[`reports/cold_start.md`](reports/cold_start.md). The history below is how that
+number came to be trusted.
+
 **What the free tier costs, stated before the demo rather than during it.** The
 API instance has **512 MB of memory and 0.1 of a CPU**, spins down after 15 idle
 minutes, and takes about a minute to come back. Measured locally, the container
@@ -1802,8 +1811,7 @@ inside columns said why: the process took 38–46 s to become ready before any
 artifact, because the switch to `uv` had stopped compiling bytecode at install
 and every cold start was compiling four libraries from source on a tenth of a
 CPU. One line in the Dockerfile fixes it; `docs/design.md` §7e records the
-diagnosis and the re-measurement replaces the report. The definitive figure is
-still owed.
+diagnosis and the re-measurement replaces the report.
 
 **The load path has since been measured on the platform itself, and it is not
 where the seconds are.** On 2026-09-20 a throwaway second Render service was
@@ -1819,9 +1827,7 @@ without an artifact, the unpickle itself **under a second**, the first
 half, peak memory 220 MB of 512. The whole of the cold start is the platform
 wake plus the imports; the 25 s load estimate below, taken under Docker's hard
 CPU quota, was wrong by a factor of forty, and `docs/design.md` §7e-iii says
-why the direction of that error is the lesson. The definitive figure is still
-the one with the real artifact, and `reports/cold_start.md` still does not
-exist.
+why the direction of that error is the lesson.
 
 **And the term the baseline is missing is now estimated: 25.18 s.** The baseline
 covers everything *except* the one thing the criterion exists to bound — reading
@@ -1852,7 +1858,7 @@ that produced the 25.18 s.
 The honest reading of **57.83 s against 90 s** is deliberately narrow. It is an
 estimate assembled from two measurements of different things on different
 machines, and the acceptance is one measurement of the right thing on the right
-one — `reports/cold_start.md`, which does not exist yet (the platform's own
+one — [`reports/cold_start.md`](reports/cold_start.md) (the platform's own
 load-path number, with a synthetic artifact, is in
 `reports/cold_start_rehearsal.md` and is forty times smaller than this
 estimate). It does not
