@@ -249,9 +249,11 @@ tied — in which case the simpler model is the answer.
 
 Then, and only then:
 
-    .venv/bin/python -m src.models.freeze --run <the model you chose>
+    caffeinate -i ./scripts/release.sh --run <the model you chose>
 
-That opens the test block. Once. Nothing downstream of it may change afterwards,
-including the threshold, so be sure the choice above is settled first.
+That runs the release chain, and its `src.models.freeze --run` step opens the
+test block. Once. Nothing downstream of it may change afterwards, including the
+threshold, so be sure the choice above is settled first. The chain stops before
+MODEL_TAG; deploying the artifact is a separate, deliberate commit.
 ================================================================================
 MESSAGE

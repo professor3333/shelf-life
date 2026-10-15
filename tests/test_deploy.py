@@ -1052,7 +1052,9 @@ def test_the_watch_rehearses_once_at_the_first_legal_cut_and_never_freezes():
     assert 'PREVIOUS_CUTS:-0}" = "0"' in before_the_gate, "it must fire on the transition only"
     # Both refusals still stand below it, unchanged.
     assert 'if [ "${SHORTFALL}" -gt 0 ]; then' in first_cut
-    # `freeze` is named once, in the message that tells a person to run it.
+    # The chain is named once, in the message that tells a person to run it —
+    # `release.sh`, not a bare `freeze` that would skip the smoke and the bracket.
     commands, _, message = script.partition("cat <<'MESSAGE'")
     assert "src.models.freeze" not in commands
-    assert "src.models.freeze --run" in message
+    assert "release.sh" not in commands
+    assert "./scripts/release.sh --run" in message
